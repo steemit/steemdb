@@ -30,3 +30,5 @@ If you'd like to run any of the syncronization services for initialization, you 
 You can uncomment all 3 services to start all applications when docker creates it's containers.
 
 The initial syncronization run by the sync service will take many hours to complete and process all of the blocks. It will also require an enormous amount of disk space. As time progresses, this data will be trimmed. For now in early alpha it's better to have it all.
+
+# Forked by https://github.com/aaroncox/steemdb
