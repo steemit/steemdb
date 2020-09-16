@@ -5,7 +5,7 @@ use Phalcon\Logger;
 
 return new Config([
     'database' => [
-        'host' => 'mongodb://10.40.103.102:27017',
+        'host' => 'mongodb://172.31.31.104:27017',
         'dbname' => 'steemdb'
     ],
     'application' => [
@@ -18,7 +18,7 @@ return new Config([
         'pluginsDir'     => APP_PATH . '/plugins/',
         'cacheDir'       => BASE_PATH . '/cache/',
         'baseUri'        => '/',
-        'publicUrl'      => 'steemdb.com',
+        'publicUrl'      => 'steemdb.io',
         'cryptSalt'      => 'eEAfR|_&G&f,+vU]:jFr!!A&+71w1Ms9~8_4L!<@[N@DyaIP_2My|:+.u>/6m,$D'
     ],
     'logger' => [

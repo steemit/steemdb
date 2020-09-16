@@ -12,11 +12,12 @@ import os
 fullnodes = [
     #'http://10.40.103.102:8090',
     #'https://api.steemit.com',
-    'http://10.60.103.43:8080',
+    #'http://10.60.103.43:8080',
+    'https://tronjussi.steemit.com',
 ]
 rpc = Steem(fullnodes)
 
-mongo = MongoClient("mongodb://10.40.103.102")
+mongo = MongoClient("mongodb://172.31.31.104")
 db = mongo.steemdb
 
 misses = {}
