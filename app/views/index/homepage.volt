@@ -242,7 +242,7 @@
             </tr>
           </tbody>
         </table>
-        <div class="ui small header">
+<!--        <div class="ui small header">
           Consensus State
         </div>
         <table class="ui small definition table" id="state">
@@ -279,6 +279,7 @@
             </tr>
           </tbody>
         </table>
+-->
         <div class="ui small header">
           Reward Pool
         </div>
@@ -329,9 +330,9 @@
       ellog = document.getElementById('log');
 
       if (window.location.hostname === "localhost") {
-         wsuri = "ws://localhost:8888";
+         wsuri = "wss://localhost:8888";
       } else {
-         wsuri = "ws://" + window.location.hostname + ":8888";
+         wsuri = "wss://" + window.location.hostname + ":8888";
       }
 
       if ("WebSocket" in window) {

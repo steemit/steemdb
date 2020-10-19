@@ -17,7 +17,8 @@ import re
 fullnodes = [
     #'http://10.40.103.102:8090',
     #'https://api.steemit.com',
-    'http://10.60.103.43:8080',
+    #'http://10.60.103.43:8080',
+    'https://tronjussi.steemit.com',
 ]
 rpc = Steem(fullnodes)
 

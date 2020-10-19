@@ -11,10 +11,11 @@ import os
 fullnodes = [
     #'http://10.40.103.102:8090',
     #'https://api.steemit.com',
-    'http://10.60.103.43:8080',
+    #'http://10.60.103.43:8080',
+    'https://tronjussi.steemit.com',
 ]
 rpc = Steem(fullnodes)
-mongo = MongoClient("mongodb://10.40.103.102")
+mongo = MongoClient("mongodb://172.31.31.104")
 db = mongo.steemdb
 
 init = db.status.find_one({'_id': 'height'})
@@ -32,7 +33,7 @@ else:
 # where you want some data but don't want to sync the entire blockchain.
 # ------------
 
-#last_block = 42120185
+last_block = 45292560
 
 def process_op(opObj, block, blockid):
     opType = opObj[0]

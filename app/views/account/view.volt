@@ -68,12 +68,6 @@
                 View Account on steemit.com
               </a>
             </div>
-            <div class="item">
-              <a href="https://steemd.com/@{{ account.name }}" class="ui fluid teal icon small basic button" target="_blank">
-                <i class="external icon"></i>
-                View Account on steemd.com
-              </a>
-            </div>
           </div>
           <table class="ui small definition table">
             <tbody>

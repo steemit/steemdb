@@ -15,7 +15,7 @@ services:
     # links:
     #   - mongo
     ports:
-      - "8888:8888"
+      - "8889:8888"
   sync:
     build: ./docker/sync
     restart: on-failure
@@ -43,7 +43,7 @@ services:
     volumes:
       - .:/var/www/html
     ports:
-      - "80:80"
+      - "8000:80"
   # mongodata:
   #   image: mongo:3.3.10
   #   volumes:

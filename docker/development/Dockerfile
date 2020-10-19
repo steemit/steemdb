@@ -100,6 +100,6 @@ COPY conf/vhost.conf /etc/nginx/sites-enabled/default
 # Services
 ADD conf/supervisord.conf /etc/supervisord.conf
 
-EXPOSE 443 80
+EXPOSE 443 8000
 
 CMD ["/start.sh"]
