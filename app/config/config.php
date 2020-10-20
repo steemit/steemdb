@@ -27,5 +27,8 @@ return new Config([
         'date'     => 'D j H:i:s',
         'logLevel' => Logger::DEBUG,
         'filename' => 'application.log',
-    ]
+    ],
+    'steemd' => [
+        'url'       => getenv('STEEMD_URL') ? getenv('STEEMD_URL') : 'https://api.steemit.com',
+    ],
 ]);

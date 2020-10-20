@@ -158,8 +158,9 @@ $di->set('logger', function ($filename = null, $format = null) {
 });
 
 $di->set('steemd', function() {
+  $config = $this->getConfig();
   require_once(APP_PATH . '/libs/steemd.php');
-  return new Steemd('https://tronjussi.steemit.com');
+  return new Steemd($config->get('steemd')->url);
 });
 
 $di->set('memcached', function() {
