@@ -40,6 +40,7 @@ docker run -itd \
     --restart always \
     -e MONGODB=mongodb://x.x.x.x:27017 \
     -e STEEMD_URL=https://api.steemit.com \
+    -p 8000:8000 \
     steemit/steemdb:development
 
 # Sync Service
