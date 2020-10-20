@@ -7,7 +7,7 @@ ENV MONGODB mongodb://172.31.31.104:27017
 
 RUN apt-get update && apt-get install -y software-properties-common python-software-properties
 
-RUN apt-add-repository ppa:phalcon/stable && apt-get update
+RUN apt-add-repository -y ppa:phalcon/stable && apt-get update -y
 
 RUN apt-get install -y bash \
     openssh-client \
@@ -44,7 +44,7 @@ RUN apt-get install -y bash \
     mkdir -p /var/log/supervisor
 
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php -r "if (hash_file('SHA384', 'composer-setup.php') === '${composer_hash}') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" && \
+    #php -r "if (hash_file('SHA384', 'composer-setup.php') === '${composer_hash}') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" && \
     php composer-setup.php --install-dir=/usr/bin --filename=composer && \
     php -r "unlink('composer-setup.php');"
 
