@@ -5,11 +5,9 @@ ENV fpm_conf /etc/php/7.0/fpm/php-fpm.conf
 ENV composer_hash e0012edf3e80b6978849f5eff0d4b4e4c79ff1609dd1e613307e16318854d24ae64f26d17af3ef0bf7cfb710ca74755a
 ENV MONGODB mongodb://172.31.31.104:27017
 
-RUN apt-get update && apt-get install -y software-properties-common python-software-properties
-
-RUN apt-add-repository -y ppa:phalcon/stable && apt-get update -y
-
-RUN apt-get install -y bash \
+RUN apt-get update -y && apt-get install -y software-properties-common python-software-properties && \
+    apt-add-repository -y ppa:phalcon/stable && apt-get update -y && \
+    apt-get install -y bash \
     openssh-client \
     wget \
     nginx \
@@ -41,26 +39,23 @@ RUN apt-get install -y bash \
     mkdir -p /etc/nginx && \
     mkdir -p /var/www/app && \
     mkdir -p /run/nginx && \
-    mkdir -p /var/log/supervisor
-
-RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
+    mkdir -p /var/log/supervisor && \
+    php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
     #php -r "if (hash_file('SHA384', 'composer-setup.php') === '${composer_hash}') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" && \
     php composer-setup.php --install-dir=/usr/bin --filename=composer && \
-    php -r "unlink('composer-setup.php');"
-
-# nginx site conf
-RUN mkdir -p /etc/nginx/sites-available/ && \
+    php -r "unlink('composer-setup.php');" && \
+    # nginx site conf
+    mkdir -p /etc/nginx/sites-available/ && \
     mkdir -p /etc/nginx/sites-enabled/ && \
     mkdir -p /etc/nginx/ssl/ && \
-    rm -Rf /var/www/*
-RUN ln -s /etc/nginx/sites-available/default.conf /etc/nginx/sites-enabled/default.conf
-
-RUN apt-get update && apt-get install -y php-pear libcurl4-openssl-dev pkg-config libssl-dev libsslcommon2-dev && \
+    rm -Rf /var/www/* && \
+    ln -s /etc/nginx/sites-available/default.conf /etc/nginx/sites-enabled/default.conf && \
+    apt-get update -y && apt-get install -y php-pear libcurl4-openssl-dev pkg-config libssl-dev libsslcommon2-dev && \
     pecl install mongodb && \
     echo "extension=mongodb.so" > /etc/php/7.0/fpm/conf.d/30-mongo.ini && \
-    echo "extension=mongodb.so" > /etc/php/7.0/cli/conf.d/30-mongo.ini
-
-RUN apt-get install -y memcached php-memcached
+    echo "extension=mongodb.so" > /etc/php/7.0/cli/conf.d/30-mongo.ini && \
+    apt-get install -y memcached php-memcached && \
+    apt-get remove -y gcc musl-dev && apt-get clean -y
 
 # tweak php-fpm config
 RUN mkdir -p /run/php &&\
