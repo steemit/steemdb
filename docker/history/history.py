@@ -10,6 +10,7 @@ import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+env_dist = os.environ
 steemd_url = env_dist.get('STEEMD_URL')
 if steemd_url == None or steemd_url == "":
     steemd_url = 'https://api.steemit.com'
