@@ -90,18 +90,18 @@ RUN mkdir -p /run/php &&\
     echo "extension=phalcon.so" > /etc/php/7.0/cli/conf.d/30-phalcon.ini
 
 # Add Scripts
-ADD scripts/start.sh /start.sh
+ADD ./docker/development/scripts/start.sh /start.sh
 RUN chmod 755 /start.sh
 
 # Copy our nginx config
 RUN rm -Rf /etc/nginx/nginx.conf
-ADD conf/nginx.conf /etc/nginx/nginx.conf
-COPY conf/vhost.conf /etc/nginx/sites-enabled/default
+ADD ./docker/development/conf/nginx.conf /etc/nginx/nginx.conf
+COPY ./docker/development/conf/vhost.conf /etc/nginx/sites-enabled/default
 
 # Services
-ADD conf/supervisord.conf /etc/supervisord.conf
+ADD ./docker/development/conf/supervisord.conf /etc/supervisord.conf
 
-COPY ./../.. /var/www/html
+COPY . /var/www/html
 
 EXPOSE 443 8000
 

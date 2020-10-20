@@ -5,6 +5,6 @@ RUN apt-get update && \
 
 RUN pip3 install steem apscheduler pymongo
 
-COPY . /src
+COPY ./docker/witnesses /src
 
 CMD ["python", "/src/witnesses.py"]
