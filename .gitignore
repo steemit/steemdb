@@ -1,5 +1,8 @@
 cache/*
 !cache/.gitkeep
+!cache/volt
+cache/volt/*
+!cache/volt/.gitkeep
 vendor/*
 !vendor/.gitkeep
 logs/*
