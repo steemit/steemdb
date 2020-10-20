@@ -45,11 +45,11 @@ RUN apt-get update -y && apt-get install -y software-properties-common python-so
     php composer-setup.php --install-dir=/usr/bin --filename=composer && \
     php -r "unlink('composer-setup.php');" && \
     # nginx site conf
-    mkdir -p /etc/nginx/sites-available/ && \
-    mkdir -p /etc/nginx/sites-enabled/ && \
-    mkdir -p /etc/nginx/ssl/ && \
-    rm -Rf /var/www/* && \
-    ln -s /etc/nginx/sites-available/default.conf /etc/nginx/sites-enabled/default.conf && \
+    #mkdir -p /etc/nginx/sites-available/ && \
+    #mkdir -p /etc/nginx/sites-enabled/ && \
+    #mkdir -p /etc/nginx/ssl/ && \
+    #rm -Rf /var/www/* && \
+    #ln -s /etc/nginx/sites-available/default.conf /etc/nginx/sites-enabled/default.conf && \
     apt-get update -y && apt-get install -y php-pear libcurl4-openssl-dev pkg-config libssl-dev libsslcommon2-dev && \
     pecl install mongodb && \
     echo "extension=mongodb.so" > /etc/php/7.0/fpm/conf.d/30-mongo.ini && \
