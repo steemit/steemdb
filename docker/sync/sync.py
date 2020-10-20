@@ -8,14 +8,21 @@ import time
 import sys
 import os
 
+steemd_url = env_dist.get('STEEMD_URL')
+if steemd_url == None or steemd_url == "":
+    steemd_url = 'https://api.steemit.com'
+mongodb_url = env_dist.get('MONGODB')
+if mongodb_url == None or mongodb_url == "":
+    mongodb_url = 'mongodb://172.31.31.104'
+
 fullnodes = [
     #'http://10.40.103.102:8090',
     #'https://api.steemit.com',
     #'http://10.60.103.43:8080',
-    'https://tronjussi.steemit.com',
+    steemd_url,
 ]
 rpc = Steem(fullnodes)
-mongo = MongoClient("mongodb://172.31.31.104")
+mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
 init = db.status.find_one({'_id': 'height'})
@@ -33,7 +40,7 @@ else:
 # where you want some data but don't want to sync the entire blockchain.
 # ------------
 
-last_block = 45292560
+#last_block = 45292560
 
 def process_op(opObj, block, blockid):
     opType = opObj[0]

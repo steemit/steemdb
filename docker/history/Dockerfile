@@ -5,6 +5,6 @@ RUN apt-get update && \
 
 RUN pip3 install steem pymongo apscheduler
 
-# COPY . /src
+COPY . /src
 
 CMD ["python", "/src/history.py"]

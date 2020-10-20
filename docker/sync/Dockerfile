@@ -4,4 +4,6 @@ RUN apt-get update && apt-get install -y make gcc libssl-dev
 
 RUN pip3 install steem pymongo
 
+COPY . /src
+
 CMD ["python", "/src/sync.py"]

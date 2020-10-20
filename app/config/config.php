@@ -3,9 +3,11 @@
 use Phalcon\Config;
 use Phalcon\Logger;
 
+var_dump('Current Mongodb:', getenv('MONGODB'));
+
 return new Config([
     'database' => [
-        'host' => 'mongodb://172.31.31.104:27017',
+        'host' => getenv('MONGODB'),
         'dbname' => 'steemdb'
     ],
     'application' => [

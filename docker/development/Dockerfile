@@ -3,6 +3,7 @@ FROM ubuntu:16.04
 ENV php_conf /etc/php/7.0/fpm/php.ini
 ENV fpm_conf /etc/php/7.0/fpm/php-fpm.conf
 ENV composer_hash e0012edf3e80b6978849f5eff0d4b4e4c79ff1609dd1e613307e16318854d24ae64f26d17af3ef0bf7cfb710ca74755a
+ENV MONGODB mongodb://172.31.31.104:27017
 
 RUN apt-get update && apt-get install -y software-properties-common python-software-properties
 
@@ -99,6 +100,8 @@ COPY conf/vhost.conf /etc/nginx/sites-enabled/default
 
 # Services
 ADD conf/supervisord.conf /etc/supervisord.conf
+
+COPY ./../.. /var/www/html
 
 EXPOSE 443 8000
 

@@ -10,13 +10,20 @@ import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+steemd_url = env_dist.get('STEEMD_URL')
+if steemd_url == None or steemd_url == "":
+    steemd_url = 'https://api.steemit.com'
+mongodb_url = env_dist.get('MONGODB')
+if mongodb_url == None or mongodb_url == "":
+    mongodb_url = 'mongodb://172.31.31.104'
+
 fullnodes = [
     #'http://10.40.103.102:8090',
     #'https://api.steemit.com',
-    'https://tronjussi.steemit.com',
+    steemd_url,
 ]
 rpc = Steem(fullnodes)
-mongo = MongoClient("mongodb://172.31.31.104")
+mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
 mvest_per_account = {}
