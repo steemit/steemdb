@@ -3,8 +3,6 @@
 use Phalcon\Config;
 use Phalcon\Logger;
 
-var_dump('Current Mongodb:', getenv('MONGODB'));
-
 return new Config([
     'database' => [
         'host' => getenv('MONGODB'),
