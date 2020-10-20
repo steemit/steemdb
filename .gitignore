@@ -2,3 +2,5 @@ cache/*
 !cache/.gitkeep
 vendor/*
 !vendor/.gitkeep
+logs/*
+!logs/.gitkeep
