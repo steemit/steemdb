@@ -31,6 +31,42 @@ You can uncomment all 3 services to start all applications when docker creates i
 
 The initial syncronization run by the sync service will take many hours to complete and process all of the blocks. It will also require an enormous amount of disk space. As time progresses, this data will be trimmed. For now in early alpha it's better to have it all.
 
+### Run in several independent containers
+
+```
+# Web Server
+docker run -itd \
+    --name steemdb-web \
+    --restart always \
+    -e MONGODB=mongodb://x.x.x.x:27017 \
+    -e STEEMD_URL=https://api.steemit.com \
+    steemit/steemdb:development
+
+# Sync Service
+docker run -itd \
+    --name steemdb-syncd \
+    --restart always \
+    -e MONGODB=mongodb://x.x.x.x:27017 \
+    -e STEEMD_URL=https://api.steemit.com \
+    steemit/steemdb:sync
+
+# History Service
+docker run -itd \
+    --name steemdb-history \
+    --restart always \
+    -e MONGODB=mongodb://x.x.x.x:27017 \
+    -e STEEMD_URL=https://api.steemit.com \
+    steemit/steemdb:history
+
+# Witnesses Service
+docker run -itd \
+    --name steemdb-witnesses\
+    --restart always \
+    -e MONGODB=mongodb://x.x.x.x:27017 \
+    -e STEEMD_URL=https://api.steemit.com \
+    steemit/steemdb:witnesses
+```
+
 # Notice
 
 Forked by https://github.com/aaroncox/steemdb
