@@ -97,7 +97,7 @@ COPY ./docker/development/conf/vhost.conf /etc/nginx/sites-enabled/default
 ADD ./docker/development/conf/supervisord.conf /etc/supervisord.conf
 
 COPY . /var/www/html
-RUN composer -d /var/www/html install && \
+RUN composer -d/var/www/html install && \
     chmod -R 777 /var/www/html/cache && \
     chmod -R 777 /var/www/html/logs
 
