@@ -97,6 +97,7 @@ COPY ./docker/development/conf/vhost.conf /etc/nginx/sites-enabled/default
 ADD ./docker/development/conf/supervisord.conf /etc/supervisord.conf
 
 COPY . /var/www/html
+RUN composer -d /var/www/html install
 
 EXPOSE 443 8000
 

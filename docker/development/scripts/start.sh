@@ -10,9 +10,9 @@ TARGET_GID=$(stat -c "%g" /var/lib/nginx)
 echo '-- Setting nginx group to use gid '$TARGET_GID
 groupmod -o -g $TARGET_GID nginx || true
 
-echo '-- Updating composer libraries'
-composer -d/var/www/html install
-composer -d/var/www/html update
+#echo '-- Updating composer libraries'
+#composer -d/var/www/html install
+#composer -d/var/www/html update
 
 echo '* Starting nginx'
 /usr/bin/supervisord -n -c /etc/supervisord.conf
