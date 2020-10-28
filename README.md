@@ -66,6 +66,14 @@ docker run -itd \
     -e MONGODB=mongodb://x.x.x.x:27017 \
     -e STEEMD_URL=https://api.steemit.com \
     steemit/steemdb:witnesses
+
+# Live Service
+docker run -itd \
+    --name steemdb-live\
+    --restart always \
+    -e LIVE_PORT=8888 \
+    -e STEEMD_URL=https://api.steemit.com \
+    steemit/steemdb:live
 ```
 
 # Notice
