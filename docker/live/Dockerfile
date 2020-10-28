@@ -7,6 +7,6 @@ RUN pip3 install steem pymongo autobahn
 
 RUN pip3 install twisted
 
-COPY . /src
+COPY ./docker/live /src
 
 CMD ["python", "/src/live.py"]

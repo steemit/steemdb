@@ -14,11 +14,19 @@ import sys
 import os
 import re
 
+env_dist = os.environ
+steemd_url = env_dist.get('STEEMD_URL')
+if steemd_url == None or steemd_url == "":
+    steemd_url = 'https://api.steemit.com'
+
+live_port = env_dist.get('LIVE_PORT')
+if live_port == None or live_port == "":
+    live_port = 8888
+
 fullnodes = [
     #'http://10.40.103.102:8090',
     #'https://api.steemit.com',
-    #'http://10.60.103.43:8080',
-    'https://tronjussi.steemit.com',
+    steemd_url,
 ]
 rpc = Steem(fullnodes)
 
@@ -233,8 +241,7 @@ if __name__ == '__main__':
 
     ServerFactory = BroadcastServerFactory
 
-    factory = ServerFactory(u"ws://10.40.103.102:8888")
-    #factory = ServerFactory(u"ws://47.240.97.170:8888")
+    factory = ServerFactory(u"ws://0.0.0.0:%s" % live_port)
     factory.protocol = BroadcastServerProtocol
     listenWS(factory)
 
