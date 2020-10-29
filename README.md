@@ -1,6 +1,6 @@
 ## steemdb
 
-https://steemdb.com
+[https://steemdb.io](https://steemdb.io)
 
 open source blockchain explorer for the steem blockchain - build on phalcon + mongodb
 
@@ -49,6 +49,7 @@ docker run -itd \
     --restart always \
     -e MONGODB=mongodb://x.x.x.x:27017 \
     -e STEEMD_URL=https://api.steemit.com \
+    -e LAST_BLOCK=1 \
     steemit/steemdb:sync
 
 # History Service

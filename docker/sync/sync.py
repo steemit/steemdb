@@ -12,6 +12,9 @@ env_dist = os.environ
 steemd_url = env_dist.get('STEEMD_URL')
 if steemd_url == None or steemd_url == "":
     steemd_url = 'https://api.steemit.com'
+last_block_env = env_dist.get('LAST_BLOCK')
+if last_block_env == None or last_block_env == "":
+    last_block_env = None
 mongodb_url = env_dist.get('MONGODB')
 if mongodb_url == None or mongodb_url == "":
     print('NEED MONGODB')
@@ -29,9 +32,11 @@ db = mongo.steemdb
 
 init = db.status.find_one({'_id': 'height'})
 if(init):
-  last_block = init['value']
+    last_block = init['value']
+else if(last_block_env != None):
+    last_block = int(last_block_env)
 else:
-  last_block = 1
+    last_block = 1
 
 # ------------
 # For development:
