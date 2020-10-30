@@ -193,4 +193,12 @@ $router->add('/forums/{tag}/@{author}/{permlink}', [
   'action' => 'view'
 ]);
 
+/**
+ * health check
+ */
+$router->add('/.well-known/healthcheck.json', [
+  'controller' => 'index',
+  'action' => 'health_check'
+]);
+
 return $router;

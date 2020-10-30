@@ -43,4 +43,17 @@ class IndexController extends ControllerBase
   public function show404Action() {
 
   }
+
+  public function healthCheckAction() {
+    $this->response->setContentType('application/json', 'UTF-8');
+    $this->response->setHeader('Cache-Control', 'no-store');
+    $data = [
+      'status' => 'OK',
+    ];
+    if (true !== $this->response->isSent()) {
+      $this->response->setJsonContent($data);
+      return $this->response->send();
+    }
+
+  }
 }
