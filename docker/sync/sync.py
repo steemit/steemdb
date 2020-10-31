@@ -19,6 +19,7 @@ mongodb_url = env_dist.get('MONGODB')
 if mongodb_url == None or mongodb_url == "":
     print('NEED MONGODB')
     exit()
+print('mongo url: %s' % mongodb_url)
 
 fullnodes = [
     #'http://10.40.103.102:8090',
