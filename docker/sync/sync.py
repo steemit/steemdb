@@ -31,9 +31,9 @@ mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
 init = db.status.find_one({'_id': 'height'})
-if(init):
+if init:
     last_block = init['value']
-else if(last_block_env != None):
+elif last_block_env != None:
     last_block = int(last_block_env)
 else:
     last_block = 1
