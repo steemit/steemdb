@@ -69,7 +69,29 @@ $di->set('view', function () {
  */
 $di->setShared('mongo', function () {
   $config = $this->getConfig();
-  $mongo = new Client($config->database->host);
+  $mongoConfig = $config->database->host;
+  $tmp = explode('/?', $mongoConfig);
+  if ($tmp[1] && strpos($tmp[1], 'ssl=true') !== false) {
+    // enable ssl
+    preg_match('/ssl_ca_certs=([^&]+)/', $tmp[1], $matches);
+    if ($matches[1]) {
+      $SSL_FILE = $matches[1];
+      //Specify the Amazon DocumentDB cert
+      $ctx = stream_context_create(array(
+          "ssl" => array(
+              "cafile" => $SSL_FILE,
+          ))
+      );
+      $mongo = new Client($tmp[0], array("ssl" => true), array("context" => $ctx));
+    } else {
+      var_dump($matches);
+      echo 'ssl error';
+      die();
+    }
+  } else {
+    // disable ssl
+    $mongo = new Client($config->database->host);
+  }
   $options = [];
   return $mongo->selectDatabase($config->database->dbname, $options);
 });
