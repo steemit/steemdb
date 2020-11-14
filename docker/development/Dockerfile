@@ -101,6 +101,8 @@ RUN composer -d/var/www/html install && \
     chmod -R 777 /var/www/html/cache && \
     chmod -R 777 /var/www/html/logs
 
+ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
+
 EXPOSE 443 8000
 
 CMD ["/start.sh"]

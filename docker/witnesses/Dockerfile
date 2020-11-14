@@ -6,5 +6,6 @@ RUN apt-get update && \
 RUN pip3 install steem apscheduler pymongo
 
 COPY ./docker/witnesses /src
+ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
 
 CMD ["python", "/src/witnesses.py"]
