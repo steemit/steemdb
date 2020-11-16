@@ -51,6 +51,7 @@ else:
 #last_block = 45292560
 
 def process_op(opObj, block, blockid):
+    process_op_start_time = time.clock()
     opType = opObj[0]
     op = opObj[1]
     if opType == "comment":
@@ -84,6 +85,8 @@ def process_op(opObj, block, blockid):
         save_vesting_deposit(op, block, blockid)
     if opType == "fill_vesting_withdraw":
         save_vesting_withdraw(op, block, blockid)
+    process_op_end_time = time.clock()
+    print('process_op time on block [%i] op [%s] in [%f]' % (blockid, opType, process_op_end_time - process_op_start_time))
 
 def process_block(block, blockid):
     save_block(block, blockid)
@@ -520,7 +523,10 @@ if __name__ == '__main__':
             pprint("[STEEM] - Starting Block #" + str(last_block))
             sys.stdout.flush()
             # Get full block
+            get_block_start_time = time.clock()
             block = rpc.get_block(last_block)
+            get_block_end_time = time.clock()
+            print('[TEST Time]get block [%i] time [%f]' % (last_block, get_block_end_time - get_block_start_time))
             # Process block
             process_block(block, last_block)
             # Update our block height
