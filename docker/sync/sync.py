@@ -513,6 +513,7 @@ if __name__ == '__main__':
     load_accounts()
     # We are going to loop indefinitely
     while True:
+        global_process_start_time = time.clock()
         # Update the Queue
         update_queue()
         # Process New Blocks
@@ -520,6 +521,7 @@ if __name__ == '__main__':
         block_number = props['last_irreversible_block_num']
         while (block_number - last_block) > 0:
             last_block += 1
+            block_process_start_time = time.clock()
             pprint("[STEEM] - Starting Block #" + str(last_block))
             sys.stdout.flush()
             # Get full block
@@ -534,8 +536,11 @@ if __name__ == '__main__':
             # if last_block % 100 == 0:
             pprint("[STEEM] - Processed up to Block #" + str(last_block))
             sys.stdout.flush()
+            block_process_end_time = time.clock()
+            print('[TEST Time]block process [%i] time [%f]' % (last_block, block_process_end_time - block_process_start_time))
 
         sys.stdout.flush()
+        print('[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
 
         # Sleep for one block
         time.sleep(block_interval)
