@@ -544,7 +544,7 @@ if __name__ == '__main__':
             pprint("[STEEM] - Processed up to Block #" + str(last_block))
             sys.stdout.flush()
             total_time = time.clock() - total_start_time
-            print('[TEST Time] Total time: [%f], get block time: [%f, %s%], process block time: [%f, %s%], process ops time: [%s]' % (total_time, get_block_time, str(get_block_time / total_time * 100), process_block_time, str(get_block_time / total_time * 100), str(process_op_time)))
+            print('[TEST Time] Total time: [%f], get block time: [%f, %s%%], process block time: [%f, %s%%], process ops time: [%s]' % (total_time, get_block_time, str(get_block_time / total_time * 100), process_block_time, str(get_block_time / total_time * 100), str(process_op_time)))
 
         sys.stdout.flush()
         print('[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
