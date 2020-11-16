@@ -54,6 +54,8 @@ process_op_time = 0
 get_block_time = 0
 
 def process_op(opObj, block, blockid):
+    global process_op_time
+    process_op_time = 0
     process_op_start_time = time.clock()
     opType = opObj[0]
     op = opObj[1]
@@ -91,6 +93,8 @@ def process_op(opObj, block, blockid):
     process_op_time = time.clock() - process_op_start_time
 
 def process_block(block, blockid):
+    global process_block_time
+    process_block_time = 0
     process_block_start_time = time.clock()
     save_block(block, blockid)
     ops = rpc.get_ops_in_block(blockid, False)
