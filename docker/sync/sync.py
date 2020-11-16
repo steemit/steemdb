@@ -557,11 +557,13 @@ if __name__ == '__main__':
             flush_time2 = time.clock() - flush_start_time2
             total_time = time.clock() - total_start_time
             print('[TEST Time] Total time: [%f], \
-            get_block time: [%f, %s%%], \
-            process_block time: [%f, %s%%], \
-            save_block time: [%f, %s%%], \
-            get_ops_in_block time: [%f, %s%%], \
-            process ops time: [%s]'
+get_block time: [%f, %s%%], \
+process_block time: [%f, %s%%], \
+save_block time: [%f, %s%%], \
+get_ops_in_block time: [%f, %s%%], \
+process ops time: [%s], \
+flush_time1: [%f, %s%%], \
+flush_time2: [%f, %s%%]'
                 % (
                     total_time,
                     get_block_time,
@@ -572,7 +574,12 @@ if __name__ == '__main__':
                     str(save_block_time / total_time * 100),
                     get_ops_in_block_time,
                     str(get_ops_in_block_time / total_time * 100),
-                    str(process_op_time)))
+                    str(process_op_time),
+                    flush_time1,
+                    str(flush_time1 / total_time * 100),
+                    flush_time2,
+                    str(flush_time2 / total_time * 100)
+                    ))
 
         sys.stdout.flush()
         print('[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
