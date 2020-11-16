@@ -50,12 +50,11 @@ else:
 
 #last_block = 45292560
 process_block_time = 0
-process_op_time = 0
+process_op_time = []
 get_block_time = 0
 
 def process_op(opObj, block, blockid):
     global process_op_time
-    process_op_time = 0
     process_op_start_time = time.clock()
     opType = opObj[0]
     op = opObj[1]
@@ -90,14 +89,15 @@ def process_op(opObj, block, blockid):
         save_vesting_deposit(op, block, blockid)
     if opType == "fill_vesting_withdraw":
         save_vesting_withdraw(op, block, blockid)
-    process_op_time = time.clock() - process_op_start_time
+    process_op_time.append(time.clock() - process_op_start_time)
 
 def process_block(block, blockid):
-    global process_block_time
+    global process_block_time, process_op_time
     process_block_time = 0
     process_block_start_time = time.clock()
     save_block(block, blockid)
     ops = rpc.get_ops_in_block(blockid, False)
+    process_op_time = []
     for tx in block['transactions']:
       for opObj in tx['operations']:
         process_op(opObj, block, blockid)
@@ -544,7 +544,7 @@ if __name__ == '__main__':
             pprint("[STEEM] - Processed up to Block #" + str(last_block))
             sys.stdout.flush()
             total_time = time.clock() - total_start_time
-            print('[TEST Time] Total time: [%f], get block time: [%f], process block time: [%f], process ops time: [%f]' % (total_time, get_block_time, process_block_time, process_op_time))
+            print('[TEST Time] Total time: [%f], get block time: [%f], process block time: [%f], process ops time: [%s]' % (total_time, get_block_time, process_block_time, str(process_op_time)))
 
         sys.stdout.flush()
         print('[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
