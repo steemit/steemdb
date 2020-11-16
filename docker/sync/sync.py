@@ -49,6 +49,9 @@ else:
 # ------------
 
 #last_block = 45292560
+process_block_time = 0
+process_op_time = 0
+get_block_time = 0
 
 def process_op(opObj, block, blockid):
     process_op_start_time = time.clock()
@@ -85,10 +88,10 @@ def process_op(opObj, block, blockid):
         save_vesting_deposit(op, block, blockid)
     if opType == "fill_vesting_withdraw":
         save_vesting_withdraw(op, block, blockid)
-    process_op_end_time = time.clock()
-    print('process_op time on block [%i] op [%s] in [%f]' % (blockid, opType, process_op_end_time - process_op_start_time))
+    process_op_time = time.clock() - process_op_start_time
 
 def process_block(block, blockid):
+    process_block_start_time = time.clock()
     save_block(block, blockid)
     ops = rpc.get_ops_in_block(blockid, False)
     for tx in block['transactions']:
@@ -96,6 +99,7 @@ def process_block(block, blockid):
         process_op(opObj, block, blockid)
     for opObj in ops:
       process_op(opObj['op'], block, blockid)
+    process_block_time = time.clock() - process_block_start_time
 
 def save_convert(op, block, blockid):
     convert = op.copy()
@@ -521,14 +525,13 @@ if __name__ == '__main__':
         block_number = props['last_irreversible_block_num']
         while (block_number - last_block) > 0:
             last_block += 1
-            block_process_start_time = time.clock()
+            total_start_time = time.clock()
             pprint("[STEEM] - Starting Block #" + str(last_block))
             sys.stdout.flush()
             # Get full block
             get_block_start_time = time.clock()
             block = rpc.get_block(last_block)
-            get_block_end_time = time.clock()
-            print('[TEST Time]get block [%i] time [%f]' % (last_block, get_block_end_time - get_block_start_time))
+            get_block_time = time.clock() - get_block_start_time
             # Process block
             process_block(block, last_block)
             # Update our block height
@@ -536,8 +539,8 @@ if __name__ == '__main__':
             # if last_block % 100 == 0:
             pprint("[STEEM] - Processed up to Block #" + str(last_block))
             sys.stdout.flush()
-            block_process_end_time = time.clock()
-            print('[TEST Time]block process [%i] time [%f]' % (last_block, block_process_end_time - block_process_start_time))
+            total_time = time.clock() - total_start_time
+            print('[TEST Time] Total time: [%f], get block time: [%f], process block time: [%f], process ops time: [%f]' % (total_time, get_block_time, process_block_time, process_op_time))
 
         sys.stdout.flush()
         print('[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
