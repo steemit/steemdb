@@ -59,12 +59,12 @@ class AccountsController extends ControllerBase
     }
     $limit = 10;
     // Determine how many pages of users we have
-    echo 'start';
-    print_r(array(
-      array('key' => 'users'),
-      "sort" => array('date' => -1)
-    ));
-    echo(stop);
+    // echo 'start';
+    // print_r(array(
+    //   array('key' => 'users'),
+    //   "sort" => array('date' => -1)
+    // ));
+    // echo(stop);
     $this->view->pages = ceil(Statistics::findFirst(array(
       array('key' => 'users'),
       "sort" => array('date' => -1)
