@@ -14,6 +14,7 @@ import sys
 import os
 import re
 
+log_tag = '[Live] '
 env_dist = os.environ
 steemd_url = env_dist.get('STEEMD_URL')
 if steemd_url == None or steemd_url == "":
@@ -90,8 +91,8 @@ class BroadcastServerFactory(WebSocketServerFactory):
         self.publish("props", "props", props)
 
     def publishState(self, state):
-        print(state)
-        print('state')
+        print(log_tag + str(state))
+        print(log_tag + 'state')
         partial = {
           #'witness_schedule': state['witness_schedule'],
           'feed_price': state['feed_price']
@@ -193,7 +194,7 @@ class BroadcastServerFactory(WebSocketServerFactory):
               self.publishBlock(previous)
             self.clients.append(client)
         except Exception as e:
-            print('error', e)
+            print(log_tag + 'error', e)
             pass
 
     def unregister(self, client):
@@ -229,7 +230,7 @@ class BroadcastServerFactory(WebSocketServerFactory):
                     # print("publishing op '{}' [{}] to subscriber [{}] based on channel subscription [{}]".format(opType, data, c.peer, channel))
                     c.sendMessage(data.encode('utf8'))
                 except Exception as e:
-                    print('error:', e)
+                    print(log_tag + 'error:', e)
                     self.channels[channel].remove(c)
 
 

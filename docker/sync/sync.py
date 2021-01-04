@@ -8,6 +8,8 @@ import time
 import sys
 import os
 
+log_tag = '[Sync] '
+
 env_dist = os.environ
 steemd_url = env_dist.get('STEEMD_URL')
 if steemd_url == None or steemd_url == "":
@@ -17,9 +19,9 @@ if last_block_env == None or last_block_env == "":
     last_block_env = None
 mongodb_url = env_dist.get('MONGODB')
 if mongodb_url == None or mongodb_url == "":
-    print('NEED MONGODB')
+    print(log_tag + 'NEED MONGODB')
     exit()
-print('mongo url: %s' % mongodb_url)
+print(log_tag + 'mongo url: %s' % mongodb_url)
 
 fullnodes = [
     #'http://10.40.103.102:8090',
@@ -219,9 +221,9 @@ def save_custom_json(op, block, blockid):
             if data[0] == 'follow':
                 save_follow(data, op, block, blockid)
     except ValueError:
-        pprint("[STEEM] - Processing failure")
-        pprint(blockid)
-        pprint(op['json'])
+        pprint(log_tag + "[STEEM] - Processing failure")
+        pprint(log_tag + str(blockid))
+        pprint(log_tag + str(op['json']))
 
 def save_feed_publish(op, block, blockid):
     doc = op.copy()
@@ -410,7 +412,7 @@ def update_comment_options(op, block, blockid):
 mvest_per_account = {}
 
 def load_accounts():
-    pprint("[STEEM] - Loading all accounts")
+    pprint(log_tag + "[STEEM] - Loading all accounts")
     for account in db.account.find():
         if 'vesting_shares' in account:
             mvest_per_account.update({account['name']: account['vesting_shares']})
@@ -488,7 +490,7 @@ def update_queue():
         'created': {'$gt': max_date},
         'scanned': {'$lt': scan_ignore},
     }).sort([('scanned', 1)]).limit(queue_length)
-    pprint("[Queue] Comments - " + str(queue_length) + " of " + str(queue.count()))
+    pprint(log_tag + "[Queue] Comments - " + str(queue_length) + " of " + str(queue.count()))
     for item in queue:
         update_comment(item['author'], item['permlink'])
 
@@ -505,7 +507,7 @@ def update_queue():
           '$gt': 0
         }
     }).limit(queue_length)
-    pprint("[Queue] Past Payouts - " + str(queue_length) + " of " + str(queue.count()))
+    pprint(log_tag + "[Queue] Past Payouts - " + str(queue_length) + " of " + str(queue.count()))
     for item in queue:
         update_comment(item['author'], item['permlink'])
     # -- Process Queue - Dirty Accounts
@@ -513,13 +515,13 @@ def update_queue():
     queue = db.account.find({
         '_dirty': True
     }).limit(queue_length)
-    pprint("[Queue] Updating Accounts - " + str(queue_length) + " of " + str(queue.count()))
+    pprint(log_tag + "[Queue] Updating Accounts - " + str(queue_length) + " of " + str(queue.count()))
     for item in queue:
         update_account(item['_id'])
-    pprint("[Queue] Done")
+    pprint(log_tag + "[Queue] Done")
 
 if __name__ == '__main__':
-    pprint("[STEEM] - Starting SteemDB Sync Service")
+    pprint(log_tag + "[STEEM] - Starting SteemDB Sync Service")
     sys.stdout.flush()
     # Let's find out how often blocks are generated!
     config = rpc.get_config()
@@ -536,7 +538,7 @@ if __name__ == '__main__':
         while (block_number - last_block) > 0:
             last_block += 1
             total_start_time = time.clock()
-            pprint("[STEEM] - Starting Block #" + str(last_block))
+            pprint(log_tag + "[STEEM] - Starting Block #" + str(last_block))
             flush_start_time1 = time.clock()
             sys.stdout.flush()
             flush_time1 = time.clock() - flush_start_time1
@@ -551,12 +553,12 @@ if __name__ == '__main__':
             # Update our block height
             db.status.update({'_id': 'height'}, {"$set" : {'value': last_block}}, upsert=True)
             # if last_block % 100 == 0:
-            pprint("[STEEM] - Processed up to Block #" + str(last_block))
+            pprint(log_tag + "[STEEM] - Processed up to Block #" + str(last_block))
             flush_start_time2 = time.clock()
             sys.stdout.flush()
             flush_time2 = time.clock() - flush_start_time2
             total_time = time.clock() - total_start_time
-            print('[TEST Time] Total time: [%f], \
+            print(log_tag + '[TEST Time] Total time: [%f], \
 get_block time: [%f, %s%%], \
 process_block time: [%f, %s%%], \
 save_block time: [%f, %s%%], \
@@ -582,7 +584,7 @@ flush_time2: [%f, %s%%]'
                     ))
 
         sys.stdout.flush()
-        print('[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
+        print(log_tag + '[TEST Time]global process time [%f]' % (time.clock() - global_process_start_time))
 
         # Sleep for one block
         time.sleep(block_interval)

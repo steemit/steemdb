@@ -31,6 +31,8 @@ db = mongo.steemdb
 
 misses = {}
 
+log_tag = '[Witness] '
+
 # Command to check how many blocks a witness has missed
 def check_misses():
     global misses
@@ -70,7 +72,7 @@ def update_witnesses():
     scantime = datetime.now()
     users = rpc.get_witnesses_by_vote('', 100)
     #pprint(users)
-    pprint("[STEEM] - Update Witnesses (" + str(len(users)) + " accounts)")
+    pprint(log_tag + "[STEEM] - Update Witnesses (" + str(len(users)) + " accounts)")
     db.witness.remove({})
     for user in users:
         # Convert to Numbers

@@ -10,13 +10,14 @@ import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+log_tag = '[History] '
 env_dist = os.environ
 steemd_url = env_dist.get('STEEMD_URL')
 if steemd_url == None or steemd_url == "":
     steemd_url = 'https://api.steemit.com'
 mongodb_url = env_dist.get('MONGODB')
 if mongodb_url == None or mongodb_url == "":
-    print('NEED MONGODB')
+    print(log_tag + 'NEED MONGODB')
     exit()
 
 fullnodes = [
@@ -31,13 +32,13 @@ db = mongo.steemdb
 mvest_per_account = {}
 
 def load_accounts():
-    pprint("[STEEM] - Loading mvest per account")
+    pprint(log_tag + "[STEEM] - Loading mvest per account")
     for account in db.account.find():
         if "name" in account.keys():
             mvest_per_account.update({account['name']: account['vesting_shares']})
 
 def update_fund_history():
-    pprint("[STEEM] - Update Fund History")
+    pprint(log_tag + "[STEEM] - Update Fund History")
 
     fund = rpc.get_reward_fund('post')
     for key in ['recent_claims', 'content_constant']:
@@ -50,7 +51,7 @@ def update_fund_history():
     db.funds_history.insert(fund)
 
 def update_props_history():
-    pprint("[STEEM] - Update Global Properties")
+    pprint(log_tag + "[STEEM] - Update Global Properties")
 
     props = rpc.get_dynamic_global_properties()
 
@@ -87,7 +88,7 @@ def update_props_history():
     db.props_history.insert(props)
 
 def update_tx_history():
-    pprint("[STEEM] - Update Transaction History")
+    pprint(log_tag + "[STEEM] - Update Transaction History")
     now = datetime.now().date()
 
     today = datetime.combine(now, datetime.min.time())
@@ -102,11 +103,11 @@ def update_tx_history():
     }
     count = db.block_30d.count(query)
 
-    pprint(count)
+    pprint(log_tag + str(count))
 
-    pprint(now)
-    pprint(today)
-    pprint(yesterday)
+    pprint(log_tag + str(now))
+    pprint(log_tag + str(today))
+    pprint(log_tag + str(yesterday))
 
 
 
@@ -130,7 +131,7 @@ def update_history():
     now = datetime.now().date()
     today = datetime.combine(now, datetime.min.time())
 
-    pprint("[STEEM] - Update History (" + str(len(users)) + " accounts)")
+    pprint(log_tag + "[STEEM] - Update History (" + str(len(users)) + " accounts)")
     # Snapshot User Count
     db.statistics.update({
       'key': 'users',
@@ -211,11 +212,11 @@ def update_history():
           'account': user,
           'date': today
         }, snapshot, upsert=True)
-        print('finish user: ', user)
-    pprint("history update finish")
+        print(log_tag + 'finish user: ', user)
+    pprint(log_tag + "history update finish")
 
 def update_stats():
-  pprint("updating stats");
+  pprint(log_tag + "updating stats");
   # Calculate Transactions
   results = db.block_30d.aggregate([
     {
@@ -331,7 +332,7 @@ def update_stats():
 
 def update_clients():
   try:
-    pprint("updating clients");
+    pprint(log_tag + "updating clients");
     start = datetime.today() - timedelta(days=90)
     end = datetime.today()
     regx = re.compile("([\w-]+\/[\w.]+)", re.IGNORECASE)
@@ -411,7 +412,7 @@ def update_clients():
         }
       },
     ])
-    pprint("complete")
+    pprint(log_tag + "complete")
     sys.stdout.flush()
     data = list(results)
     db.status.update({'_id': 'clients-snapshot'}, {'$set': {'data' : data}}, upsert=True)
@@ -426,7 +427,7 @@ def update_clients():
 
 
 if __name__ == '__main__':
-    pprint("starting");
+    pprint(log_tag + "starting");
     # Load all account data into memory
 
     # Start job immediately
