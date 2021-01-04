@@ -69,7 +69,7 @@ def update_witnesses():
     # }, upsert=True)
     scantime = datetime.now()
     users = rpc.get_witnesses_by_vote('', 100)
-    pprint(users)
+    #pprint(users)
     pprint("[STEEM] - Update Witnesses (" + str(len(users)) + " accounts)")
     db.witness.remove({})
     for user in users:
