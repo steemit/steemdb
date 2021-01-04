@@ -216,6 +216,8 @@ def save_custom_json(op, block, blockid):
     try:
         data = json.loads(op['json'])
         if type(data) is list:
+            if len(data) == 0:
+                return
             if data[0] == 'reblog':
                 save_reblog(data, op, block, blockid)
             if data[0] == 'follow':
