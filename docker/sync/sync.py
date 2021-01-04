@@ -222,10 +222,12 @@ def save_custom_json(op, block, blockid):
                 save_reblog(data, op, block, blockid)
             if data[0] == 'follow':
                 save_follow(data, op, block, blockid)
-    except ValueError:
+    #except ValueError:
+    except Exception as e:
         pprint(log_tag + "[STEEM] - Processing failure")
         pprint(log_tag + str(blockid))
         pprint(log_tag + str(op['json']))
+        print(log_tag + repr(e))
 
 def save_feed_publish(op, block, blockid):
     doc = op.copy()
