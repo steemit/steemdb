@@ -11,31 +11,54 @@ class SearchController extends ControllerBase
   public function indexAction()
   {
     $query = $this->request->get("q", "string");
-    $accounts = Account::find(array(
-      array(
-        'name' => new Regex('^'.$query, 'i')
-      ),
-      "sort" => [
-        "followers" => -1
-      ],
-      "fields" => [
-        'name' => 1
-      ],
-      "limit" => 5
-    ));
     $data = [
-      'results' => [
-        'accounts' => [
-          'name' => 'Accounts',
-          'results' => array_map(function($account) {
-            return [
-              'title' => $account->name,
-              'url' => '/@'.$account->name
-            ];
-          }, $accounts)
-        ]
-      ]
+      'results' => [],
     ];
+
+    if (is_numeric($query)) {
+      // block search
+      $block = $this->steemd->getBlock($query);
+      $data['results']['block'] = [
+        'name' => 'Block',
+        'results' => $block ? [[
+          'title' => $query,
+          'url' => '/block/'.$query,
+        ]] : [],
+      ];
+    } else if (strlen($query) == 40) {
+      // transaction search
+      $trx = $this->steemd->getTx($query);
+      $data['results']['trx'] = [
+        'name' => 'Transaction',
+        'results' => $trx ? [[
+          'title' => $trx['transaction_id'],
+          'url' => '/tx/'.$trx['transaction_id'],
+        ]] : [],
+      ];
+    } else {
+      // user search
+      $accounts = Account::find(array(
+      array(
+          'name' => new Regex('^'.$query, 'i')
+        ),
+        "sort" => [
+          "followers" => -1
+        ],
+        "fields" => [
+          'name' => 1
+        ],
+        "limit" => 5
+      ));
+      $data['results']['accounts'] = [
+        'name' => 'Accounts',
+        'results' => array_map(function($account) {
+          return [
+            'title' => $account->name,
+            'url' => '/@'.$account->name
+          ];
+        }, $accounts),
+      ];
+    }
     $this->view->disable();
     $this->response->setContentType('application/json', 'UTF-8');
     $this->response->setJsonContent($data);
