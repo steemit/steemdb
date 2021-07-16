@@ -40,7 +40,7 @@ class steemd
   public function getTx($txid)
   {
     try {
-      return $this->client->call(0, 'get_transaction', [$txid]);
+      return $this->client->execute('condenser_api.get_transaction', [$txid]);
     } catch (Exception $e) {
       return array();
     }
