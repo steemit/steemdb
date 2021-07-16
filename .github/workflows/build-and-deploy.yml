@@ -32,7 +32,7 @@ jobs:
           file: ./docker/development/Dockerfile
           context: .
           push: true
-          tags: steemit/steem:development,steemit/steem:latest
+          tags: steemit/steemdb:development,steemit/steemdb:latest
       -
         name: Build and Push History
         uses: docker/build-push-action@v2
@@ -40,7 +40,7 @@ jobs:
           file: ./docker/history/Dockerfile
           context: .
           push: true
-          tags: steemit/steem:history
+          tags: steemit/steemdb:history
       -
         name: Build and Push Live
         uses: docker/build-push-action@v2
@@ -48,7 +48,7 @@ jobs:
           file: ./docker/live/Dockerfile
           context: .
           push: true
-          tags: steemit/steem:live
+          tags: steemit/steemdb:live
       -
         name: Build and Push Sync
         uses: docker/build-push-action@v2
@@ -56,7 +56,7 @@ jobs:
           file: ./docker/sync/Dockerfile
           context: .
           push: true
-          tags: steemit/steem:sync
+          tags: steemit/steemdb:sync
       -
         name: Build and Push Witnesses
         uses: docker/build-push-action@v2
@@ -64,7 +64,7 @@ jobs:
           file: ./docker/witnesses/Dockerfile
           context: .
           push: true
-          tags: steemit/steem:witnesses
+          tags: steemit/steemdb:witnesses
       -
         name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
