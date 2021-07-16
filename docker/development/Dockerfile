@@ -51,7 +51,7 @@ RUN apt-get update -y && apt-get install -y software-properties-common python-so
     #rm -Rf /var/www/* && \
     #ln -s /etc/nginx/sites-available/default.conf /etc/nginx/sites-enabled/default.conf && \
     apt-get update -y && apt-get install -y php-pear libcurl4-openssl-dev pkg-config libssl-dev libsslcommon2-dev && \
-    pecl install mongodb && \
+    pecl install mongodb-1.9.2 && \
     echo "extension=mongodb.so" > /etc/php/7.0/fpm/conf.d/30-mongo.ini && \
     echo "extension=mongodb.so" > /etc/php/7.0/cli/conf.d/30-mongo.ini && \
     apt-get install -y memcached php-memcached && \
