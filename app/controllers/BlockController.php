@@ -8,6 +8,7 @@ class BlockController extends ControllerBase
   {
     $this->view->height = $height = $this->dispatcher->getParam("height");
     $this->view->current = $this->steemd->getBlock($height);
+    $this->view->currentVirtualOps = $this->steemd->getVirtualOpsInBlock($height);
   }
 
 }

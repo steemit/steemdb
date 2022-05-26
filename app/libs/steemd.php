@@ -93,4 +93,13 @@ class steemd
     $api = $this->getApi('follow_api');
     return $this->client->call($api, 'get_following', [$username, $skip, $limit]);
   }
+
+  public function getVirtualOpsInBlock($height)
+  {
+    try {
+      return $this->client->execute('condenser_api.get_ops_in_block', [$height, true]);
+    } catch (Exception $e) {
+      return array();
+    }
+  }
 }

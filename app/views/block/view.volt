@@ -50,6 +50,9 @@
           {% else %}
           <a class="active item" data-tab="block">Block Data</a>
           {% endif %}
+          {% if currentVirtualOps | length %}
+          <a class="item" data-tab="virtual_ops">Virtual Ops</a>
+          {% endif %}
           <a class="item" data-tab="json">JSON</a>
         </div>
         <div class="ui bottom attached padded segment">
@@ -100,6 +103,29 @@
           {% endif %}
             {% include '_elements/definition_table' with ['data': current] %}
           </div>
+          {% if currentVirtualOps | length %}
+          <div class="ui tab" data-tab="virtual_ops">
+            <table class="ui definition table" style="table-layout: fixed">
+              <tbody>
+              {% for op in currentVirtualOps %}
+              <tr>
+                <td class="two wide">
+                  {{ op['virtual_op'] }}
+                </td>
+                <td class="three wide">
+                  {{ op['op'][0] }}
+                </td>
+                <td>
+<pre>
+<?php echo json_encode($op['op'][1], JSON_PRETTY_PRINT); ?>
+</pre>
+                </td>
+              </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
           <div class="ui tab" data-tab="json">
 <pre>
 <?php echo json_encode($current, JSON_PRETTY_PRINT); ?>
