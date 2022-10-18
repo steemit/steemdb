@@ -1,4 +1,4 @@
-name: build-and-deploy
+name: build-history
 
 on:
   workflow_dispatch:
