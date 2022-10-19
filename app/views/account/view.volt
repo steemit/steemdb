@@ -53,9 +53,17 @@
       <div class="four wide column">
         <div class="ui sticky">
           {% include '_elements/cards/account.volt' %}
-          <div class="ui small indicating progress">
+          <div class="ui small indicating progress" id="vp_progress">
             <div class="label">
               {{ live[0]['voting_power'] / 10000 * 100 }}% Voting Power
+            </div>
+            <div class="bar">
+              <div class="progress"></div>
+            </div>
+          </div>
+          <div class="ui small indicating progress" id="mana_progress">
+            <div class="label" data-popup data-html="<table class='ui small definition table'><tr><td>Current Mana</td><td>{{ rc['rc_manabar']['current_mana'] }}</td></tr><tr><td>Total Mana</td><td>{{ rc['max_rc'] }}</td></tr></table>" data-position="left center">
+              {{ rc['rc_manabar']['current_mana'] }} Mana / {{ rc['max_rc'] }} Mana
             </div>
             <div class="bar">
               <div class="progress"></div>
@@ -147,9 +155,13 @@
     {% include 'charts/account/' ~ router.getActionName() %}
   {% endif %}
   <script>
-    $('.ui.indicating.progress')
+    $('#vp_progress')
       .progress({
         percent: {{ live[0]['voting_power'] / 100 }}
+      });
+    $('#mana_progress')
+      .progress({
+        percent: {{ rc['rc_manabar']['current_mana'] / rc['max_rc'] }}
       });
     $('.tabular.menu .item')
       .tab({

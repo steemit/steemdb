@@ -62,6 +62,16 @@ class steemd
       return array();
     }
   }
+
+  public function getAccountsRC($accounts)
+  {
+    try {
+      return $this->client->execute('rc_api.find_rc_accounts', ["accounts" => $accounts]);
+    } catch (Exception $e) {
+      return array();
+    }
+  }
+
   public function getAccountHistory($username, $limit = 100, $skip = -1)
   {
     try {

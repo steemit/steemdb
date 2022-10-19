@@ -49,9 +49,32 @@ class AccountController extends ControllerBase
     return $account;
   }
 
+  private function getAccountRC()
+  {
+    $account = strtolower($this->dispatcher->getParam("account"));
+    $cacheKey = 'account-rc-'.$account;
+    // Check the cache for this account from the blockchain
+    $cached = $this->memcached->get($cacheKey);
+    // No cache, let's load
+    if($cached === null) {
+      $result = $this->steemd->getAccountsRC([$account]);
+      if ($result[0]) {
+        $this->view->rc = $result[0];
+      } else {
+        $this->view->rc = array();
+      }
+      $this->memcached->save($cacheKey, $this->view->rc, 60);
+    } else {
+      // Use cache
+      $this->view->rc = $cached;
+    }
+    return;
+  }
+
   public function viewAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->props = $this->steemd->getProps();
     try {
       $this->view->activity = array_reverse($this->steemd->getAccountHistory($account));
