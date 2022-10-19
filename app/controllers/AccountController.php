@@ -95,6 +95,7 @@ class AccountController extends ControllerBase
   public function propsAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->history = WitnessHistory::find(array(
       ['owner' => $account],
       'sort' => array('created' => -1),
@@ -106,6 +107,7 @@ class AccountController extends ControllerBase
   public function postsAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->comments = Comment::find(array(
       array(
         'author' => $account,
@@ -131,6 +133,7 @@ class AccountController extends ControllerBase
   public function votesAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->filter = $this->request->get('type');
     switch($this->view->filter) {
       case "incoming":
@@ -156,6 +159,7 @@ class AccountController extends ControllerBase
   public function repliesAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->replies = Comment::find(array(
       array(
         'author' => $account,
@@ -170,6 +174,7 @@ class AccountController extends ControllerBase
   public function followersAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->followers = Follow::find([
       ["following" => $account],
       "sort" => ['_ts' => -1]
@@ -181,6 +186,7 @@ class AccountController extends ControllerBase
   public function followersWhalesAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $followers = $this->view->account->followers;
     $this->view->followers = Account::find([
       ['name' => ['$in' => $followers]],
@@ -192,6 +198,7 @@ class AccountController extends ControllerBase
   public function followingAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->followers = Follow::find([
       ["follower" => $account],
       "sort" => ['_ts' => -1]
@@ -202,6 +209,7 @@ class AccountController extends ControllerBase
   public function witnessAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->votes = WitnessVote::agg([
       ['$match' => [
         'witness' => $account
@@ -237,6 +245,7 @@ class AccountController extends ControllerBase
   public function blocksAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $query = array(
       array(
         'witness' => $account,
@@ -253,6 +262,7 @@ class AccountController extends ControllerBase
   public function missedAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->mining = WitnessMiss::find(array(
       array(
         'witness' => $account,
@@ -266,6 +276,7 @@ class AccountController extends ControllerBase
   public function reblogsAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $page = $this->view->page = (int) $this->request->get('page') ?: 1;
     $this->view->reblogs = Reblog::find(array(
       array(
@@ -281,6 +292,7 @@ class AccountController extends ControllerBase
   public function rebloggedAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $page = $this->view->page = (int) $this->request->get('page') ?: 1;
     $this->view->reblogs = Reblog::find(array(
       array(
@@ -296,6 +308,7 @@ class AccountController extends ControllerBase
   public function proxiedAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->proxied = Account::find(array(
       array('proxy' => $account)
     ));
@@ -305,6 +318,7 @@ class AccountController extends ControllerBase
   public function curationAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->curation = CurationReward::agg(array(
       ['$match' => [
         'curator' => $account,
@@ -376,6 +390,7 @@ class AccountController extends ControllerBase
 
   public function curationDateAction() {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->date = $this->dispatcher->getParam("date");
     $this->view->curation = CurationReward::find(array(
       array(
@@ -395,6 +410,7 @@ class AccountController extends ControllerBase
   public function beneficiariesAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->beneficiaries = BenefactorReward::agg(array(
       ['$match' => [
         'benefactor' => $account,
@@ -466,6 +482,7 @@ class AccountController extends ControllerBase
 
   public function beneficiariesDateAction() {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->date = $this->dispatcher->getParam("date");
     $this->view->beneficiaries = BenefactorReward::find(array(
       array(
@@ -486,6 +503,7 @@ class AccountController extends ControllerBase
   public function authoringAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->filter = $filter = $this->request->get('filter', 'string') ?: null;
     // Define our default match against rewards
     $match = [
@@ -572,6 +590,7 @@ class AccountController extends ControllerBase
   public function authoringDateAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->page = $page = (int) $this->request->get("page") ?: 1;
     $this->view->date = $this->dispatcher->getParam("date");
     $limit = 50;
@@ -607,6 +626,7 @@ class AccountController extends ControllerBase
   public function powerupAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->powerup = VestingDeposit::find(array(
       array('to' => $account),
       'sort' => array('_ts' => -1)
@@ -618,6 +638,7 @@ class AccountController extends ControllerBase
   public function powerdownAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->powerdown = VestingWithdraw::find(array(
       array('from_account' => $account),
       'sort' => array('_ts' => -1)
@@ -629,6 +650,7 @@ class AccountController extends ControllerBase
   public function transfersAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->page = $page = (int) $this->request->get("page") ?: 1;
     $limit = 500;
     $this->view->transfers = Transfer::find(array(
@@ -657,6 +679,7 @@ class AccountController extends ControllerBase
   public function dataAction()
   {
     $account = $this->getAccount();
+    $this->getAccountRC();
     $this->view->pick("account/view");
   }
 }
