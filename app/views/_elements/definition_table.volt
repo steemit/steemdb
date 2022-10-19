@@ -20,7 +20,11 @@
               echo number_format($value, 3, '.', ',');
               break;
             default:
-              echo htmlspecialchars($value);
+              if (in_array($key, ['creator', 'delegator', 'delegatee'])) {
+                echo '<a href="/@'.htmlspecialchars($value).'">'.htmlspecialchars($value).'</a>';
+              } else {
+                echo htmlspecialchars($value);
+              }
               break;
           }
         ?>
