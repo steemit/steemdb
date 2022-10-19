@@ -78,10 +78,34 @@
                 </td>
               </tr>
               <tr {% if account.vesting_withdraw_rate and account.vesting_withdraw_rate > 1 %}data-popup data-html="<table class='ui small definition table'><tr><td>Power Down - Rate</td><td>-<?php echo $this->convert::vest2sp($current->vesting_withdraw_rate, " SP"); ?></td></tr><tr><td>Power Down - Datetime</td><td><?php echo gmdate("Y-m-d H:i:s e", (string) $account->next_vesting_withdrawal / 1000) ?></td></tr></table>" data-position="left center" data-variation="very wide"{% endif %}>
-                <td>SP</td>
+                <td>Total SP</td>
                 <td>
                   <div class="ui tiny header">
                     <?php echo $this->convert::vest2sp($current->vesting_shares); ?>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>Delegated SP</td>
+                <td>
+                  <div class="ui tiny header">
+                    <?php echo $this->convert::vest2sp($current->delegated_vesting_shares); ?>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>Received SP</td>
+                <td>
+                  <div class="ui tiny header">
+                    <?php echo $this->convert::vest2sp($current->received_vesting_shares); ?>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>Effective SP</td>
+                <td>
+                  <div class="ui tiny header">
+                    <?php echo $this->convert::vest2sp($current->vesting_shares + $current->received_vesting_shares - $current->delegated_vesting_shares); ?>
                   </div>
                 </td>
               </tr>
