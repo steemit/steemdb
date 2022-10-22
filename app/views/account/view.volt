@@ -45,7 +45,7 @@
         <svg width="100%" height="200px" id="account-{{ router.getActionName() }}"></svg>
       </div>
       {% endif %}
-      <div class="ui bottom attached secondary segment">
+      <div class="ui bottom attached secondary segment" style="overflow-x: scroll;">
         {% include "account/view/" ~ router.getActionName() %}
       </div>
     </div>
