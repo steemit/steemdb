@@ -61,7 +61,7 @@
           </div>
         </div>
         <div class="ui small indicating progress" id="mana_progress">
-          <div class="label" data-popup data-html="<table class='ui small definition table'><tr><td>Current Mana</td><td>{{ rc['rc_manabar']['current_mana'] }}</td></tr><tr><td>Total Mana</td><td>{{ rc['max_rc'] }}</td></tr></table>" data-position="left center">
+          <div class="label" data-popup data-html="<table class='ui small definition table'><tr><td>Current Mana</td><td>{{ rc['rc_manabar']['current_mana'] }}</td></tr><tr><td>Total Mana</td><td>{{ rc['max_rc'] }}</td></tr></table>" data-position="bottom center">
             <?php echo round($rc['rc_manabar']['current_mana'] / $rc['max_rc'] * 100, 2);?>% Mana
           </div>
           <div class="bar">
