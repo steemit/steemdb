@@ -77,7 +77,7 @@ class AccountController extends ControllerBase
     $this->getAccountRC();
     $this->view->props = $this->steemd->getProps();
     try {
-      $this->view->activity = array_reverse($this->steemd->getAccountHistory($account));
+      $this->view->activity = array_reverse($this->steemd->getAccountHistory($account, 10));
     } catch (Exception $e) {
       $this->view->activity = false;
     }
