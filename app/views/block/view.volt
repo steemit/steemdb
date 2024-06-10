@@ -117,7 +117,7 @@
                 </td>
                 <td>
 <pre>
-<?php echo json_encode($op['op'][1], JSON_PRETTY_PRINT); ?>
+<?php echo htmlspecialchars(json_encode($op['op'][1], JSON_PRETTY_PRINT)); ?>
 </pre>
                 </td>
               </tr>
@@ -128,7 +128,7 @@
           {% endif %}
           <div class="ui tab" data-tab="json">
 <pre>
-<?php echo json_encode($current, JSON_PRETTY_PRINT); ?>
+<?php echo htmlspecialchars(json_encode($current, JSON_PRETTY_PRINT)); ?>
 </pre>
           </div>
         </div>

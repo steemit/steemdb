@@ -13,7 +13,7 @@
               if($value instanceOf MongoDB\BSON\UTCDateTime) {
                 echo $value->toDateTime()->format('Y-m-d H:i');
               } else {
-                echo "<pre>" . json_encode($value, JSON_PRETTY_PRINT) . "</pre>";
+                echo "<pre>" . htmlspecialchars(json_encode($value, JSON_PRETTY_PRINT)) . "</pre>";
               }
               break;
             case "double":
