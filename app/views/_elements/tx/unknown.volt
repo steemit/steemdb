@@ -1,2 +1,2 @@
 
-<?= json_encode($item[1]) ?>
+<?= htmlspecialchars(json_encode($item[1])) ?>
