@@ -1,5 +1,4 @@
-## steemdb With Nodejs Implementation on Backend
-
+## steemdb 
 [https://steemdb.io](https://steemdb.io)
 
 open source blockchain explorer for the steem blockchain - build on phalcon + mongodb
