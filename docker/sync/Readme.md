@@ -1,3 +1,4 @@
+
 # Steem Blockchain Sync Script
 
 ## 📝 Overview
@@ -51,18 +52,17 @@ Modify the `config.json` file with the appropriate settings before running the D
     "last_block_env": 78090042,
     "batch_size": 50
 }
-
 ```
 
-`mongodb_url`: The connection string to your MongoDB instance.
-`steemd_url`: The URL of the Steem node you are connecting to.
-`last_block_env`: The block number to start synchronization from.
-`batch_size`: Number of blocks to fetch in one batch (default is 50).
+- `mongodb_url`: The connection string to your MongoDB instance.
+- `steemd_url`: The URL of the Steem node you are connecting to.
+- `last_block_env`: The block number to start synchronization from.
+- `batch_size`: Number of blocks to fetch in one batch (default is 50).
 
+## 🤝 Contributing
 
-
-🤝 Contributing
 Contributions are welcome! Please feel free to submit a pull request or open an issue on GitHub.
 
-📜 License
+## 📜 License
+
 This project is licensed under the MIT License. See the LICENSE file for details.
