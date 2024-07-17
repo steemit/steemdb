@@ -51,7 +51,7 @@ Modify the `config.json` file with the appropriate settings before running the D
     "last_block_env": 78090042,
     "batch_size": 50
 }
-```json
+
 
 'mongodb_url': The connection string to your MongoDB instance.
 'steemd_url': The URL of the Steem node you are connecting to.
