@@ -54,10 +54,13 @@ Modify the `config.json` file with the appropriate settings before running the D
 
 ```
 
-'mongodb_url': The connection string to your MongoDB instance.
-'steemd_url': The URL of the Steem node you are connecting to.
-'last_block_env': The block number to start synchronization from.
-'batch_size': Number of blocks to fetch in one batch (default is 50).
+`mongodb_url`: The connection string to your MongoDB instance.
+`steemd_url`: The URL of the Steem node you are connecting to.
+`last_block_env`: The block number to start synchronization from.
+`batch_size`: Number of blocks to fetch in one batch (default is 50).
+
+
+
 🤝 Contributing
 Contributions are welcome! Please feel free to submit a pull request or open an issue on GitHub.
 
