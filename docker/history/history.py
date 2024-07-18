@@ -1,35 +1,41 @@
 from datetime import datetime, timedelta
 from steem import Steem
-from pymongo import MongoClient
+from pymongo import MongoClient, UpdateOne
 from pprint import pprint
 import collections
 import time
 import sys
 import os
-import re
-
+import json
+import requests
+from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
 
 log_tag = '[History] '
-env_dist = os.environ
-steemd_url = env_dist.get('STEEMD_URL')
-if steemd_url == None or steemd_url == "":
-    steemd_url = 'https://api.steemit.com'
-mongodb_url = env_dist.get('MONGODB')
-if mongodb_url == None or mongodb_url == "":
+
+# Load configuration from config.json
+with open('config.json') as config_file:
+    config = json.load(config_file)
+
+steemd_url = config.get('STEEMD_URL', 'https://api.steemit.com')
+mongodb_url = config.get('MONGODB')
+if not mongodb_url:
     print(log_tag + 'NEED MONGODB')
     exit()
 
-fullnodes = [
-    #'http://10.40.103.102:8090',
-    #'https://api.steemit.com',
-    steemd_url,
-]
+fullnodes = [steemd_url]
 rpc = Steem(fullnodes)
 mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
 mvest_per_account = {}
+
+def steem_batch_request(url, batch_data):
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    response = requests.post(url, headers=headers, data=json.dumps(batch_data))
+    return response.json()
 
 def load_accounts():
     pprint(log_tag + "[STEEM] - Loading mvest per account")
@@ -48,14 +54,13 @@ def update_fund_history():
     for key in ['last_update']:
         fund[key] = datetime.strptime(fund[key], "%Y-%m-%dT%H:%M:%S")
 
-    db.funds_history.insert(fund)
+    db.funds_history.insert_one(fund)
 
 def update_props_history():
     pprint(log_tag + "[STEEM] - Update Global Properties")
 
     props = rpc.get_dynamic_global_properties()
 
-    #for key in ['max_virtual_bandwidth', 'recent_slots_filled', 'total_reward_shares2']:
     for key in ['recent_slots_filled', 'total_reward_shares2']:
         props[key] = float(props[key])
     for key in ['confidential_sbd_supply', 'confidential_supply', 'current_sbd_supply', 'current_supply', 'total_reward_fund_steem', 'total_vesting_fund_steem', 'total_vesting_shares', 'virtual_supply']:
@@ -63,29 +68,27 @@ def update_props_history():
     for key in ['time']:
         props[key] = datetime.strptime(props[key], "%Y-%m-%dT%H:%M:%S")
 
-    #floor($return['total_vesting_fund_steem'] / $return['total_vesting_shares'] * 1000000 * 1000) / 1000;
-
     props['steem_per_mvests'] = props['total_vesting_fund_steem'] / props['total_vesting_shares'] * 1000000
 
-    db.status.update({
-      '_id': 'steem_per_mvests'
+    db.status.update_one({
+        '_id': 'steem_per_mvests'
     }, {
-      '$set': {
-        '_id': 'steem_per_mvests',
-        'value': props['steem_per_mvests']
-      }
+        '$set': {
+            '_id': 'steem_per_mvests',
+            'value': props['steem_per_mvests']
+        }
     }, upsert=True)
 
-    db.status.update({
-      '_id': 'props'
+    db.status.update_one({
+        '_id': 'props'
     }, {
-      '$set': {
-        '_id': 'props',
-        'props': props
-      }
+        '$set': {
+            '_id': 'props',
+            'props': props
+        }
     }, upsert=True)
 
-    db.props_history.insert(props)
+    db.props_history.insert_one(props)
 
 def update_tx_history():
     pprint(log_tag + "[STEEM] - Update Transaction History")
@@ -94,31 +97,42 @@ def update_tx_history():
     today = datetime.combine(now, datetime.min.time())
     yesterday = today - timedelta(1)
 
-    # Determine tx per day
     query = {
-      '_ts': {
-        '$gte': today,
-        '$lte': today + timedelta(1)
-      }
+        '_ts': {
+            '$gte': today,
+            '$lte': today + timedelta(1)
+        }
     }
-    count = db.block_30d.count(query)
+    count = db.block_30d.count_documents(query)
 
     pprint(log_tag + str(count))
-
     pprint(log_tag + str(now))
     pprint(log_tag + str(today))
     pprint(log_tag + str(yesterday))
 
+def get_batch_account_details(accounts):
+    batch_data = [{"jsonrpc": "2.0", "method": "condenser_api.get_accounts", "params": [accounts], "id": i+1} for i, account in enumerate(accounts)]
+    response = steem_batch_request(steemd_url, batch_data)
+    return [res['result'][0] for res in response]
 
+def process_account_details(account):
+    account_data = collections.OrderedDict(sorted(account.items()))
+    account_data['proxy_witness'] = sum(float(i) for i in account_data['proxied_vsf_votes']) / 1000000
+    for key in ['reputation', 'to_withdraw']:
+        account_data[key] = float(account_data[key])
+    for key in ['balance', 'sbd_balance', 'sbd_seconds', 'savings_balance', 'savings_sbd_balance', 'vesting_balance', 'vesting_shares', 'vesting_withdraw_rate']:
+        account_data[key] = float(account_data[key].split()[0])
+    for key in ['created','last_account_recovery','last_account_update','last_owner_update','last_post','last_root_post','last_vote_time','next_vesting_withdrawal','savings_sbd_last_interest_payment','savings_sbd_seconds_last_update','sbd_last_interest_payment','sbd_seconds_last_update']:
+        account_data[key] = datetime.strptime(account_data[key], "%Y-%m-%dT%H:%M:%S")
+    account_data['total_balance'] = account_data['balance'] + account_data['savings_balance']
+    account_data['total_sbd_balance'] = account_data['sbd_balance'] + account_data['savings_sbd_balance']
+    account_data['scanned'] = datetime.now()
+    return account_data
 
 def update_history():
-
     update_fund_history()
     update_props_history()
-    # update_tx_history()
-    # sys.stdout.flush()
 
-    # Load all accounts
     users = rpc.lookup_accounts(-1, 1000)
     more = True
     while more:
@@ -127,310 +141,231 @@ def update_history():
             more = False
         users = users + newUsers
 
-    # Set dates
-    now = datetime.now().date()
-    today = datetime.combine(now, datetime.min.time())
+    batch_size = 50
+    for i in range(0, len(users), batch_size):
+        batch_users = users[i:i+batch_size]
+        account_details = get_batch_account_details(batch_users)
 
-    pprint(log_tag + "[STEEM] - Update History (" + str(len(users)) + " accounts)")
-    # Snapshot User Count
-    db.statistics.update({
-      'key': 'users',
-      'date': today,
-    }, {
-      'key': 'users',
-      'date': today,
-      'value': len(users)
-    }, upsert=True)
-    sys.stdout.flush()
+        operations = []
+        for account in account_details:
+            account_data = process_account_details(account)
+            operations.append(UpdateOne({'_id': account_data['name']}, {'$set': account_data}, upsert=True))
+            
+            wanted_keys = ['name', 'proxy_witness', 'activity_shares', 'average_bandwidth', 'average_market_bandwidth', 'savings_balance', 'balance', 'comment_count', 'curation_rewards', 'lifetime_bandwidth', 'lifetime_vote_count', 'next_vesting_withdrawal', 'reputation', 'post_bandwidth', 'post_count', 'posting_rewards', 'sbd_balance', 'savings_sbd_balance', 'sbd_last_interest_payment', 'sbd_seconds', 'sbd_seconds_last_update', 'to_withdraw', 'vesting_balance', 'vesting_shares', 'vesting_withdraw_rate', 'voting_power', 'withdraw_routes', 'withdrawn', 'witnesses_voted_for']
+            snapshot = dict((k, account_data[k]) for k in wanted_keys if k in account_data)
+            snapshot.update({
+                'account': account_data['name'],
+                'date': datetime.combine(datetime.now().date(), datetime.min.time()),
+            })
+            operations.append(UpdateOne({'account': account_data['name'], 'date': datetime.combine(datetime.now().date(), datetime.min.time())}, {'$set': snapshot}, upsert=True))
 
-    # Update history on accounts
-    for user in users:
-        # Load State
-        state = rpc.get_accounts([user])
-        # Get Account Data
-        account = collections.OrderedDict(sorted(state[0].items()))
-        # Get followers
-        account['followers'] = []
-        account['followers_count'] = 0
-        account['followers_mvest'] = 0
-#        #followers_results = rpc.get_followers(user, "", "blog", 100, api="follow")
-#        followers_results = rpc.get_followers(user, "", "blog", 100)
-#        while followers_results:
-#          last_account = ""
-#          for follower in followers_results:
-#            last_account = follower['follower']
-#            if 'blog' in follower['what'] or 'posts' in follower['what']:
-#              account['followers'].append(follower['follower'])
-#              account['followers_count'] += 1
-#              if follower['follower'] in mvest_per_account.keys():
-#                account['followers_mvest'] += float(mvest_per_account[follower['follower']])
-#          #followers_results = rpc.get_followers(user, last_account, "blog", 100, api="follow")[1:]
-#          followers_results = rpc.get_followers(user, last_account, "blog", 100)[1:]
-#        # Get following
-        account['following'] = []
-        account['following_count'] = 0
-#        #following_results = rpc.get_following(user, -1, "blog", 100, api="follow")
-#        following_results = rpc.get_following(user, "", "blog", 100)
-#        while following_results:
-#          last_account = ""
-#          for following in following_results:
-#            last_account = following['following']
-#            if 'blog' in following['what'] or 'posts' in following['what']:
-#              account['following'].append(following['following'])
-#              account['following_count'] += 1
-#          #following_results = rpc.get_following(user, last_account, "blog", 100, api="follow")[1:]
-#          following_results = rpc.get_following(user, last_account, "blog", 100)[1:]
-        # Convert to Numbers
-        account['proxy_witness'] = sum(float(i) for i in account['proxied_vsf_votes']) / 1000000
-        for key in ['reputation', 'to_withdraw']:
-            account[key] = float(account[key])
-        for key in ['balance', 'sbd_balance', 'sbd_seconds', 'savings_balance', 'savings_sbd_balance', 'vesting_balance', 'vesting_shares', 'vesting_withdraw_rate']:
-            account[key] = float(account[key].split()[0])
-        # Convert to Date
-        #for key in ['created','last_account_recovery','last_account_update','last_active_proved','last_bandwidth_update','last_market_bandwidth_update','last_owner_proved','last_owner_update','last_post','last_root_post','last_vote_time','next_vesting_withdrawal','savings_sbd_last_interest_payment','savings_sbd_seconds_last_update','sbd_last_interest_payment','sbd_seconds_last_update']:
-        for key in ['created','last_account_recovery','last_account_update','last_owner_update','last_post','last_root_post','last_vote_time','next_vesting_withdrawal','savings_sbd_last_interest_payment','savings_sbd_seconds_last_update','sbd_last_interest_payment','sbd_seconds_last_update']:
-            account[key] = datetime.strptime(account[key], "%Y-%m-%dT%H:%M:%S")
-        # Combine Savings + Balance
-        account['total_balance'] = account['balance'] + account['savings_balance']
-        account['total_sbd_balance'] = account['sbd_balance'] + account['savings_sbd_balance']
-        # Update our current info about the account
-        mvest_per_account.update({account['name']: account['vesting_shares']})
-        # Save current state of account
-        account['scanned'] = datetime.now()
-        db.account.update({'_id': user}, account, upsert=True)
-        # Create our Snapshot dict
-        wanted_keys = ['name', 'proxy_witness', 'activity_shares', 'average_bandwidth', 'average_market_bandwidth', 'savings_balance', 'balance', 'comment_count', 'curation_rewards', 'lifetime_bandwidth', 'lifetime_vote_count', 'next_vesting_withdrawal', 'reputation', 'post_bandwidth', 'post_count', 'posting_rewards', 'sbd_balance', 'savings_sbd_balance', 'sbd_last_interest_payment', 'sbd_seconds', 'sbd_seconds_last_update', 'to_withdraw', 'vesting_balance', 'vesting_shares', 'vesting_withdraw_rate', 'voting_power', 'withdraw_routes', 'withdrawn', 'witnesses_voted_for']
-        snapshot = dict((k, account[k]) for k in wanted_keys if k in account)
-        snapshot.update({
-          'account': user,
-          'date': today,
-          'followers': len(account['followers']),
-          'following': len(account['following']),
-        })
-        # Save Snapshot in Database
-        db.account_history.update({
-          'account': user,
-          'date': today
-        }, snapshot, upsert=True)
-        print(log_tag + 'finish user: ', user)
+        db.account.bulk_write(operations)
+        db.account_history.bulk_write(operations)
+
     pprint(log_tag + "history update finish")
 
 def update_stats():
-  pprint(log_tag + "updating stats");
-  # Calculate Transactions
-  results = db.block_30d.aggregate([
-    {
-      '$sort': {
-        '_id': -1
-      }
-    },
-    {
-      '$limit': 28800 * 1
-    },
-    {
-      '$unwind': '$transactions'
-    },
-    {
-      '$group': {
-        '_id': '24h',
-        'tx': {
-          '$sum': 1
-        }
-      }
-    }
-  ])
-  data = list(results)[0]['tx']
-  db.status.update({'_id': 'transactions-24h'}, {'$set': {'data' : data}}, upsert=True)
-  now = datetime.now().date()
-  today = datetime.combine(now, datetime.min.time())
-  db.tx_history.update({
-    'timeframe': '24h',
-    'date': today
-  }, {'$set': {'data': data}}, upsert=True)
-
-  results = db.block_30d.aggregate([
-    {
-      '$sort': {
-        '_id': -1
-      }
-    },
-    {
-      '$limit': 1200 * 1
-    },
-    {
-      '$unwind': '$transactions'
-    },
-    {
-      '$group': {
-        '_id': '1h',
-        'tx': {
-          '$sum': 1
-        }
-      }
-    }
-  ])
-  db.status.update({'_id': 'transactions-1h'}, {'$set': {'data' : list(results)[0]['tx']}}, upsert=True)
-
-  # Calculate Operations
-  results = db.block_30d.aggregate([
-    {
-      '$sort': {
-        '_id': -1
-      }
-    },
-    {
-      '$limit': 28800 * 1
-    },
-    {
-      '$unwind': '$transactions'
-    },
-    {
-      '$group': {
-        '_id': '24h',
-        'tx': {
-          '$sum': {
-            '$size': '$transactions.operations'
-          }
-        }
-      }
-    }
-  ])
-  data = list(results)[0]['tx']
-  db.status.update({'_id': 'operations-24h'}, {'$set': {'data' : data}}, upsert=True)
-  now = datetime.now().date()
-  today = datetime.combine(now, datetime.min.time())
-  db.op_history.update({
-    'timeframe': '24h',
-    'date': today
-  }, {'$set': {'data': data}}, upsert=True)
-
-  results = db.block_30d.aggregate([
-    {
-      '$sort': {
-        '_id': -1
-      }
-    },
-    {
-      '$limit': 1200 * 1
-    },
-    {
-      '$unwind': '$transactions'
-    },
-    {
-      '$group': {
-        '_id': '1h',
-        'tx': {
-          '$sum': {
-            '$size': '$transactions.operations'
-          }
-        }
-      }
-    }
-  ])
-  db.status.update({'_id': 'operations-1h'}, {'$set': {'data' : list(results)[0]['tx']}}, upsert=True)
-
-
-def update_clients():
-  try:
-    pprint(log_tag + "updating clients");
-    start = datetime.today() - timedelta(days=90)
-    end = datetime.today()
-    regx = re.compile("([\w-]+\/[\w.]+)", re.IGNORECASE)
-    results = db.comment.aggregate([
-      {
-        '$match': {
-          'created': {
-            '$gte': start,
-            '$lte': end,
-          },
-          'json_metadata.app': {
-            '$type': 'string',
-            '$regex': regx,
-          }
-        }
-      },
-      {
-        '$project': {
-          'created': '$created',
-          'parts': {
-            '$split': ['$json_metadata.app', '/']
-          },
-          'reward': {
-            '$add': ['$total_payout_value', '$pending_payout_value', '$total_pending_payout_value']
-          }
-        }
-      },
-      {
-        '$group': {
-          '_id': {
-            'client': {'$arrayElemAt': ['$parts', 0]},
-            'doy': {'$dayOfYear': '$created'},
-            'year': {'$year': '$created'},
-            'month': {'$month': '$created'},
-            'day': {'$dayOfMonth': '$created'},
-            'dow': {'$dayOfWeek': '$created'},
-          },
-          'reward': {'$sum': '$reward'},
-          'value': {'$sum': 1}
-        }
-      },
-      {
-        '$sort': {
-          '_id.year': 1,
-          '_id.doy': 1,
-          'value': -1,
-        }
-      },
-      {
-        '$group': {
-          '_id': {
-            'doy': '$_id.doy',
-            'year': '$_id.year',
-            'month': '$_id.month',
-            'day': '$_id.day',
-            'dow': '$_id.dow',
-          },
-          'clients': {
-            '$push': {
-              'client': '$_id.client',
-              'count': '$value',
-              'reward': '$reward'
+    pprint(log_tag + "updating stats")
+    results = db.block_30d.aggregate([
+        {
+            '$sort': {
+                '_id': -1
             }
-          },
-          'reward' : {
-            '$sum': '$reward'
-          },
-          'total': {
-            '$sum': '$value'
-          }
+        },
+        {
+            '$limit': 28800 * 1
+        },
+        {
+            '$unwind': '$transactions'
+        },
+        {
+            '$group': {
+                '_id': '24h',
+                'tx': {
+                    '$sum': 1
+                }
+            }
         }
-      },
-      {
-        '$sort': {
-          '_id.year': -1,
-          '_id.doy': -1
-        }
-      },
     ])
-    pprint(log_tag + "complete")
-    sys.stdout.flush()
-    data = list(results)
-    db.status.update({'_id': 'clients-snapshot'}, {'$set': {'data' : data}}, upsert=True)
+    data = list(results)[0]['tx']
+    db.status.update_one({'_id': 'transactions-24h'}, {'$set': {'data': data}}, upsert=True)
     now = datetime.now().date()
     today = datetime.combine(now, datetime.min.time())
-    db.clients_history.update({
-      'date': today
+    db.tx_history.update_one({
+        'timeframe': '24h',
+        'date': today
     }, {'$set': {'data': data}}, upsert=True)
-    pass
-  except Exception as e:
-    pass
 
+    results = db.block_30d.aggregate([
+        {
+            '$sort': {
+                '_id': -1
+            }
+        },
+        {
+            '$limit': 1200 * 1
+        },
+        {
+            '$unwind': '$transactions'
+        },
+        {
+            '$group': {
+                '_id': '1h',
+                'tx': {
+                    '$sum': 1
+                }
+            }
+        }
+    ])
+    db.status.update_one({'_id': 'transactions-1h'}, {'$set': {'data': list(results)[0]['tx']}}, upsert=True)
+
+    results = db.block_30d.aggregate([
+        {
+            '$sort': {
+                '_id': -1
+            }
+        },
+        {
+            '$limit': 28800 * 1
+        },
+        {
+            '$unwind': '$transactions'
+        },
+        {
+            '$group': {
+                '_id': '24h',
+                'tx': {
+                    '$sum': {
+                        '$size': '$transactions.operations'
+                    }
+                }
+            }
+        }
+    ])
+    data = list(results)[0]['tx']
+    db.status.update_one({'_id': 'operations-24h'}, {'$set': {'data': data}}, upsert=True)
+    db.op_history.update_one({
+        'timeframe': '24h',
+        'date': today
+    }, {'$set': {'data': data}}, upsert=True)
+
+    results = db.block_30d.aggregate([
+        {
+            '$sort': {
+                '_id': -1
+            }
+        },
+        {
+            '$limit': 1200 * 1
+        },
+        {
+            '$unwind': '$transactions'
+        },
+        {
+            '$group': {
+                '_id': '1h',
+                'tx': {
+                    '$sum': {
+                        '$size': '$transactions.operations'
+                    }
+                }
+            }
+        }
+    ])
+    db.status.update_one({'_id': 'operations-1h'}, {'$set': {'data': list(results)[0]['tx']}}, upsert=True)
+
+def update_clients():
+    try:
+        pprint(log_tag + "updating clients")
+        start = datetime.today() - timedelta(days=90)
+        end = datetime.today()
+        regx = re.compile("([\w-]+\/[\w.]+)", re.IGNORECASE)
+        results = db.comment.aggregate([
+            {
+                '$match': {
+                    'created': {
+                        '$gte': start,
+                        '$lte': end,
+                    },
+                    'json_metadata.app': {
+                        '$type': 'string',
+                        '$regex': regx,
+                    }
+                }
+            },
+            {
+                '$project': {
+                    'created': '$created',
+                    'parts': {
+                        '$split': ['$json_metadata.app', '/']
+                    },
+                    'reward': {
+                        '$add': ['$total_payout_value', '$pending_payout_value', '$total_pending_payout_value']
+                    }
+                }
+            },
+            {
+                '$group': {
+                    '_id': {
+                        'client': {'$arrayElemAt': ['$parts', 0]},
+                        'doy': {'$dayOfYear': '$created'},
+                        'year': {'$year': '$created'},
+                        'month': {'$month': '$created'},
+                        'day': {'$dayOfMonth': '$created'},
+                        'dow': {'$dayOfWeek': '$created'},
+                    },
+                    'reward': {'$sum': '$reward'},
+                    'value': {'$sum': 1}
+                }
+            },
+            {
+                '$sort': {
+                    '_id.year': 1,
+                    '_id.doy': 1,
+                    'value': -1,
+                }
+            },
+            {
+                '$group': {
+                    '_id': {
+                        'doy': '$_id.doy',
+                        'year': '$_id.year',
+                        'month': '$_id.month',
+                        'day': '$_id.day',
+                        'dow': '$_id.dow',
+                    },
+                    'clients': {
+                        '$push': {
+                            'client': '$_id.client',
+                            'count': '$value',
+                            'reward': '$reward'
+                        }
+                    },
+                    'reward': {'$sum': '$reward'},
+                    'total': {'$sum': '$value'}
+                }
+            },
+            {
+                '$sort': {
+                    '_id.year': -1,
+                    '_id.doy': -1
+                }
+            },
+        ])
+        pprint(log_tag + "complete")
+        sys.stdout.flush()
+        data = list(results)
+        db.status.update_one({'_id': 'clients-snapshot'}, {'$set': {'data': data}}, upsert=True)
+        now = datetime.now().date()
+        today = datetime.combine(now, datetime.min.time())
+        db.clients_history.update_one({
+            'date': today
+        }, {'$set': {'data': data}}, upsert=True)
+    except Exception as e:
+        print(log_tag + "Error updating clients: ", str(e))
 
 if __name__ == '__main__':
-    pprint(log_tag + "starting");
-    # Load all account data into memory
-
-    # Start job immediately
+    pprint(log_tag + "starting")
     update_clients()
     update_props_history()
     load_accounts()
@@ -438,13 +373,11 @@ if __name__ == '__main__':
     update_history()
     sys.stdout.flush()
 
-    # Schedule it to run every 6 hours
     scheduler = BackgroundScheduler()
     scheduler.add_job(update_history, 'interval', hours=24, id='update_history')
     scheduler.add_job(update_clients, 'interval', hours=1, id='update_clients')
     scheduler.add_job(update_stats, 'interval', minutes=5, id='update_stats')
     scheduler.start()
-    # Loop
     try:
         while True:
             time.sleep(2)
