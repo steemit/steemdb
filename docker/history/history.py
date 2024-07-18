@@ -6,6 +6,7 @@ from steem import Steem
 from pymongo import MongoClient, UpdateOne
 from pprint import pprint
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import re  # Importing re for regular expressions
 from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -367,7 +368,7 @@ def update_clients():
             'date': today
         }, {'$set': {'data': data}}, upsert=True)
     except Exception as e:
-        logger.error(log_tag + "Error updating clients: ", str(e))
+        logger.error(log_tag + "Error updating clients: %s", str(e))
 
 if __name__ == '__main__':
     logger.info(log_tag + "starting")
