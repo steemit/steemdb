@@ -6,7 +6,8 @@ from steem import Steem
 from pymongo import MongoClient, UpdateOne
 from pprint import pprint
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import re  # Importing re for regular expressions
+import re
+import sys  # Importing sys for sys.stdout.flush()
 from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
 
