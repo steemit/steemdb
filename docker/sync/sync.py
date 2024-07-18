@@ -1,14 +1,18 @@
 import os
 import time
 import json
-import sys  # Importing sys module
+import sys
 from datetime import datetime, timedelta
 from steem import Steem
 from pymongo import MongoClient
 from pprint import pprint
 import requests
+import logging
 
 log_tag = '[Sync] '
+
+# Configure logging
+logging.basicConfig(filename='error.log', level=logging.ERROR)
 
 # Load configuration from config.json
 config_path = 'config.json'
@@ -77,7 +81,10 @@ def process_op(op_obj, block, blockid):
         elif op_type == "fill_vesting_withdraw":
             save_vesting_withdraw(op, block, blockid)
     except Exception as e:
-        print(f"{log_tag}Error processing operation {op_type}: {e}")
+        error_message = f"{log_tag}Error processing operation {op_type}: {e}"
+        print(error_message)
+        logging.error(error_message)
+        sys.exit(1)  # Stop the script
     finally:
         process_op_time.append(time.perf_counter() - process_op_start_time)
 
@@ -557,23 +564,23 @@ flush_time2: [%f, %s%%]'
                     pprint(log_tag + "[STEEM] - Starting Block #" + str(last_block))
                     flush_start_time1 = time.perf_counter()
                     sys.stdout.flush()
-                    flush_time1 = time.perf_counter() - flush_start_time1
+                    flush_time1 = time.perf.counter() - flush_start_time1
 
-                    get_block_start_time = time.perf_counter()
-                    get_block_time = time.perf_counter() - get_block_start_time
+                    get_block_start_time = time.perf.counter()
+                    get_block_time = time.perf.counter() - get_block_start_time
 
-                    process_block_start_time = time.perf_counter()
+                    process_block_start_time = time.perf.counter()
                     process_block(block, last_block)
-                    process_block_time = time.perf_counter() - process_block_start_time
+                    process_block_time = time.perf.counter() - process_block_start_time
 
                     db.status.update_one({'_id': 'height'}, {"$set": {'value': last_block}}, upsert=True)
                     pprint(log_tag + "[STEEM] - Processed up to Block #" + str(last_block))
 
-                    flush_start_time2 = time.perf_counter()
+                    flush_start_time2 = time.perf.counter()
                     sys.stdout.flush()
-                    flush_time2 = time.perf_counter() - flush_start_time2
+                    flush_time2 = time.perf.counter() - flush_start_time2
 
-                    total_time = time.perf_counter() - total_start_time
+                    total_time = time.perf.counter() - total_start_time
                     print(log_tag + '[TEST Time] Total time: [%f], \
 get_block time: [%f, %s%%], \
 process_block time: [%f, %s%%], \
