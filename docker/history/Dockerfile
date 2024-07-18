@@ -10,7 +10,7 @@ RUN apt-get update && \
 RUN pip install steem pymongo apscheduler requests tenacity
 
 # Copy the application code into the container
-COPY ./docker/history /src
+COPY . /src
 
 
 
