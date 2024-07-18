@@ -7,7 +7,8 @@ from pymongo import MongoClient, UpdateOne
 from pprint import pprint
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import re
-import sys  # Importing sys for sys.stdout.flush()
+import sys
+import collections  # Importing collections for OrderedDict
 from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -21,14 +22,14 @@ log_tag = '[History] '
 with open('config.json') as config_file:
     config = json.load(config_file)
 
-steemd_url = config.get('STEEMD_URL', 'https://api.steemit.com')
+steemd_urls = config.get('STEEMD_URLS', ['https://api.steemit.com'])
 mongodb_url = config.get('MONGODB')
 if not mongodb_url:
     logger.error(log_tag + 'NEED MONGODB')
     exit()
 
-fullnodes = [steemd_url]
-rpc = Steem(fullnodes)
+# Initialize Steem client
+rpc = Steem(steemd_urls)
 mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
@@ -119,8 +120,8 @@ def update_tx_history():
 @retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(5), retry=retry_if_exception_type(Exception))
 def get_batch_account_details(accounts):
     batch_data = [{"jsonrpc": "2.0", "method": "condenser_api.get_accounts", "params": [accounts], "id": i+1} for i, account in enumerate(accounts)]
-    response = steem_batch_request(steemd_url, batch_data)
-    return [res['result'][0] for res in response]
+    response = steem_batch_request(rpc.nodes[0], batch_data)  # Use the first node
+    return [res['result'][0] for res in response if 'result' in res]
 
 def process_account_details(account):
     account_data = collections.OrderedDict(sorted(account.items()))
