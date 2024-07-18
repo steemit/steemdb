@@ -1,15 +1,17 @@
+import logging
+import json
+import requests
 from datetime import datetime, timedelta
 from steem import Steem
 from pymongo import MongoClient, UpdateOne
 from pprint import pprint
-import collections
-import time
-import sys
-import os
-import json
-import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 log_tag = '[History] '
 
@@ -20,7 +22,7 @@ with open('config.json') as config_file:
 steemd_url = config.get('STEEMD_URL', 'https://api.steemit.com')
 mongodb_url = config.get('MONGODB')
 if not mongodb_url:
-    print(log_tag + 'NEED MONGODB')
+    logger.error(log_tag + 'NEED MONGODB')
     exit()
 
 fullnodes = [steemd_url]
@@ -34,17 +36,19 @@ def steem_batch_request(url, batch_data):
     headers = {
         'Content-Type': 'application/json',
     }
+    logger.info("Requesting: %s", json.dumps(batch_data))
     response = requests.post(url, headers=headers, data=json.dumps(batch_data))
+    logger.info("Response: %s", response.text)
     return response.json()
 
 def load_accounts():
-    pprint(log_tag + "[STEEM] - Loading mvest per account")
+    logger.info(log_tag + "[STEEM] - Loading mvest per account")
     for account in db.account.find():
         if "name" in account.keys():
             mvest_per_account.update({account['name']: account['vesting_shares']})
 
 def update_fund_history():
-    pprint(log_tag + "[STEEM] - Update Fund History")
+    logger.info(log_tag + "[STEEM] - Update Fund History")
 
     fund = rpc.get_reward_fund('post')
     for key in ['recent_claims', 'content_constant']:
@@ -57,7 +61,7 @@ def update_fund_history():
     db.funds_history.insert_one(fund)
 
 def update_props_history():
-    pprint(log_tag + "[STEEM] - Update Global Properties")
+    logger.info(log_tag + "[STEEM] - Update Global Properties")
 
     props = rpc.get_dynamic_global_properties()
 
@@ -91,7 +95,7 @@ def update_props_history():
     db.props_history.insert_one(props)
 
 def update_tx_history():
-    pprint(log_tag + "[STEEM] - Update Transaction History")
+    logger.info(log_tag + "[STEEM] - Update Transaction History")
     now = datetime.now().date()
 
     today = datetime.combine(now, datetime.min.time())
@@ -105,11 +109,12 @@ def update_tx_history():
     }
     count = db.block_30d.count_documents(query)
 
-    pprint(log_tag + str(count))
-    pprint(log_tag + str(now))
-    pprint(log_tag + str(today))
-    pprint(log_tag + str(yesterday))
+    logger.info(log_tag + str(count))
+    logger.info(log_tag + str(now))
+    logger.info(log_tag + str(today))
+    logger.info(log_tag + str(yesterday))
 
+@retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(5), retry=retry_if_exception_type(Exception))
 def get_batch_account_details(accounts):
     batch_data = [{"jsonrpc": "2.0", "method": "condenser_api.get_accounts", "params": [accounts], "id": i+1} for i, account in enumerate(accounts)]
     response = steem_batch_request(steemd_url, batch_data)
@@ -162,10 +167,10 @@ def update_history():
         db.account.bulk_write(operations)
         db.account_history.bulk_write(operations)
 
-    pprint(log_tag + "history update finish")
+    logger.info(log_tag + "history update finish")
 
 def update_stats():
-    pprint(log_tag + "updating stats")
+    logger.info(log_tag + "updating stats")
     results = db.block_30d.aggregate([
         {
             '$sort': {
@@ -276,7 +281,7 @@ def update_stats():
 
 def update_clients():
     try:
-        pprint(log_tag + "updating clients")
+        logger.info(log_tag + "updating clients")
         start = datetime.today() - timedelta(days=90)
         end = datetime.today()
         regx = re.compile("([\w-]+\/[\w.]+)", re.IGNORECASE)
@@ -352,7 +357,7 @@ def update_clients():
                 }
             },
         ])
-        pprint(log_tag + "complete")
+        logger.info(log_tag + "complete")
         sys.stdout.flush()
         data = list(results)
         db.status.update_one({'_id': 'clients-snapshot'}, {'$set': {'data': data}}, upsert=True)
@@ -362,10 +367,10 @@ def update_clients():
             'date': today
         }, {'$set': {'data': data}}, upsert=True)
     except Exception as e:
-        print(log_tag + "Error updating clients: ", str(e))
+        logger.error(log_tag + "Error updating clients: ", str(e))
 
 if __name__ == '__main__':
-    pprint(log_tag + "starting")
+    logger.info(log_tag + "starting")
     update_clients()
     update_props_history()
     load_accounts()
