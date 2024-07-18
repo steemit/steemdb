@@ -12,8 +12,7 @@ RUN pip install steem pymongo apscheduler requests tenacity
 # Copy the application code into the container
 COPY ./docker/history /src
 
-# Add the CA bundle for RDS
-ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
+
 
 # Copy config.json into the container
 COPY ./config.json /src/config.json
