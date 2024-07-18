@@ -1,10 +1,17 @@
-FROM python:3.6.2-slim
+# Use an official Python runtime as a parent image
+FROM python:3.9-slim
 
+# Set the working directory
+WORKDIR /src
+
+# Install dependencies
 RUN apt-get update && apt-get install -y make gcc libssl-dev
 
-RUN pip3 install steem pymongo
+# Install Python dependencies
+RUN pip install steem pymongo requests
 
-COPY ./docker/sync /src
-ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
+# Copy the current directory contents into the container at /src
+COPY . /src
 
+# Run sync.py when the container launches
 CMD ["python", "/src/sync.py"]
