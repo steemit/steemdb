@@ -11,6 +11,7 @@ import sys
 import collections  # Importing collections for OrderedDict
 from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
+import itertools
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,8 +29,10 @@ if not mongodb_url:
     logger.error(log_tag + 'NEED MONGODB')
     exit()
 
-# Initialize Steem client
+# Initialize Steem client with cycling nodes
 rpc = Steem(steemd_urls)
+rpc.nodes = itertools.cycle(steemd_urls)
+
 mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
@@ -120,7 +123,8 @@ def update_tx_history():
 @retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(5), retry=retry_if_exception_type(Exception))
 def get_batch_account_details(accounts):
     batch_data = [{"jsonrpc": "2.0", "method": "condenser_api.get_accounts", "params": [accounts], "id": i+1} for i, account in enumerate(accounts)]
-    response = steem_batch_request(rpc.nodes[0], batch_data)  # Use the first node
+    current_node = next(rpc.nodes)  # Get the current node from the cycle
+    response = steem_batch_request(current_node, batch_data)
     return [res['result'][0] for res in response if 'result' in res]
 
 def process_account_details(account):
@@ -141,34 +145,49 @@ def update_history():
     update_fund_history()
     update_props_history()
 
-    users = rpc.lookup_accounts(-1, 1000)
-    more = True
-    while more:
-        newUsers = rpc.lookup_accounts(users[-1], 1000)
-        if len(newUsers) < 1000:
-            more = False
-        users = users + newUsers
+    users = []
+    try:
+        users = rpc.lookup_accounts(-1, 1000)
+        more = True
+        while more:
+            newUsers = rpc.lookup_accounts(users[-1], 1000)
+            if len(newUsers) < 1000:
+                more = False
+            users = users + newUsers
+    except Exception as e:
+        logger.error(f"{log_tag}Error fetching accounts: {str(e)}")
 
     batch_size = 50
     for i in range(0, len(users), batch_size):
         batch_users = users[i:i+batch_size]
-        account_details = get_batch_account_details(batch_users)
+        try:
+            account_details = get_batch_account_details(batch_users)
+        except Exception as e:
+            logger.error(f"{log_tag}Error fetching account details for batch {batch_users}: {str(e)}")
+            continue
 
         operations = []
         for account in account_details:
-            account_data = process_account_details(account)
-            operations.append(UpdateOne({'_id': account_data['name']}, {'$set': account_data}, upsert=True))
-            
-            wanted_keys = ['name', 'proxy_witness', 'activity_shares', 'average_bandwidth', 'average_market_bandwidth', 'savings_balance', 'balance', 'comment_count', 'curation_rewards', 'lifetime_bandwidth', 'lifetime_vote_count', 'next_vesting_withdrawal', 'reputation', 'post_bandwidth', 'post_count', 'posting_rewards', 'sbd_balance', 'savings_sbd_balance', 'sbd_last_interest_payment', 'sbd_seconds', 'sbd_seconds_last_update', 'to_withdraw', 'vesting_balance', 'vesting_shares', 'vesting_withdraw_rate', 'voting_power', 'withdraw_routes', 'withdrawn', 'witnesses_voted_for']
-            snapshot = dict((k, account_data[k]) for k in wanted_keys if k in account_data)
-            snapshot.update({
-                'account': account_data['name'],
-                'date': datetime.combine(datetime.now().date(), datetime.min.time()),
-            })
-            operations.append(UpdateOne({'account': account_data['name'], 'date': datetime.combine(datetime.now().date(), datetime.min.time())}, {'$set': snapshot}, upsert=True))
+            try:
+                account_data = process_account_details(account)
+                operations.append(UpdateOne({'_id': account_data['name']}, {'$set': account_data}, upsert=True))
 
-        db.account.bulk_write(operations)
-        db.account_history.bulk_write(operations)
+                wanted_keys = ['name', 'proxy_witness', 'activity_shares', 'average_bandwidth', 'average_market_bandwidth', 'savings_balance', 'balance', 'comment_count', 'curation_rewards', 'lifetime_bandwidth', 'lifetime_vote_count', 'next_vesting_withdrawal', 'reputation', 'post_bandwidth', 'post_count', 'posting_rewards', 'sbd_balance', 'savings_sbd_balance', 'sbd_last_interest_payment', 'sbd_seconds', 'sbd_seconds_last_update', 'to_withdraw', 'vesting_balance', 'vesting_shares', 'vesting_withdraw_rate', 'voting_power', 'withdraw_routes', 'withdrawn', 'witnesses_voted_for']
+                snapshot = dict((k, account_data[k]) for k in wanted_keys if k in account_data)
+                snapshot.update({
+                    'account': account_data['name'],
+                    'date': datetime.combine(datetime.now().date(), datetime.min.time()),
+                })
+                operations.append(UpdateOne({'account': account_data['name'], 'date': datetime.combine(datetime.now().date(), datetime.min.time())}, {'$set': snapshot}, upsert=True))
+            except Exception as e:
+                logger.error(f"{log_tag}Error processing account {account['name']}: {str(e)}")
+                continue
+
+        try:
+            db.account.bulk_write(operations)
+            db.account_history.bulk_write(operations)
+        except Exception as e:
+            logger.error(f"{log_tag}Error writing to MongoDB: {str(e)}")
 
     logger.info(log_tag + "history update finish")
 
