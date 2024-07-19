@@ -44,7 +44,7 @@ The script also supports configuration via environment variables, which can be s
 
 3. Run the Docker container with environment variables (if not using `config.json`):
    ```sh
-   docker run -d --name steem-history      -e STEEMD_URLS="http://10.10.100.12:8080"      -e MONGODB="mongodb://10.10.100.30:27017"      steem-history
+   docker run -d --name steem-history -e STEEMD_URLS="http://10.10.100.12:8080" -e MONGODB="mongodb://10.10.100.30:27017" steem-history
    ```
 
 4. Run the Docker Contaner with copied config.json 
