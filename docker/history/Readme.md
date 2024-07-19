@@ -24,6 +24,11 @@ Create a `config.json` file in the root directory with the following structure:
 }
 ```
 
+The script also supports configuration via environment variables, which can be specified when running the Docker container:
+
+- `STEEMD_URLS`: A comma-separated list of Steem node URLs.
+- `MONGODB`: The MongoDB connection string.
+
 ## 🚀 Installation
 
 1. Clone the repository:
@@ -37,9 +42,9 @@ Create a `config.json` file in the root directory with the following structure:
    docker build -t steem-history .
    ```
 
-3. Run the Docker container:
+3. Run the Docker container with environment variables (if not using `config.json`):
    ```sh
-   docker run -d --name steem-history steem-history
+   docker run -d --name steem-history      -e STEEMD_URLS="http://10.10.100.12:8080"      -e MONGODB="mongodb://10.10.100.30:27017"      steem-history
    ```
 
 ## 📚 Usage
