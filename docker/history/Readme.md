@@ -47,6 +47,12 @@ The script also supports configuration via environment variables, which can be s
    docker run -d --name steem-history      -e STEEMD_URLS="http://10.10.100.12:8080"      -e MONGODB="mongodb://10.10.100.30:27017"      steem-history
    ```
 
+4. Run the Docker Contaner with copied config.json 
+
+```sh
+docker run -d --name name steem-history steem-history
+```
+
 ## 📚 Usage
 The script performs the following tasks:
 1. Updates client information.
