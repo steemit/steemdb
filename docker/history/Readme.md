@@ -1,3 +1,4 @@
+
 # Steem Account Data Updater
 
 This repository contains a script to update and maintain Steem account data and related properties in MongoDB. It fetches data from the Steem blockchain and stores it in MongoDB, running scheduled updates to keep the data current.
@@ -21,3 +22,43 @@ Create a `config.json` file in the root directory with the following structure:
     "STEEMD_URLS": ["https://api.steemit.com"],
     "MONGODB": "your_mongodb_connection_string"
 }
+```
+
+## Installation
+
+1. Clone the repository:
+   ```sh
+   git clone https://github.com/your-repo/steem-account-updater.git
+   cd steem-account-updater
+   ```
+
+2. Build the Docker image:
+   ```sh
+   docker build -t steem-history .
+   ```
+
+3. Run the Docker container:
+   ```sh
+   docker run -d --name steem-history steem-history
+   ```
+
+## Usage
+The script performs the following tasks:
+1. Updates client information.
+2. Updates global properties.
+3. Loads mvest per account.
+4. Updates transaction history.
+5. Processes and inserts account details into MongoDB.
+
+Logs can be monitored using:
+```sh
+docker logs --follow steem-history
+```
+
+## Contributing
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+Please ensure that you update tests as appropriate.
+
+## License
+[MIT](https://choosealicense.com/licenses/mit/)
