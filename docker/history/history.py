@@ -12,6 +12,7 @@ import collections  # Importing collections for OrderedDict
 from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
 import itertools
+import os  # Import os module to read environment variables
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -19,12 +20,17 @@ logger = logging.getLogger(__name__)
 
 log_tag = '[History] '
 
-# Load configuration from config.json
-with open('config.json') as config_file:
-    config = json.load(config_file)
+# Load configuration from config.json if it exists, otherwise from environment variables
+try:
+    with open('config.json') as config_file:
+        config = json.load(config_file)
+    steemd_urls = config.get('STEEMD_URLS', ['https://api.steemit.com'])
+    mongodb_url = config.get('MONGODB')
+except FileNotFoundError:
+    logger.warning(log_tag + 'config.json not found, falling back to environment variables')
+    steemd_urls = os.getenv('STEEMD_URLS', 'https://api.steemit.com').split(',')
+    mongodb_url = os.getenv('MONGODB')
 
-steemd_urls = config.get('STEEMD_URLS', ['https://api.steemit.com'])
-mongodb_url = config.get('MONGODB')
 if not mongodb_url:
     logger.error(log_tag + 'NEED MONGODB')
     exit()
