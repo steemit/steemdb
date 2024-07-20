@@ -54,7 +54,7 @@ Alternatively, configure via environment variables when running the Docker conta
 
 5. Run the Docker container with `config.json`:
    ```sh
-   docker run -d --name steem-history -v $(pwd)/config.json:/app/config.json steem-history
+   docker run -d --name steem-history -v $(pwd)/config.json:/src/config.json steem-history
    ```
 
 ## 📚 Usage
