@@ -564,23 +564,23 @@ flush_time2: [%f, %s%%]'
                     pprint(log_tag + "[STEEM] - Starting Block #" + str(last_block))
                     flush_start_time1 = time.perf_counter()
                     sys.stdout.flush()
-                    flush_time1 = time.perf.counter() - flush_start_time1
+                    flush_time1 = time.perf_counter() - flush_start_time1
 
-                    get_block_start_time = time.perf.counter()
-                    get_block_time = time.perf.counter() - get_block_start_time
+                    get_block_start_time = time.perf_counter()
+                    get_block_time = time.perf_counter() - get_block_start_time
 
-                    process_block_start_time = time.perf.counter()
+                    process_block_start_time = time.perf_counter()
                     process_block(block, last_block)
-                    process_block_time = time.perf.counter() - process_block_start_time
+                    process_block_time = time.perf_counter() - process_block_start_time
 
                     db.status.update_one({'_id': 'height'}, {"$set": {'value': last_block}}, upsert=True)
                     pprint(log_tag + "[STEEM] - Processed up to Block #" + str(last_block))
 
-                    flush_start_time2 = time.perf.counter()
+                    flush_start_time2 = time.perf_counter()
                     sys.stdout.flush()
-                    flush_time2 = time.perf.counter() - flush_start_time2
+                    flush_time2 = time.perf_counter() - flush_start_time2
 
-                    total_time = time.perf.counter() - total_start_time
+                    total_time = time.perf_counter() - total_start_time
                     print(log_tag + '[TEST Time] Total time: [%f], \
 get_block time: [%f, %s%%], \
 process_block time: [%f, %s%%], \
