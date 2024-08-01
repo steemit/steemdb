@@ -13,6 +13,7 @@ from multiprocessing import Pool
 from apscheduler.schedulers.background import BackgroundScheduler
 import itertools
 import os  # Import os module to read environment variables
+import time  # Importing time module
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
