@@ -408,10 +408,12 @@ def update_queue():
         'created': {'$gt': max_date},
         'scanned': {'$lt': scan_ignore},
     }).sort('scanned', 1).limit(queue_length)
-    print(f"{log_tag}[Queue] Comments - {queue_length} of {db.comment.count_documents({
+    total_comments = db.comment.count_documents({
         'created': {'$gt': max_date},
         'scanned': {'$lt': scan_ignore}
-    })}")
+    })
+    print(f"{log_tag}[Queue] Comments - {queue_length} of {total_comments}")
+
     for item in queue:
         update_comment(item['author'], item['permlink'])
 
@@ -421,18 +423,22 @@ def update_queue():
         'depth': 0,
         'pending_payout_value': {'$gt': 0}
     }).limit(queue_length)
-    print(f"{log_tag}[Queue] Past Payouts - {queue_length} of {db.comment.count_documents({
+
+    total_past_payouts = db.comment.count_documents({
         'cashout_time': {'$lt': datetime.now()},
         'mode': {'$in': ['first_payout', 'second_payout']},
         'depth': 0,
         'pending_payout_value': {'$gt': 0}
-    })}")
+    })
+    print(f"{log_tag}[Queue] Past Payouts - {queue_length} of {total_past_payouts}")
+
     for item in queue:
         update_comment(item['author'], item['permlink'])
 
     queue_length = 20
     queue = db.account.find({'_dirty': True}).limit(queue_length)
-    print(f"{log_tag}[Queue] Updating Accounts - {queue_length} of {db.account.count_documents({'_dirty': True})}")
+    total_accounts = db.account.count_documents({'_dirty': True})
+    print(f"{log_tag}[Queue] Updating Accounts - {queue_length} of {total_accounts}")
     for item in queue:
         update_account(item['_id'])
     print(f"{log_tag}[Queue] Done")
