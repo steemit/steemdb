@@ -1,5 +1,5 @@
 {
-    "STEEMD_URL": "http://10.10.100.12:8080",
-    "MONGODB": "mongodb://10.10.100.30:27017/"
-  }
+    "STEEMD_URLS": ["https://api.steemit.com"],
+    "MONGODB": "your_mongodb_connection_string"
+}
   
