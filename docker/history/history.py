@@ -49,7 +49,7 @@ def steem_batch_request(url, batch_data):
     headers = {
         'Content-Type': 'application/json',
     }
-    logger.info("Requesting: %s", json.dumps(batch_data))
+    # logger.info("Requesting: %s", json.dumps(batch_data))
     response = requests.post(url, headers=headers, data=json.dumps(batch_data))
     # logger.info("Response: %s", response.text)
     return response.json()
