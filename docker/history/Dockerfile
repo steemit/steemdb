@@ -17,4 +17,4 @@ COPY . /src
 WORKDIR /src
 
 # Command to run the application
-CMD ["python", "history.py"]
+CMD ["python", "/src/history.py"]
