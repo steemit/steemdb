@@ -1,9 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Node.js
+node_modules/
+
+# Cache directories (with exceptions)
 cache/*
 !cache/.gitkeep
 !cache/volt
 cache/volt/*
 !cache/volt/.gitkeep
+
+# Vendor directory (with exception)
 vendor/*
 !vendor/.gitkeep
+
+# Logs (with exception)
 logs/*
 !logs/.gitkeep
+
+# Other common exclusions
+.DS_Store
+.idea/
+.vscode/
+.env
+*.env

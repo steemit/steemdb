@@ -1,0 +1,24 @@
+services:
+  BlazeAPI:
+    image: python:3.9.6-slim
+    container_name: BlazeAPI
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "7060:8000"
+    command: >
+      sh -c "apt-get update && 
+             apt-get install -y git make gcc libssl-dev libgmp-dev python-dev libxml2-dev libxslt1-dev zlib1g-dev &&
+             pip install -r requirements.txt &&
+             uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
