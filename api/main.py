@@ -23,7 +23,7 @@ from api.state import router as state_router
 CACHE_RULES = {
     "/blocks/getBlockDetails": 300,  # 5 minutes 
     "/blocks/getBlocks": None,       # Skip caching
-    
+    "/state/getTPS": 21600, 	     # 1 Day Caching
 }
 
 

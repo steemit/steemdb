@@ -1,56 +1,1 @@
-
-db.createCollection("block_30d", {capped: true, max: 864000, size: 2147483648});
-
-db.comment.createIndex({parent_permlink: 1});
-
-db.comment.createIndex({scanned: 1, created: 1});
-
-db.comment.createIndex({depth: 1, created: 1});
-
-db.comment.createIndex({author: 1, depth: 1, created: 1});
-
-db.comment.createIndex({pending_payout_value: 1, mode: 1, cashout_time: 1, depth: 1});
-
-db.comment.createIndex({
-  pending_payout_value: 1,
-  cashout_time: 1
-}, {sparse: true});
-
-db.block.createIndex({witness: 1, _ts: 1});
-
-db.block_30d.createIndex({witness: 1, _ts: 1});
-
-db.vote.createIndex({voter: 1, author: 1, _ts: 1});
-
-db.vote.createIndex({voter: 1, _ts: 1});
-
-db.account.createIndex({name: 1});
-
-db.account.createIndex({created: 1});
-
-db.account.createIndex({vesting_shares: 1});
-
-db.account.createIndex({reputation: 1});
-
-db.account.createIndex({post_count: 1});
-
-db.account.createIndex({followers: 1});
-
-db.account.createIndex({witness_votes: 1});
-
-db.account.createIndex({name: 1, vesting_shares: 1});
-
-db.account_history.createIndex({date: 1, name: 1});
-
-
-db.follow.createIndex({follower: 1, following: 1, _block: 1});
-
-db.comment.createIndex({depth: 1, category: 1, last_reply: 1}, {sparse: true});
-
-db.curation_reward.createIndex({curator: 1});
-
-db.curation_reward.createIndex({_ts: 1}, {background: true});
-
-db.comment_diff.createIndex({author: 1, permlink: 1});
-
-db.vote.createIndex({_ts: 1, weight: 1}, {background: true});
+[?2004h[?1049h[22;0;0t[1;28r(B[m[4l[?7h[39;49m[?1h=[?1h=[?25l[39;49m(B[m[H[2J(B[0;7m  GNU nano 5.6.1                                                                                                                   New Buffer                                                                                                                              [1;266H(B[m[26;109H(B[0;7m[ Welcome to nano.  For basic help, type Ctrl+G. ](B[m[27d(B[0;7m^G(B[m Help[27;18H(B[0;7m^O(B[m Write Out     (B[0;7m^W(B[m Where Is	   (B[0;7m^K(B[m Cut[27;69H(B[0;7m^T(B[m Execute[86G(B[0;7m^C(B[m Location[103G(B[0;7mM-U(B[m Undo[27;120H(B[0;7mM-A(B[m Set Mark     (B[0;7mM-](B[m To Bracket   (B[0;7mM-Q(B[m Previous     (B[0;7m^B(B[m Back[27;188H(B[0;7m^◀(B[m Prev Word     (B[0;7m^A(B[m Home[27;222H(B[0;7m^P(B[m Prev Line     (B[0;7mM-▲(B[m Scroll Up[28d(B[0;7m^X(B[m Exit[28;18H(B[0;7m^R(B[m Read File     (B[0;7m^\(B[m Replace	   (B[0;7m^U(B[m Paste[28;69H(B[0;7m^J(B[m Justify[86G(B[0;7m^_(B[m Go To Line    (B[0;7mM-E(B[m Redo[28;120H(B[0;7mM-6(B[m Copy[28;137H(B[0;7m^Q(B[m Where Was     (B[0;7mM-W(B[m Next[28;171H(B[0;7m^F(B[m Forward	   (B[0;7m^▶(B[m Next Word     (B[0;7m^E(B[m End[28;222H(B[0;7m^N(B[m Next Line     (B[0;7mM-▼(B[m Scroll Down[2d[?12l[?25h[?25l[26;111H(B[0;7mline 1/1 (100%), col 1/1 (100%), char 0/0 (0%) ](B[m[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[26;159H[2d[?12l[?25h[?25l[1;258H(B[0;7mModified(B[m[3d[?12l[?25h[?25l[4d[?12l[?25h[?25l[5d[?12l[?25h[?25l[6d[?12l[?25h[?25l[26;108H(B[0;7m[ line 5/5 (100%), col 1/1 (100%), char 4/4 (100%) ](B[m[6d[?12l[?25h[?25l[26;160H[6d[?12l[?25h[?25l[26;160H[6d[?12l[?25h[?25l[26;160H[6d[?12l[?25h[?25l[26;160H[6d[?12l[?25h[?25l[7d[?12l[?25h[?25l[8d[?12l[?25h[?25l[9d[?12l[?25h[?25l[10d[?12l[?25h[?25l[11d[?12l[?25h[28;1H[?1049l[23;0;0t[?1l>[?2004l[28;1H[?1049l[23;0;0t[?1l>[?2004l
