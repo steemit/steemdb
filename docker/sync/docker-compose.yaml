@@ -1,0 +1,16 @@
+services:
+  steem-sync:
+    image: python:3.9-slim
+    container_name: BlazerDb_Blocks
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./blocks.py:/app/blocks.py
+      - ./config.py:/app/config.py
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: sh -c "
+      apt-get update && 
+      apt-get install -y gcc libssl-dev && 
+      pip install steem pymongo requests && 
+      python blocks.py"
