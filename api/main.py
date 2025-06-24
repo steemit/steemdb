@@ -9,7 +9,7 @@ import config
 # Import your routers
 from api.blocks import router as blocks_router
 #from api.operations import router as operations_router
-#from api.state import router as state_router
+from api.state import router as state_router
 #from api.accounts import router as accounts_router
 #from api.content import router as content_router
 #from api.communities import router as communities_router
@@ -128,7 +128,7 @@ app.add_middleware(RedisCacheMiddleware)
 
 app.include_router(blocks_router, prefix="/blocks", tags=["Blocks"])
 #app.include_router(operations_router, prefix="/operations", tags=["Operations"])
-#app.include_router(state_router, prefix="/state", tags=["State"])
+app.include_router(state_router, prefix="/state", tags=["State"])
 #app.include_router(accounts_router, prefix="/accounts", tags=["Accounts"]) # Consolidated from two includes
 #app.include_router(content_router, prefix="/content", tags=["Content"]) # Consolidated from two includes
 #app.include_router(communities_router, prefix="/communities", tags=["Communities"])

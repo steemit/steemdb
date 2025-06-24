@@ -1,5 +1,5 @@
 from pymongo import MongoClient
-steemNODE = "https://api.botsteem.com"
+steemNODE = "https://api.justyy.com"
 MONGO_URI = "mongodb://10.10.100.34:27017/"
 MONGO_DB_NAME = "BlazeDB"
 MONGO_COLLECTION_BLOCKS = "Blocks"
