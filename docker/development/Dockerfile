@@ -66,19 +66,8 @@ RUN mkdir -p /run/php &&\
     sed -i -e "s/;daemonize\s*=\s*yes/daemonize = no/g" ${fpm_conf} && \
     sed -i -e "s/;catch_workers_output\s*=\s*yes/catch_workers_output = yes/g" ${fpm_conf} && \
     sed -i -e "s/pm.max_children = 4/pm.max_children = 4/g" ${fpm_conf} && \
-    sed -i -e "s/pm.start_servers = 2/pm.start_servers = 3/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/pm.min_spare_servers = 1/pm.min_spare_servers = 2/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/pm.max_spare_servers = 3/pm.max_spare_servers = 4/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/pm.max_requests = 500/pm.max_requests = 200/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/user = nobody/user = nginx/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/group = nobody/group = nginx/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/;listen.mode = 0660/listen.mode = 0666/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/;listen.owner = nobody/listen.owner = nginx/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/;listen.group = nobody/listen.group = nginx/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/;php_admin_value[memory_limit] = 32M/php_admin_value[memory_limit] = 512M/g" /etc/php/7.0/fpm/pool.d/www.conf && \
-    sed -i -e "s/^;clear_env = no$/clear_env = no/" /etc/php/7.0/fpm/pool.d/www.conf &&\
-    sed -i -e "s/memory_limit = 128M/memory_limit = 512M/" /etc/php/7.0/fpm/php.ini &&\
-    ln -s /etc/php/7.0/fpm/php.ini /etc/php/7.0/fpm/conf.d/php.ini && \
+    sed -i -e "s/memory_limit = 128M/memory_limit = 512M/" ${php_conf} &&\
+    ln -s ${php_conf} /etc/php/7.0/fpm/conf.d/php.ini && \
     find /etc/php/7.0/fpm/conf.d/ -name "*.ini" -exec sed -i -re 's/^(\s*)#(.*)/\1;\2/g' {} \; && \
     sed -i -e "s/memory_limit = 128M/memory_limit = 512M/" /etc/php/7.0/fpm/conf.d/php.ini &&\
     echo "extension=phalcon.so" > /etc/php/7.0/fpm/conf.d/30-phalcon.ini && \
@@ -88,10 +77,11 @@ RUN mkdir -p /run/php &&\
 ADD ./docker/development/scripts/start.sh /start.sh
 RUN chmod 755 /start.sh
 
-# Copy our nginx config
+# Copy our nginx and php-fpm config
 RUN rm -Rf /etc/nginx/nginx.conf
 ADD ./docker/development/conf/nginx.conf /etc/nginx/nginx.conf
 COPY ./docker/development/conf/vhost.conf /etc/nginx/sites-enabled/default
+COPY ./docker/development/conf/www.conf /etc/php/7.0/fpm/pool.d/www.conf
 
 # Services
 ADD ./docker/development/conf/supervisord.conf /etc/supervisord.conf
