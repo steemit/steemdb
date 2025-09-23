@@ -56,11 +56,11 @@ $(document)
 </script>
 
 <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-GCRLEVCXDJ"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-Y9ZPVZV9X5"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
 
-  gtag('config', 'G-GCRLEVCXDJ');
+  gtag('config', 'G-Y9ZPVZV9X5');
 </script>
