@@ -929,5 +929,23 @@ class ApiController extends ControllerBase
     echo json_encode($accounts, JSON_PRETTY_PRINT);
   }
 
+  public function tokenAction()
+  {
+    header('Content-type:text/plain');
+    $all_coins = ['steem', 'sbd', 'sp'];
+    $coin = strtolower($this->request->getQuery('coin'));
+    if (!in_array($coin, $all_coins)) {
+      echo '';
+    }
+    $props = $this->steemd->getProps();
+    switch ($coin) {
+      case 'steem':
+        echo number_format($props['current_supply'], 3, '.', '');
+        break;
+      case 'sbd':
+        echo number_format($props['current_sbd_supply'], 3, '.', '');
+        break;
+    }
+  }
 
 }

@@ -86,9 +86,9 @@ class steemd
   {
     try {
       return Status::findFirst([['_id' => 'props']])->toArray()['props'];
-      $return = $this->client->call(0, 'get_dynamic_global_properties', []);
-      $return['steem_per_mvests'] = Status::findFirst([['_id' => 'steem_per_mvests']])->value;
-      return $return;
+      // $return = $this->client->call(0, 'get_dynamic_global_properties', []);
+      // $return['steem_per_mvests'] = Status::findFirst([['_id' => 'steem_per_mvests']])->value;
+      // return $return;
     } catch (Exception $e) {
       return array();
     }
