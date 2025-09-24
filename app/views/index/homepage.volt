@@ -32,8 +32,8 @@
         <script type="text/javascript">
         new TradingView.widget({
           "autosize": true,
-          "symbol": "POLONIEX:STEEMBTC",
-          "interval": "120",
+          "symbol": "BINANCE:STEEMUSDT",
+          "interval": "1440",
           "timezone": "Etc/UTC",
           "theme": "White",
           "style": "1",
