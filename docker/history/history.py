@@ -43,8 +43,6 @@ rpc.nodes = itertools.cycle(steemd_urls)
 mongo = MongoClient(mongodb_url)
 db = mongo.steemdb
 
-mvest_per_account = {}
-
 def steem_batch_request(url, batch_data):
     headers = {
         'Content-Type': 'application/json',
@@ -53,12 +51,6 @@ def steem_batch_request(url, batch_data):
     response = requests.post(url, headers=headers, data=json.dumps(batch_data))
     # logger.info("Response: %s", response.text)
     return response.json()
-
-def load_accounts():
-    logger.info(log_tag + "[STEEM] - Loading mvest per account")
-    for account in db.account.find():
-        if "name" in account.keys():
-            mvest_per_account.update({account['name']: account['vesting_shares']})
 
 def update_fund_history():
     logger.info(log_tag + "[STEEM] - Update Fund History")
@@ -351,7 +343,7 @@ def update_clients():
                 }
             },
         ])
-        logger.info(log_tag + "complete")
+        logger.info(log_tag + "update_clients complete")
         sys.stdout.flush()
         data = list(results)
         db.status.update_one({'_id': 'clients-snapshot'}, {'$set': {'data': data}}, upsert=True)
@@ -366,7 +358,6 @@ def update_clients():
 if __name__ == '__main__':
     logger.info(log_tag + "starting")
     update_clients()
-    load_accounts()
     update_stats()
     update_history()
     sys.stdout.flush()

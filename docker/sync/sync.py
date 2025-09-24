@@ -365,14 +365,6 @@ def update_comment_options(op, block, blockid):
     data = {'options': op.copy()}
     db.comment.update_one({'_id': _id}, {"$set": data}, upsert=True)
 
-mvest_per_account = {}
-
-def load_accounts():
-    print(f"{log_tag}[STEEM] - Loading all accounts")
-    for account in db.account.find():
-        if 'vesting_shares' in account:
-            mvest_per_account.update({account['name']: account['vesting_shares']})
-
 def queue_update_account(account_name):
     db.account.update_one({'_id': account_name}, {"$set": {'_dirty': True}}, upsert=True)
 
@@ -392,7 +384,6 @@ def update_account(account_name):
 
     account['total_balance'] = account['balance'] + account['savings_balance']
     account['total_sbd_balance'] = account['sbd_balance'] + account['savings_sbd_balance']
-    mvest_per_account.update({account['name']: account['vesting_shares']})
 
     account['scanned'] = datetime.now()
     if '_dirty' in account:
@@ -513,7 +504,6 @@ if __name__ == '__main__':
     sys.stdout.flush()
     config = rpc.get_config()
     block_interval = config["STEEM_BLOCK_INTERVAL"]
-    load_accounts()
 
     while True:
         global_process_start_time = time.perf_counter()
