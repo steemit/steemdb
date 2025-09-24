@@ -513,7 +513,7 @@ if __name__ == '__main__':
         block_number = props['last_irreversible_block_num']
 
         while (block_number - last_block) > 0:
-            total_start_time = time.perf_counter()
+            #total_start_time = time.perf_counter()
             end_block = min(last_block + batch_size, block_number)
             if end_block <= last_block:
                 break
@@ -529,8 +529,8 @@ if __name__ == '__main__':
                 print(f"{log_tag}[STEEM] - Processed up to Block #{last_block}")
                 sys.stdout.flush()
 
-            total_time = time.perf_counter() - total_start_time
-            print(f"{log_tag}[TEST Time] Batch Process Time: [{total_time}]")
+            #total_time = time.perf_counter() - total_start_time
+            #print(f"{log_tag}[TEST Time] Batch Process Time: [{total_time}]")
 
         sys.stdout.flush()
         print(f"{log_tag}[TEST Time] Global Process Time [{time.perf_counter() - global_process_start_time}]")
