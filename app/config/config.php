@@ -22,6 +22,7 @@ return new Config([
         'cryptSalt'      => 'eEAfR|_&G&f,+vU]:jFr!!A&+71w1Ms9~8_4L!<@[N@DyaIP_2My|:+.u>/6m,$D'
     ],
     'logger' => [
+        'saveFile' => false,
         'path'     => BASE_PATH . '/logs/',
         'format'   => '%date% [%type%] %message%',
         'date'     => 'D j H:i:s',

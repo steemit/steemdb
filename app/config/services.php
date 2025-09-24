@@ -169,9 +169,14 @@ $di->set('logger', function ($filename = null, $format = null) {
   $format   = $format ?: $config->get('logger')->format;
   $filename = trim($filename ?: $config->get('logger')->filename, '\\/');
   $path     = rtrim($config->get('logger')->path, '\\/') . DIRECTORY_SEPARATOR;
+  $saveFile = $config->get('logger')->saveFile;
 
   $formatter = new FormatterLine($format, $config->get('logger')->date);
-  $logger    = new FileLogger($path . $filename);
+  if ($saveFile) {
+    $logger    = new FileLogger($path . $filename);
+  } else {
+    $logger    = new FileLogger('php://stdout');
+  }
 
   $logger->setFormatter($formatter);
   $logger->setLogLevel($config->get('logger')->logLevel);
