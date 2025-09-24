@@ -476,6 +476,38 @@ def fetch_block(block_num):
         print(f"{log_tag}Error fetching block {block_num}: {e}")
         return None
 
+def update_props_history(props):
+    print(f"{log_tag}[STEEM] - Update Global Properties")
+
+    for key in ['recent_slots_filled', 'total_reward_shares2']:
+        props[key] = float(props[key])
+    for key in ['confidential_sbd_supply', 'confidential_supply', 'current_sbd_supply', 'current_supply', 'total_reward_fund_steem', 'total_vesting_fund_steem', 'total_vesting_shares', 'virtual_supply']:
+        props[key] = float(props[key].split()[0])
+    for key in ['time']:
+        props[key] = datetime.strptime(props[key], "%Y-%m-%dT%H:%M:%S")
+
+    props['steem_per_mvests'] = props['total_vesting_fund_steem'] / props['total_vesting_shares'] * 1000000
+
+    db.status.update_one({
+        '_id': 'steem_per_mvests'
+    }, {
+        '$set': {
+            '_id': 'steem_per_mvests',
+            'value': props['steem_per_mvests']
+        }
+    }, upsert=True)
+
+    db.status.update_one({
+        '_id': 'props'
+    }, {
+        '$set': {
+            '_id': 'props',
+            'props': props
+        }
+    }, upsert=True)
+
+    db.props_history.insert_one(props)
+
 if __name__ == '__main__':
     print(f"{log_tag}[STEEM] - Starting SteemDB Sync Service")
     sys.stdout.flush()
@@ -487,6 +519,7 @@ if __name__ == '__main__':
         global_process_start_time = time.perf_counter()
         update_queue()
         props = rpc.get_dynamic_global_properties()
+        update_props_history(props)
         block_number = props['last_irreversible_block_num']
 
         while (block_number - last_block) > 0:

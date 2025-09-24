@@ -73,40 +73,6 @@ def update_fund_history():
 
     db.funds_history.insert_one(fund)
 
-def update_props_history():
-    logger.info(log_tag + "[STEEM] - Update Global Properties")
-
-    props = rpc.get_dynamic_global_properties()
-
-    for key in ['recent_slots_filled', 'total_reward_shares2']:
-        props[key] = float(props[key])
-    for key in ['confidential_sbd_supply', 'confidential_supply', 'current_sbd_supply', 'current_supply', 'total_reward_fund_steem', 'total_vesting_fund_steem', 'total_vesting_shares', 'virtual_supply']:
-        props[key] = float(props[key].split()[0])
-    for key in ['time']:
-        props[key] = datetime.strptime(props[key], "%Y-%m-%dT%H:%M:%S")
-
-    props['steem_per_mvests'] = props['total_vesting_fund_steem'] / props['total_vesting_shares'] * 1000000
-
-    db.status.update_one({
-        '_id': 'steem_per_mvests'
-    }, {
-        '$set': {
-            '_id': 'steem_per_mvests',
-            'value': props['steem_per_mvests']
-        }
-    }, upsert=True)
-
-    db.status.update_one({
-        '_id': 'props'
-    }, {
-        '$set': {
-            '_id': 'props',
-            'props': props
-        }
-    }, upsert=True)
-
-    db.props_history.insert_one(props)
-
 def update_tx_history():
     logger.info(log_tag + "[STEEM] - Update Transaction History")
     now = datetime.now().date()
@@ -150,7 +116,6 @@ def process_account_details(account):
 
 def update_history():
     update_fund_history()
-    update_props_history()
 
     users = []
     try:
@@ -401,7 +366,6 @@ def update_clients():
 if __name__ == '__main__':
     logger.info(log_tag + "starting")
     update_clients()
-    update_props_history()
     load_accounts()
     update_stats()
     update_history()
