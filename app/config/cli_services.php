@@ -5,7 +5,7 @@ use Phalcon\Events\Manager as EventsManager;
 use Phalcon\Flash\Direct as Flash;
 use Phalcon\Logger\Adapter\File as FileLogger;
 use Phalcon\Logger\Formatter\Line as FormatterLine;
-use Phalcon\Cli\Collection\Manager;
+use Phalcon\Mvc\Collection\Manager;
 use Phalcon\Cli\Dispatcher as CliDispatcher;
 use Phalcon\Cli\Dispatcher\Exception as DispatchException;
 use Phalcon\Cli\Model\Metadata\Files as MetaDataAdapter;

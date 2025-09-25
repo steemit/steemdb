@@ -23,6 +23,17 @@ class Utilities
       'interest' => $this->di->get('convert')->sp2vest($props['virtual_supply'] * 0.095 * 0.15 / 12, false),
       'witnesses' => $this->di->get('convert')->sp2vest($props['virtual_supply'] * 0.095 * 0.1 / 12, false),
     ];
+    return $totals;
+  }
+
+  public function updateDistribution($props) {
+    $cacheKey = 'distribution-30d';
+    $totals = [
+      'curation' => 0,
+      'authors' => 0,
+      'interest' => $this->di->get('convert')->sp2vest($props['virtual_supply'] * 0.095 * 0.15 / 12, false),
+      'witnesses' => $this->di->get('convert')->sp2vest($props['virtual_supply'] * 0.095 * 0.1 / 12, false),
+    ];
     // Set Date Range
     $start = new UTCDateTime(strtotime("-30 days") * 1000);
     $end = new UTCDateTime(strtotime("midnight") * 1000);
@@ -89,7 +100,9 @@ class Utilities
     foreach($curators as $curator) {
       $totals['curation'] += $curator['vests'];
     }
-    $this->di->get('memcached')->save($cacheKey, $totals, 60);
+    // every 3 minutes run this function in cli mode.
+    // so set a 4 minutes cache.
+    $this->di->get('memcached')->save($cacheKey, $totals, 240);
     return $totals;
   }
 
