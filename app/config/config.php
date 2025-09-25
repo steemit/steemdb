@@ -10,6 +10,7 @@ return new Config([
     ],
     'application' => [
         'controllersDir' => APP_PATH . '/controllers/',
+        'tasksDir'       => APP_PATH . '/tasks/',
         'modelsDir'      => APP_PATH . '/models/',
         'formsDir'       => APP_PATH . '/forms/',
         'viewsDir'       => APP_PATH . '/views/',
