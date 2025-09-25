@@ -14,5 +14,9 @@ groupmod -o -g $TARGET_GID nginx || true
 #composer -d/var/www/html install
 #composer -d/var/www/html update
 
+# Save environment to /etc/environment
+echo "MONGODB=$MONGODB" >> /etc/environment
+echo "STEEMD_URL=$STEEMD_URL" >> /etc/environment
+
 echo '* Starting nginx'
 /usr/bin/supervisord -n -c /etc/supervisord.conf

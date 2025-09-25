@@ -100,9 +100,9 @@ class Utilities
     foreach($curators as $curator) {
       $totals['curation'] += $curator['vests'];
     }
-    // every 3 minutes run this function in cli mode.
-    // so set a 4 minutes cache.
-    $this->di->get('memcached')->save($cacheKey, $totals, 240);
+    // every 10 minutes run this function in cli mode.
+    // so set a 15 minutes cache.
+    $this->di->get('memcached')->save($cacheKey, $totals, 900);
     return $totals;
   }
 
