@@ -96,8 +96,10 @@ RUN composer -d/var/www/html install && \
 ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
 
 # Config Crontab
-ADD ./docker/development/conf/cronjob /etc/cron.d/cronjob
-RUN chmod 0644 /etc/cron.d/cronjob && crontab /etc/cron.d/cronjob
+RUN echo "/usr/bin/php /var/www/html/cli.php Distribution update" > /usr/bin/run-php-cli.sh && \
+    chmod +x /usr/bin/run-php-cli.sh && \
+    echo '*/10 * * * * /usr/bin/run-php-cli.sh >> /dev/stdout 2>&1' > /etc/cron.d/cronjob && \
+    crontab /etc/cron.d/cronjob
 
 EXPOSE 443 8000
 

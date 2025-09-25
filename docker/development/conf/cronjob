@@ -1,1 +1,0 @@
-*/10 * * * * /usr/bin/php /var/www/html/cli.php Distribution update >> /dev/stdout 2>&1
