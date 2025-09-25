@@ -5,8 +5,8 @@ use Phalcon\Loader;
 $loader = new Loader();
 
 $loader->registerNamespaces([
+    'SteemDB\Tasks'       => $config->application->tasksDir,
     'SteemDB\Models'      => $config->application->modelsDir,
-    'SteemDB\Controllers' => $config->application->controllersDir,
     'SteemDB\Helpers'     => $config->application->helpersDir,
 ]);
 

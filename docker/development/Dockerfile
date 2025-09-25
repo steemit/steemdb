@@ -4,10 +4,12 @@ ENV php_conf /etc/php/7.0/fpm/php.ini
 ENV fpm_conf /etc/php/7.0/fpm/php-fpm.conf
 ENV composer_hash e0012edf3e80b6978849f5eff0d4b4e4c79ff1609dd1e613307e16318854d24ae64f26d17af3ef0bf7cfb710ca74755a
 ENV MONGODB mongodb://172.31.31.104:27017
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -y && apt-get install -y software-properties-common python-software-properties && \
     apt-add-repository -y ppa:phalcon/stable && apt-get update -y && \
     apt-get install -y bash \
+    cron \
     openssh-client \
     wget \
     nginx \
@@ -92,6 +94,12 @@ RUN composer -d/var/www/html install && \
     chmod -R 777 /var/www/html/logs
 
 ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
+
+# Config Crontab
+RUN echo "/usr/bin/php /var/www/html/cli.php Distribution update" > /usr/bin/run-php-cli.sh && \
+    chmod +x /usr/bin/run-php-cli.sh && \
+    echo '*/10 * * * * /usr/bin/run-php-cli.sh >> /dev/stdout 2>&1' > /etc/cron.d/cronjob && \
+    crontab /etc/cron.d/cronjob
 
 EXPOSE 443 8000
 
