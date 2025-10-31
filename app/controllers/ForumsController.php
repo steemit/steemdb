@@ -249,43 +249,96 @@ class ForumsController extends ControllerBase
     $this->view->perfLogger = $perfLogger = $this->request->get('perfLogger', 'int');
     $perfLog = array();
 
+    // Collect all board queries first to avoid N+1 query problem
+    $boardQueries = [];
     foreach($forums as $category_id => $category) {
       foreach($category['boards'] as $board_id => $board) {
+        if($board_id == 'general') continue; // Too much of a memory hog atm
+        
         $query = $this->getQuery($board);
         $sort = [
           'last_reply' => -1,
           'created' => -1,
         ];
-        $limit = 1;
-
-        if($board_id == 'general') continue; // Too much of a memory hog atm
-
-        // Check performance of queries
-        if($perfLogger) {
-          $perfLog[$board_id] = array(
-            'count' => $this->queryPlanner([
-              'count' => 'comment',
-              'filter' => $query,
-            ]),
-            'find' => $this->queryPlanner([
-              'find' => 'comment',
-              'filter' => $query,
-              'sort' => $sort,
-              'limit' => $limit,
-            ]),
-          );
-        }
-
-        $forums[$category_id]['boards'][$board_id]['posts'] = Comment::count([
-             $query
-        ]);
-        $forums[$category_id]['boards'][$board_id]['recent'] = Comment::find([
-             $query,
-             'sort' => $sort,
-             'limit' => $limit,
-        ])[0];
+        
+        $key = $category_id . '_' . $board_id;
+        $boardQueries[$key] = [
+          'query' => $query,
+          'sort' => $sort,
+          'category_id' => $category_id,
+          'board_id' => $board_id,
+          'board' => $board,
+        ];
       }
     }
+
+    // Check performance of queries (if requested)
+    if($perfLogger && !empty($boardQueries)) {
+      // Get first query for performance testing
+      $firstQuery = reset($boardQueries);
+      $testQuery = $firstQuery['query'];
+      $testSort = $firstQuery['sort'];
+      $perfLog[$firstQuery['board_id']] = array(
+        'count' => $this->queryPlanner([
+          'count' => 'comment',
+          'filter' => $testQuery,
+        ]),
+        'find' => $this->queryPlanner([
+          'find' => 'comment',
+          'filter' => $testQuery,
+          'sort' => $testSort,
+          'limit' => 1,
+        ]),
+      );
+    }
+
+    // Optimize: Batch process all queries using aggregation pipeline with $facet
+    if (!empty($boardQueries)) {
+      // Build $facet pipeline for all boards
+      $facetStages = [];
+      foreach ($boardQueries as $key => $item) {
+        $facetStages[$key . '_count'] = [
+          ['$match' => $item['query']],
+          ['$count' => 'count']
+        ];
+        $facetStages[$key . '_recent'] = [
+          ['$match' => $item['query']],
+          ['$sort' => $item['sort']],
+          ['$limit' => 1]
+        ];
+      }
+
+      // Execute single aggregation with $facet
+      $results = Comment::agg([
+        ['$facet' => $facetStages]
+      ])->toArray();
+
+      // Map results back to forums structure
+      if (!empty($results[0])) {
+        $aggregated = $results[0];
+        foreach ($boardQueries as $key => $item) {
+          $category_id = $item['category_id'];
+          $board_id = $item['board_id'];
+          
+          // Extract count
+          $countKey = $key . '_count';
+          if (isset($aggregated[$countKey]) && !empty($aggregated[$countKey])) {
+            $forums[$category_id]['boards'][$board_id]['posts'] = $aggregated[$countKey][0]['count'] ?? 0;
+          } else {
+            $forums[$category_id]['boards'][$board_id]['posts'] = 0;
+          }
+          
+          // Extract recent post
+          $recentKey = $key . '_recent';
+          if (isset($aggregated[$recentKey]) && !empty($aggregated[$recentKey])) {
+            $forums[$category_id]['boards'][$board_id]['recent'] = $aggregated[$recentKey][0] ?? null;
+          } else {
+            $forums[$category_id]['boards'][$board_id]['recent'] = null;
+          }
+        }
+      }
+    }
+
     $this->view->perfLog = $perfLog;
     $this->view->forums = $forums;
   }
