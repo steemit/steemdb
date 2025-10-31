@@ -7,6 +7,8 @@ from steem import Steem
 from pymongo import MongoClient
 import requests
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 
 log_tag = '[Sync] '
 
@@ -323,20 +325,35 @@ def update_comment(author, permlink, op=None, block=None, blockid=None):
         comment = rpc.get_content(author, permlink).copy()
         comment.update({'_id': _id})
 
+        # Optimization: Pre-define date format string to reduce repeated parsing
+        date_format = "%Y-%m-%dT%H:%M:%S"
         active_votes = []
         for vote in comment['active_votes']:
             vote['rshares'] = float(vote['rshares'])
             vote['weight'] = float(vote['weight'])
-            vote['time'] = datetime.strptime(vote['time'], "%Y-%m-%dT%H:%M:%S")
+            vote['time'] = datetime.strptime(vote['time'], date_format)
             active_votes.append(vote)
         comment['active_votes'] = active_votes
 
-        for key in ['author_reputation', 'net_rshares', 'children_abs_rshares', 'abs_rshares', 'vote_rshares']:
-            comment[key] = float(comment[key])
-        for key in ['total_pending_payout_value', 'pending_payout_value', 'max_accepted_payout', 'total_payout_value', 'curator_payout_value']:
-            comment[key] = float(comment[key].split()[0])
-        for key in ['active', 'created', 'cashout_time', 'last_payout', 'last_update', 'max_cashout_time']:
-            comment[key] = datetime.strptime(comment[key], "%Y-%m-%dT%H:%M:%S")
+        # Optimization: Batch type conversion for float fields
+        float_keys = ['author_reputation', 'net_rshares', 'children_abs_rshares', 'abs_rshares', 'vote_rshares']
+        for key in float_keys:
+            if key in comment:
+                comment[key] = float(comment[key])
+        
+        # Optimization: Batch process fields requiring split operation
+        split_float_keys = ['total_pending_payout_value', 'pending_payout_value', 
+                           'max_accepted_payout', 'total_payout_value', 'curator_payout_value']
+        for key in split_float_keys:
+            if key in comment and isinstance(comment[key], str):
+                comment[key] = float(comment[key].split()[0])
+        
+        # Optimization: Batch date parsing
+        date_keys = ['active', 'created', 'cashout_time', 'last_payout', 
+                    'last_update', 'max_cashout_time']
+        for key in date_keys:
+            if key in comment and isinstance(comment[key], str):
+                comment[key] = datetime.strptime(comment[key], date_format)
         for key in ['json_metadata']:
             try:
                 comment[key] = json.loads(comment[key])
@@ -394,44 +411,79 @@ def update_queue():
     queue_length = 100
     max_date = datetime.now() + timedelta(-3)
     scan_ignore = datetime.now() - timedelta(hours=6)
+    
+    # Use thread pool for concurrent processing to reduce CPU wait time
+    max_workers = min(10, queue_length)  # Limit concurrency to avoid too many connections
 
-    queue = db.comment.find({
+    # Process comment queue
+    queue = list(db.comment.find({
         'created': {'$gt': max_date},
         'scanned': {'$lt': scan_ignore},
-    }).sort('scanned', 1).limit(queue_length)
-    total_comments = db.comment.count_documents({
-        'created': {'$gt': max_date},
-        'scanned': {'$lt': scan_ignore}
-    })
-    print(f"{log_tag}[Queue] Comments - {queue_length} of {total_comments}")
+    }).sort('scanned', 1).limit(queue_length))
+    
+    # Remove count_documents query to reduce database load
+    total_comments = len(queue)
+    print(f"{log_tag}[Queue] Comments - {total_comments} items")
+    
+    # Concurrently process comments
+    if queue:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(update_comment, item['author'], item['permlink']) 
+                      for item in queue]
+            completed = 0
+            for future in as_completed(futures):
+                try:
+                    future.result()  # Get result, exceptions will be raised if any
+                    completed += 1
+                except Exception as e:
+                    print(f"{log_tag}Error in update_comment: {e}")
+        print(f"{log_tag}[Queue] Comments - Completed {completed}/{total_comments}")
 
-    for item in queue:
-        update_comment(item['author'], item['permlink'])
-
-    queue = db.comment.find({
+    # Process past payout queue
+    queue = list(db.comment.find({
         'cashout_time': {'$lt': datetime.now()},
         'mode': {'$in': ['first_payout', 'second_payout']},
         'depth': 0,
         'pending_payout_value': {'$gt': 0}
-    }).limit(queue_length)
+    }).limit(queue_length))
+    
+    total_past_payouts = len(queue)
+    print(f"{log_tag}[Queue] Past Payouts - {total_past_payouts} items")
+    
+    # Concurrently process past payouts
+    if queue:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(update_comment, item['author'], item['permlink']) 
+                      for item in queue]
+            completed = 0
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                    completed += 1
+                except Exception as e:
+                    print(f"{log_tag}Error in update_comment (past payouts): {e}")
+        print(f"{log_tag}[Queue] Past Payouts - Completed {completed}/{total_past_payouts}")
 
-    total_past_payouts = db.comment.count_documents({
-        'cashout_time': {'$lt': datetime.now()},
-        'mode': {'$in': ['first_payout', 'second_payout']},
-        'depth': 0,
-        'pending_payout_value': {'$gt': 0}
-    })
-    print(f"{log_tag}[Queue] Past Payouts - {queue_length} of {total_past_payouts}")
-
-    for item in queue:
-        update_comment(item['author'], item['permlink'])
-
+    # Process account queue
     queue_length = 20
-    queue = db.account.find({'_dirty': True}).limit(queue_length)
-    total_accounts = db.account.count_documents({'_dirty': True})
-    print(f"{log_tag}[Queue] Updating Accounts - {queue_length} of {total_accounts}")
-    for item in queue:
-        update_account(item['_id'])
+    queue = list(db.account.find({'_dirty': True}).limit(queue_length))
+    total_accounts = len(queue)
+    print(f"{log_tag}[Queue] Updating Accounts - {total_accounts} items")
+    
+    # Concurrently process accounts
+    if queue:
+        with ThreadPoolExecutor(max_workers=min(5, queue_length)) as executor:
+            futures = [executor.submit(update_account, item['_id']) 
+                      for item in queue]
+            completed = 0
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                    completed += 1
+                except Exception as e:
+                    print(f"{log_tag}Error in update_account: {e}")
+        print(f"{log_tag}[Queue] Accounts - Completed {completed}/{total_accounts}")
+    
     print(f"{log_tag}[Queue] Done")
 
 def fetch_blocks_in_batch(start_block, end_block):
