@@ -75,7 +75,7 @@ def process_op(op_obj, block, blockid):
         error_message = f"{log_tag}Error processing operation {op_type}: {e}"
         print(error_message)
         logging.error(error_message)
-        sys.exit(1)  # Stop the script
+        # Don't exit, let the script continue processing other operations
 
 def process_block(block, blockid):
     try:
@@ -468,36 +468,43 @@ def fetch_block(block_num):
         return None
 
 def update_props_history(props):
-    print(f"{log_tag}[STEEM] - Update Global Properties")
+    try:
+        print(f"{log_tag}[STEEM] - Update Global Properties")
 
-    for key in ['recent_slots_filled', 'total_reward_shares2']:
-        props[key] = float(props[key])
-    for key in ['confidential_sbd_supply', 'confidential_supply', 'current_sbd_supply', 'current_supply', 'total_reward_fund_steem', 'total_vesting_fund_steem', 'total_vesting_shares', 'virtual_supply']:
-        props[key] = float(props[key].split()[0])
-    for key in ['time']:
-        props[key] = datetime.strptime(props[key], "%Y-%m-%dT%H:%M:%S")
+        for key in ['recent_slots_filled', 'total_reward_shares2']:
+            props[key] = float(props[key])
+        for key in ['confidential_sbd_supply', 'confidential_supply', 'current_sbd_supply', 'current_supply', 'total_reward_fund_steem', 'total_vesting_fund_steem', 'total_vesting_shares', 'virtual_supply']:
+            props[key] = float(props[key].split()[0])
+        for key in ['time']:
+            props[key] = datetime.strptime(props[key], "%Y-%m-%dT%H:%M:%S")
 
-    props['steem_per_mvests'] = props['total_vesting_fund_steem'] / props['total_vesting_shares'] * 1000000
+        props['steem_per_mvests'] = props['total_vesting_fund_steem'] / props['total_vesting_shares'] * 1000000
 
-    db.status.update_one({
-        '_id': 'steem_per_mvests'
-    }, {
-        '$set': {
-            '_id': 'steem_per_mvests',
-            'value': props['steem_per_mvests']
-        }
-    }, upsert=True)
+        db.status.update_one({
+            '_id': 'steem_per_mvests'
+        }, {
+            '$set': {
+                '_id': 'steem_per_mvests',
+                'value': props['steem_per_mvests']
+            }
+        }, upsert=True)
 
-    db.status.update_one({
-        '_id': 'props'
-    }, {
-        '$set': {
-            '_id': 'props',
-            'props': props
-        }
-    }, upsert=True)
+        db.status.update_one({
+            '_id': 'props'
+        }, {
+            '$set': {
+                '_id': 'props',
+                'props': props
+            }
+        }, upsert=True)
 
-    db.props_history.insert_one(props)
+        db.props_history.insert_one(props)
+        print(f"{log_tag}[STEEM] - Successfully updated props history")
+    except Exception as e:
+        error_message = f"{log_tag}Error updating props history: {e}"
+        print(error_message)
+        logging.error(error_message)
+        # Don't exit, let the script continue
 
 if __name__ == '__main__':
     print(f"{log_tag}[STEEM] - Starting SteemDB Sync Service")
@@ -506,33 +513,61 @@ if __name__ == '__main__':
     block_interval = config["STEEM_BLOCK_INTERVAL"]
 
     while True:
-        global_process_start_time = time.perf_counter()
-        update_queue()
-        props = rpc.get_dynamic_global_properties()
-        update_props_history(props)
-        block_number = props['last_irreversible_block_num']
-
-        while (block_number - last_block) > 0:
-            #total_start_time = time.perf_counter()
-            end_block = min(last_block + batch_size, block_number)
-            if end_block <= last_block:
-                break
-            blocks = rpc.get_blocks_range(last_block + 1, end_block)
+        try:
+            global_process_start_time = time.perf_counter()
+            update_queue()
             
-            for block in blocks:
-                last_block = block['block_num']
-                print(f"{log_tag}[STEEM] - Starting Block #{last_block}")
-                sys.stdout.flush()
+            try:
+                props = rpc.get_dynamic_global_properties()
+                update_props_history(props)
+                block_number = props['last_irreversible_block_num']
+            except Exception as e:
+                error_message = f"{log_tag}Error fetching or updating props: {e}"
+                print(error_message)
+                logging.error(error_message)
+                # Continue to next iteration instead of crashing
+                # Skip block processing if props fetch fails
+                block_number = last_block
 
-                process_block(block, last_block)
-                db.status.update_one({'_id': 'height'}, {"$set": {'value': last_block}}, upsert=True)
-                print(f"{log_tag}[STEEM] - Processed up to Block #{last_block}")
-                sys.stdout.flush()
+            while (block_number - last_block) > 0:
+                #total_start_time = time.perf_counter()
+                end_block = min(last_block + batch_size, block_number)
+                if end_block <= last_block:
+                    break
+                try:
+                    blocks = rpc.get_blocks_range(last_block + 1, end_block)
+                except Exception as e:
+                    error_message = f"{log_tag}Error fetching blocks range: {e}"
+                    print(error_message)
+                    logging.error(error_message)
+                    break  # Break out of block processing loop, but continue main loop
+                
+                for block in blocks:
+                    try:
+                        last_block = block['block_num']
+                        print(f"{log_tag}[STEEM] - Starting Block #{last_block}")
+                        sys.stdout.flush()
 
-            #total_time = time.perf_counter() - total_start_time
-            #print(f"{log_tag}[TEST Time] Batch Process Time: [{total_time}]")
+                        process_block(block, last_block)
+                        db.status.update_one({'_id': 'height'}, {"$set": {'value': last_block}}, upsert=True)
+                        print(f"{log_tag}[STEEM] - Processed up to Block #{last_block}")
+                        sys.stdout.flush()
+                    except Exception as e:
+                        error_message = f"{log_tag}Error processing block {block.get('block_num', 'unknown')}: {e}"
+                        print(error_message)
+                        logging.error(error_message)
+                        # Continue processing next block instead of crashing
+                        continue
 
-        sys.stdout.flush()
-        print(f"{log_tag}[TEST Time] Global Process Time [{time.perf_counter() - global_process_start_time}]")
+                #total_time = time.perf_counter() - total_start_time
+                #print(f"{log_tag}[TEST Time] Batch Process Time: [{total_time}]")
+
+            sys.stdout.flush()
+            print(f"{log_tag}[TEST Time] Global Process Time [{time.perf_counter() - global_process_start_time}]")
+        except Exception as e:
+            error_message = f"{log_tag}Error in main loop: {e}"
+            print(error_message)
+            logging.error(error_message)
+            # Continue the main loop instead of crashing
 
         time.sleep(block_interval)
