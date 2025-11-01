@@ -89,7 +89,7 @@
                 </div>
               </td>
               <td class="collapsing center aligned">
-                {{ account.post_count }}
+                {{ account.post_count ? account.post_count : 0 }}
               </td>
               <td class="collapsing right aligned">
                 {{ partial("_elements/vesting_shares", ['current': account]) }}

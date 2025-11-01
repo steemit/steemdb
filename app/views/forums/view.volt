@@ -99,7 +99,7 @@ a.anchor {
             </a>
             {% if authors[post.author] %}
             <div class="sub header">
-              {{ authors[post.author].post_count }} posts
+              {{ authors[post.author].post_count ? authors[post.author].post_count : 0 }} posts
             </div>
             {% endif %}
           </div>
@@ -120,7 +120,7 @@ a.anchor {
                     </a>
                     {% if authors[post.author] %}
                     <div class="sub header">
-                      {{ authors[post.author].post_count }} posts
+                      {{ authors[post.author].post_count ? authors[post.author].post_count : 0 }} posts
                     </div>
                     {% endif %}
                   </div>

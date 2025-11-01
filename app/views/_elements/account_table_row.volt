@@ -11,7 +11,7 @@
     {{ current.followers_count }}
   </td>
   <td class="collapsing">
-    {{ current.post_count }}
+    {{ current.post_count ? current.post_count : 0 }}
   </td>
   <td class="collapsing right aligned">
     {{ partial("_elements/vesting_shares", ['current': current]) }}

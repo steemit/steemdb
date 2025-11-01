@@ -9,7 +9,7 @@
   </div>
   <div class="statistic">
     <div class="value">
-      {{ account.post_count }}
+      {{ account.post_count ? account.post_count : 0 }}
     </div>
     <div class="label">
       Posts
