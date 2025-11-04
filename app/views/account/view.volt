@@ -183,8 +183,8 @@
       var nextStart = {{ nextStart ? nextStart : 'null' }};
       var isLoading = false;
       var hasMore = {{ nextStart ? 'true' : 'false' }};
-      // 60% of the scroll position to load more history records when scrolling
-      var scrollThreshold = 0.6;
+      // 75% of the scroll position to load more history records when scrolling
+      var scrollThreshold = 0.75;
       
       // format time
       function formatTimeAgo(timestamp) {
