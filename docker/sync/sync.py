@@ -82,15 +82,8 @@ def process_op(op_obj, block, blockid):
 
 def process_block(block, blockid):
     try:
-        save_block_start_time = time.perf_counter()
         save_block(block, blockid)
-        save_block_time = time.perf_counter() - save_block_start_time
-        print(f"{log_tag}[TEST Time] Save Block Time [{save_block_time}]")
-
-        get_ops_in_block_start_time = time.perf_counter()
         ops = rpc.get_ops_in_block(blockid, True)
-        get_ops_in_block_time = time.perf_counter() - get_ops_in_block_start_time
-        print(f"{log_tag}[TEST Time] Get Ops in Block Time [{get_ops_in_block_time}]")
 
         for tx in block['transactions']:
             for op_obj in tx['operations']:
