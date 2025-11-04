@@ -24,6 +24,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Build and Push History
+        id: docker_build
         uses: docker/build-push-action@v2
         with:
           file: ./docker/history/Dockerfile
