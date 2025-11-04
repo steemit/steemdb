@@ -9,6 +9,7 @@ import requests
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
+import threading
 
 log_tag = '[Sync] '
 
@@ -558,11 +559,32 @@ def update_props_history(props):
         logging.error(error_message)
         # Don't exit, let the script continue
 
+def props_history_updater(rpc, block_interval):
+    """
+    Background thread that updates props history every block_interval seconds
+    This ensures props history is updated regularly regardless of how long block processing takes
+    """
+    while True:
+        try:
+            props = rpc.get_dynamic_global_properties()
+            update_props_history(props)
+        except Exception as e:
+            error_message = f"{log_tag}Error in props history updater: {e}"
+            print(error_message)
+            logging.error(error_message)
+        time.sleep(block_interval)
+
 if __name__ == '__main__':
     print(f"{log_tag}[STEEM] - Starting SteemDB Sync Service")
     sys.stdout.flush()
     config = rpc.get_config()
     block_interval = config["STEEM_BLOCK_INTERVAL"]
+    
+    # Start background thread for props history updates
+    # This ensures props history is updated every block_interval regardless of block processing time
+    props_thread = threading.Thread(target=props_history_updater, args=(rpc, block_interval), daemon=True)
+    props_thread.start()
+    print(f"{log_tag}[STEEM] - Started props history updater thread (interval: {block_interval}s)")
 
     while True:
         try:
@@ -571,10 +593,9 @@ if __name__ == '__main__':
             
             try:
                 props = rpc.get_dynamic_global_properties()
-                update_props_history(props)
                 block_number = props['last_irreversible_block_num']
             except Exception as e:
-                error_message = f"{log_tag}Error fetching or updating props: {e}"
+                error_message = f"{log_tag}Error fetching props: {e}"
                 print(error_message)
                 logging.error(error_message)
                 # Continue to next iteration instead of crashing
