@@ -36,6 +36,8 @@ class AccountController extends ControllerBase
         'name' => $account
       )
     ));
+    // Always set accountName as string for use in templates (even if account doesn't exist in DB)
+    $this->view->accountName = $account;
     // Check the cache for this account from the blockchain
     $cached = $this->memcached->get($cacheKey);
     // No cache, let's load
@@ -77,8 +79,11 @@ class AccountController extends ControllerBase
     $this->getAccountRC();
     $this->view->props = $this->steemd->getProps();
     try {
-      $this->view->activity = array_reverse($this->steemd->getAccountHistory($account, 10));
+      $history = $this->steemd->getAccountHistory($account, -1, 20);
+      $this->view->nextStart = is_array($history) && !empty($history) ? $history[0][0] : '';
+      $this->view->activity = array_reverse($history);
     } catch (Exception $e) {
+      $this->view->nextStart = '';
       $this->view->activity = false;
     }
     $this->view->mining = Pow::find(array(

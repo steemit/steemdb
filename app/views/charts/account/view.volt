@@ -1,6 +1,23 @@
 <script>
-d3.json("/api/account/{{ account.name }}/history").get(function(error, rows) {
-  var data = rows;
+d3.json("/api/account/{{ accountName }}/history").get(function(error, rows) {
+  if (error) {
+    console.error("Error loading chart data:", error);
+    return;
+  }
+  
+  // Validate data format - ensure it's an array
+  var data = Array.isArray(rows) ? rows : [];
+  
+  // Filter out any invalid entries and ensure required fields exist
+  data = data.filter(function(d) {
+    return d && d._id && d._id.year && d._id.month && d._id.day;
+  });
+  
+  if (data.length === 0) {
+    console.warn("No valid chart data available");
+    return;
+  }
+  
   var dataset = new Plottable.Dataset(data);
   var dayOffset = (24*60*60*1000); // 1 day
   var today = new Date();
@@ -17,12 +34,13 @@ d3.json("/api/account/{{ account.name }}/history").get(function(error, rows) {
   var yAxis2 = new Plottable.Axes.Numeric(yScale2, "right");
 
   var pDate = function(d) {
+    if (!d || !d._id) return new Date();
     var dateString = d._id.year + "/" + d._id.month + "/" + d._id.day;
     return new Date(dateString);
   };
-  var pVests = function(d) { return +d.vests; };
-  var pPosts = function(d) { return +d.posts; };
-  var pFollowers = function(d) { return +d.followers; };
+  var pVests = function(d) { return d && d.vests != null ? +d.vests : 0; };
+  var pPosts = function(d) { return d && d.posts != null ? +d.posts : 0; };
+  var pFollowers = function(d) { return d && d.followers != null ? +d.followers : 0; };
 
   // Chart Highest Payouts
   var lPosts = new Plottable.Plots.Bar();

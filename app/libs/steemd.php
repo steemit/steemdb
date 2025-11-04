@@ -17,6 +17,7 @@ class steemd
     $httpClient = new HttpClient($host);
     $httpClient->withoutSslVerification();
     $this->client = new Client($host, false, $httpClient);
+    // $this->client->getHttpClient()->withDebug();
   }
 
   public function getState($path = "")
@@ -73,12 +74,13 @@ class steemd
     }
   }
 
-  public function getAccountHistory($username, $limit = 100, $skip = -1)
+  public function getAccountHistory($username, $start = -1, $limit = 100)
   {
     try {
-      return $this->client->call(0, 'get_account_history', [$username, $skip, $limit]);
+      return $this->client->execute('condenser_api.get_account_history', [$username, (int)$start, (int)$limit]);
     } catch (Exception $e) {
-      return array();
+      error_log("getAccountHistory error for {$username}: " . $e->getMessage());
+      return [];
     }
   }
 

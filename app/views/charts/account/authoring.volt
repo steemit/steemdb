@@ -1,5 +1,5 @@
 <script>
-  d3.json("/api/account/{{ account.name }}/authoring").get(function(error, rows) {
+  d3.json("/api/account/{{ accountName }}/authoring").get(function(error, rows) {
     var data = rows;
     var dataset = new Plottable.Dataset(data);
     var dayOffset = (24*60*60*1000); // 1 day
