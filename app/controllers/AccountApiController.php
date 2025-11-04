@@ -33,10 +33,21 @@ class AccountApiController extends ControllerBase
 
   public function viewAction() {
     $account = $this->dispatcher->getParam("account");
+    
+    if (empty($account)) {
+      echo json_encode(['error' => 'Account name is required'], JSON_PRETTY_PRINT);
+      return;
+    }
+    
     $data = Account::findFirst([
       ['name' => $account]
     ]);
-    echo json_encode($data->toArray(), JSON_PRETTY_PRINT);
+    
+    if ($data) {
+      echo json_encode($data->toArray(), JSON_PRETTY_PRINT);
+    } else {
+      echo json_encode(['error' => 'Account not found'], JSON_PRETTY_PRINT);
+    }
   }
 
   public function witnessvotesAction() {
@@ -672,5 +683,45 @@ class AccountApiController extends ControllerBase
       }
     }
     echo json_encode($data, JSON_PRETTY_PRINT);
+  }
+
+  public function historyWaterfallApiAction() {
+    $account = $this->dispatcher->getParam("account");
+    $start = $this->request->get("start", "int", -1);
+    $limit = $this->request->get("limit", "int", 20);
+    
+    if (empty($account)) {
+      echo json_encode(['error' => 'Account name is required'], JSON_PRETTY_PRINT);
+      return;
+    }
+    
+    try {
+      $data = $this->steemd->getAccountHistory($account, $start, $limit);
+      
+      if (is_array($data) && !empty($data)) {
+        $nextStart = $data[0][0];
+        $data = array_reverse($data);
+        echo json_encode([
+          'data' => $data,
+          'nextStart' => $nextStart,
+          'hasMore' => count($data) >= $limit
+        ], JSON_PRETTY_PRINT);
+      } else {
+        // Return empty result with debug info if possible
+        $errorMsg = null;
+        if (empty($data)) {
+          $errorMsg = "No history data returned from steemd API. Account may not exist or have no history.";
+        }
+        echo json_encode([
+          'data' => [],
+          'nextStart' => null,
+          'hasMore' => false,
+          'debug' => $errorMsg
+        ], JSON_PRETTY_PRINT);
+      }
+    } catch (Exception $e) {
+      error_log("historyWaterfallApiAction error for {$account}: " . $e->getMessage());
+      echo json_encode(['error' => $e->getMessage()], JSON_PRETTY_PRINT);
+    }
   }
 }

@@ -1,6 +1,7 @@
 {% extends 'layouts/default.volt' %}
 
 {% block content %}
+{% if comment %}
 <div class="ui vertical stripe segment">
   <div class="ui stackable grid container">
     <div class="row">
@@ -73,6 +74,16 @@
     </div>
   </div>
 </div>
+{% else %}
+<div class="ui vertical stripe segment">
+  <div class="ui container">
+    <div class="ui error message">
+      <div class="header">Comment Not Found</div>
+      <p>The requested comment could not be found.</p>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

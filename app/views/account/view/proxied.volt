@@ -34,7 +34,7 @@
         </div>
       </td>
       <td class="collapsing center aligned">
-        {{ proxy.post_count }}
+        {{ proxy.post_count ? proxy.post_count : 0 }}
       </td>
       <td class="collapsing right aligned">
         {{ partial("_elements/vesting_shares", ['current': proxy]) }}

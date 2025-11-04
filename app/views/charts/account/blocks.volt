@@ -1,5 +1,5 @@
 <script>
-  d3.json("/api/account/{{ account.name }}/mining").get(function(error, rows) {
+  d3.json("/api/account/{{ accountName }}/mining").get(function(error, rows) {
     var data = rows;
     var dataset = new Plottable.Dataset(data['pow']).metadata(2);
     var dataset2 = new Plottable.Dataset(data['witness']).metadata(5);

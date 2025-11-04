@@ -171,5 +171,169 @@
         offset: 90
       });
     $(".ui.sortable.table").tablesort();
+    
+    {% if router.getActionName() == "view" %}
+    // load more history records infinitely
+    (function() {
+      var accountName = "{{ accountName }}";
+      if (accountName === '') {
+        console.log('accountName is empty');
+        return;
+      }
+      var nextStart = {{ nextStart ? nextStart : 'null' }};
+      var isLoading = false;
+      var hasMore = {{ nextStart ? 'true' : 'false' }};
+      // 60% of the scroll position to load more history records when scrolling
+      var scrollThreshold = 0.6;
+      
+      // format time
+      function formatTimeAgo(timestamp) {
+        var seconds = Math.floor((new Date() - new Date(timestamp)) / 1000);
+        if (seconds < 60) return seconds + ' seconds ago';
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + ' minutes ago';
+        var hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + ' hours ago';
+        var days = Math.floor(hours / 24);
+        if (days < 7) return days + ' days ago';
+        var weeks = Math.floor(days / 7);
+        if (weeks < 4) return weeks + ' weeks ago';
+        var months = Math.floor(days / 30);
+        if (months < 12) return months + ' months ago';
+        return Math.floor(days / 365) + ' years ago';
+      }
+      
+      // format operation name
+      function formatOpName(opType) {
+        var names = {
+          'transfer': 'Transfer',
+          'vote': 'Vote',
+          'comment': 'Comment',
+          'author_reward': 'Author Reward',
+          'curation_reward': 'Curation Reward',
+          'transfer_to_vesting': 'Power Up',
+          'withdraw_vesting': 'Power Down',
+          'delegate_vesting_shares': 'Delegate',
+          'account_update': 'Account Update',
+          'custom_json': 'Custom JSON'
+        };
+        return names[opType] || opType.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+      }
+      
+      // create simplified transaction display
+      function createTxContent(item) {
+        var op = item[1].op;
+        var opType = op[0];
+        var opData = op[1];
+        var content = '';
+        
+        switch(opType) {
+          case 'transfer':
+            content = '<span class="ui left labeled button"><a href="/@' + opData.from + '" class="ui basic right pointing label">' + opData.from + '</a><a href="/@' + opData.to + '" class="ui button">' + opData.to + '</a></span><span class="ui green label">' + opData.amount + '</span>';
+            if (opData.memo) {
+              content += '<div class="ui segment" style="max-width: 620px; overflow: scroll">' + opData.memo + '</div>';
+            }
+            break;
+          case 'vote':
+            content = '<div class="ui small header"><a href="/tag/@' + opData.author + '/' + opData.permlink + '">' + opData.permlink.replace(/-/g, ' ') + '</a><div class="sub header"><div class="ui small celled horizontal list"><span class="item">↳ by: <a href="/@' + opData.author + '">@' + opData.author + '</a></span><span class="item">voter: <a href="/@' + opData.voter + '">@' + opData.voter + '</a> (' + (opData.weight / 100) + '%)</span></div></div></div>';
+            break;
+          default:
+            content = '<span class="ui label">' + JSON.stringify(opData).substring(0, 100) + '</span>';
+        }
+        return content;
+      }
+      
+      // load more history records
+      function loadMoreHistory() {
+        if (isLoading || !hasMore || nextStart === null) {
+          return;
+        }
+        
+        isLoading = true;
+        $('#history-loading').show();
+        $('#history-no-more').hide();
+        
+        $.ajax({
+          url: '/api/history/' + accountName,
+          data: {
+            start: nextStart,
+            limit: 20
+          },
+          dataType: 'json',
+          success: function(response) {
+            if (response.error) {
+              console.error('Error loading history:', response.error);
+              isLoading = false;
+              $('#history-loading').hide();
+              return;
+            }
+            
+            if (response.data && response.data.length > 0) {
+              var tbody = $('#history-tbody');
+              response.data.forEach(function(item) {
+                var op = item[1].op;
+                var opType = op[0];
+                var tr = $('<tr data-history-item>');
+                
+                var td1 = $('<td class="three wide">');
+                var header = $('<div class="ui small header">').text(formatOpName(opType));
+                var subHeader = $('<div class="sub header">');
+                subHeader.append('<span>' + formatTimeAgo(item[1].timestamp) + '</span>');
+                subHeader.append('<br><a href="/block/' + item[1].block + '"><small style="color: #bbb">Block #' + item[1].block + '</small></a>');
+                header.append(subHeader);
+                td1.append(header);
+                
+                var td2 = $('<td>').html(createTxContent(item));
+                tr.append(td1).append(td2);
+                tbody.append(tr);
+              });
+              
+              nextStart = response.nextStart;
+              hasMore = response.hasMore;
+            } else {
+              hasMore = false;
+            }
+            
+            if (!hasMore) {
+              $('#history-no-more').show();
+            }
+          },
+          error: function(xhr, status, error) {
+            console.error('Error loading history:', error);
+          },
+          complete: function() {
+            isLoading = false;
+            $('#history-loading').hide();
+          }
+        });
+      }
+      
+      // scroll event listener with throttle (500ms)
+      var lastScrollTime = 0;
+      var throttleDelay = 500;
+      
+      $(window).on('scroll', function() {
+        if (!hasMore || isLoading) return;
+        
+        var currentTime = new Date().getTime();
+        
+        // throttle: only execute if 500ms have passed since last execution
+        if (currentTime - lastScrollTime < throttleDelay) {
+          return;
+        }
+        
+        lastScrollTime = currentTime;
+        
+        var windowHeight = $(window).height();
+        var documentHeight = $(document).height();
+        var scrollTop = $(window).scrollTop();
+        var scrollPercent = scrollTop / (documentHeight - windowHeight);
+        
+        if (scrollPercent >= scrollThreshold) {
+          loadMoreHistory();
+        }
+      });
+    })();
+    {% endif %}
   </script>
 {% endblock %}

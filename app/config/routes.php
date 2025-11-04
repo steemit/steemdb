@@ -160,13 +160,22 @@ $router->add('/api/tags/{tag}', [
   'action' => 'tags'
 ]);
 
-$router->add('/api/account/{account}', [
+$router->add('/api/account/([-a-zA-Z0-9.]+)/([-a-zA-Z0-9.]+)', [
   'controller' => 'account_api',
+  'account' => 1,
+  'action' => 2
+]);
+
+$router->add('/api/account/([-a-zA-Z0-9.]+)', [
+  'controller' => 'account_api',
+  'account' => 1,
   'action' => 'view'
 ]);
 
-$router->add('/api/account/{account}/{action}', [
-  'controller' => 'account_api'
+$router->add('/api/history/([-a-zA-Z0-9.]+)', [
+  'controller' => 'account_api',
+  'account' => 1,
+  'action' => 'historyWaterfallApi'
 ]);
 
 /*

@@ -95,9 +95,18 @@ class CommentController extends ControllerBase
     $query = array(
       '_id' => $author . '/' . $permlink
     );
-    $comment = $this->view->comment = Comment::findFirst(array(
+    $comment = Comment::findFirst(array(
       $query
     ));
+    
+    // Check if comment was found
+    if (!$comment) {
+      return false;
+    }
+    
+    // Set view comment only if found
+    $this->view->comment = $comment;
+    
     // Load author data
     $query = array(
       'name' => $comment->author
@@ -122,7 +131,7 @@ class CommentController extends ControllerBase
       $query,
       'sort' => $sort
     ]);
-    // Set our default view
+    // Set our default view only if comment exists
     $this->view->pick("comment/view");
     return $comment;
   }
@@ -130,21 +139,49 @@ class CommentController extends ControllerBase
   public function viewAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
   }
 
   public function editsAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
   }
 
   public function dataAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
   }
 
   public function tagsAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
   }
 
   public function jsonAction()
@@ -153,12 +190,29 @@ class CommentController extends ControllerBase
     header('Content-type:application/json');
     $this->view->disable();
     ini_set('precision', 20);
+    
+    // Check if comment was found
+    if (!$comment) {
+      http_response_code(404);
+      echo json_encode([
+        'error' => 'Comment not found'
+      ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+      return;
+    }
+    
     echo json_encode($comment->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
   }
 
   public function votesAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
     // Sort the votes by rshares
     $votes = $comment->active_votes;
     usort($votes, function($a, $b) {
@@ -170,6 +224,13 @@ class CommentController extends ControllerBase
   public function reblogsAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
     $query = array(
       'permlink' => $comment->permlink,
       'author' => $comment->author,
@@ -183,6 +244,13 @@ class CommentController extends ControllerBase
   public function repliesAction()
   {
     $comment = $this->getComment();
+    if (!$comment) {
+      $this->dispatcher->forward([
+        'controller' => 'index',
+        'action' => 'show404'
+      ]);
+      return;
+    }
     $query = array(
       'parent_author' => $comment->author,
       'parent_permlink' => $comment->permlink

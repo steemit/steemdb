@@ -24,24 +24,45 @@ class IndexController extends ControllerBase
     $costTime = ($endTime - $startTime) * 1000;
     $this->logger->debug("distribution() tasks {$costTime} ms");
     # Transactions
-    $tx = $results = Status::findFirst([['_id' => 'transactions-24h']]);
+    $tx = Status::findFirst([['_id' => 'transactions-24h']]);
     $tx1h = Status::findFirst([['_id' => 'transactions-1h']]);
-    $this->view->tx = $tx->data;
-    $this->view->tx_per_sec = round($tx->data / 86400, 3);
-    $this->view->tx1h = $tx1h->data;
-    $this->view->tx1h_per_sec = round($tx1h->data / 3600, 3);
+    if ($tx) {
+      $this->view->tx = $tx->data;
+      $this->view->tx_per_sec = round($tx->data / 86400, 3);
+    } else {
+      $this->view->tx = 0;
+      $this->view->tx_per_sec = 0;
+    }
+    if ($tx1h) {
+      $this->view->tx1h = $tx1h->data;
+      $this->view->tx1h_per_sec = round($tx1h->data / 3600, 3);
+    } else {
+      $this->view->tx1h = 0;
+      $this->view->tx1h_per_sec = 0;
+    }
     # Operations
-    $op = $results = Status::findFirst([['_id' => 'operations-24h']]);
+    $op = Status::findFirst([['_id' => 'operations-24h']]);
     $op1h = Status::findFirst([['_id' => 'operations-1h']]);
-    $this->view->op = $op->data;
-    $this->view->op_per_sec = round($op->data / 86400, 3);
-    $this->view->op1h = $op1h->data;
-    $this->view->op1h_per_sec = round($op1h->data / 3600, 3);
-    $this->view->funds = FundsHistory::find([
+    if ($op) {
+      $this->view->op = $op->data;
+      $this->view->op_per_sec = round($op->data / 86400, 3);
+    } else {
+      $this->view->op = 0;
+      $this->view->op_per_sec = 0;
+    }
+    if ($op1h) {
+      $this->view->op1h = $op1h->data;
+      $this->view->op1h_per_sec = round($op1h->data / 3600, 3);
+    } else {
+      $this->view->op1h = 0;
+      $this->view->op1h_per_sec = 0;
+    }
+    $funds = FundsHistory::find([
       ['name' => 'post'],
       'sort' => ['last_update' => -1],
       'limit' => 1
-    ])[0];
+    ]);
+    $this->view->funds = !empty($funds) ? $funds[0] : null;
   }
 
   public function show404Action() {

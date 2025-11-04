@@ -65,10 +65,19 @@ class AccountsController extends ControllerBase
     //   "sort" => array('date' => -1)
     // ));
     // echo(stop);
-    $this->view->pages = ceil(Statistics::findFirst(array(
+    $stats = Statistics::findFirst(array(
       array('key' => 'users'),
       "sort" => array('date' => -1)
-    ))->toArray()['value'] / $limit);
+    ));
+    
+    // Check if statistics record exists
+    if ($stats) {
+      $this->view->pages = ceil($stats->toArray()['value'] / $limit);
+    } else {
+      // Default to 1 page if statistics not found
+      $this->view->pages = 1;
+    }
+    
     // Load the accounts
     $this->view->accounts = Account::find(array(
       $query,

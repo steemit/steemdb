@@ -9,7 +9,7 @@
   </div>
   <div class="statistic">
     <div class="value">
-      {{ account.post_count }}
+      {{ account.post_count ? account.post_count : 0 }}
     </div>
     <div class="label">
       Posts
@@ -31,11 +31,11 @@
   </div>
 </h3>
 
-<table class="ui stackable definition table">
+<table class="ui stackable definition table" id="history-table">
   <thead></thead>
-  <tbody>
+  <tbody id="history-tbody">
   {% for item in activity %}
-  <tr>
+  <tr data-history-item>
     <td class="three wide">
       <div class="ui small header">
         <?php echo $this->opName::string($item[1]['op'], $account) ?>
@@ -58,3 +58,10 @@
   {% endfor %}
   </tbody>
 </table>
+<div id="history-loading" style="display: none; text-align: center; padding: 20px;">
+  <div class="ui active inline loader"></div>
+  <span>Loading more history...</span>
+</div>
+<div id="history-no-more" style="display: none; text-align: center; padding: 20px; color: #999;">
+  No more history records.
+</div>
