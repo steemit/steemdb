@@ -10,6 +10,12 @@ TARGET_GID=$(stat -c "%g" /var/lib/nginx)
 echo '-- Setting nginx group to use gid '$TARGET_GID
 groupmod -o -g $TARGET_GID nginx || true
 
+# Ensure /run/php directory exists with correct permissions for PHP-FPM socket
+echo '* Creating /run/php directory for PHP-FPM socket'
+mkdir -p /run/php
+chown www-data:www-data /run/php
+chmod 755 /run/php
+
 #echo '-- Updating composer libraries'
 #composer -d/var/www/html install
 #composer -d/var/www/html update
@@ -18,5 +24,5 @@ groupmod -o -g $TARGET_GID nginx || true
 echo "MONGODB=$MONGODB" >> /etc/environment
 echo "STEEMD_URL=$STEEMD_URL" >> /etc/environment
 
-echo '* Starting nginx'
+echo '* Starting services with supervisord'
 /usr/bin/supervisord -n -c /etc/supervisord.conf
