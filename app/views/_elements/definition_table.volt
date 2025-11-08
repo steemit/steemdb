@@ -5,7 +5,7 @@
       <td class="three wide">
         <small>{{ key }}</small>
       </td>
-      <td>
+      <td class="wide">
         <?php
           switch(gettype($value)) {
             case "array":
