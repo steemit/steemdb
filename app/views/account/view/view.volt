@@ -59,7 +59,9 @@
         $template_to_include = 'unknown';
       } else {
         // Build safe path using basename to prevent any remaining path traversal
-        $template_path = $this->getViewsDir() . '_elements/tx/' . basename($template_name) . '.volt';
+        // Use APP_PATH constant which is defined in public/index.php
+        $views_dir = APP_PATH . '/views/';
+        $template_path = $views_dir . '_elements/tx/' . basename($template_name) . '.volt';
         $template_to_include = file_exists($template_path) ? basename($template_name) : 'unknown';
       }
       
