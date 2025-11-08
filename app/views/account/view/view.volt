@@ -46,7 +46,25 @@
       </div>
     </td>
     <td>
-      {% include "_elements/tx/" ~ item[1]['op'][0] %}
+      <?php
+      // Get template name and validate it to prevent path traversal attacks
+      $template_name = isset($item[1]['op'][0]) ? $item[1]['op'][0] : '';
+      
+      // Sanitize: only allow alphanumeric characters, underscores, and hyphens
+      // Remove any path traversal attempts (../, ..\, etc.)
+      $template_name = preg_replace('/[^a-zA-Z0-9_-]/', '', $template_name);
+      
+      // If empty after sanitization, use unknown template
+      if (empty($template_name)) {
+        $template_to_include = 'unknown';
+      } else {
+        // Build safe path using basename to prevent any remaining path traversal
+        $template_path = $this->getViewsDir() . '_elements/tx/' . basename($template_name) . '.volt';
+        $template_to_include = file_exists($template_path) ? basename($template_name) : 'unknown';
+      }
+      
+      $this->view->partial('_elements/tx/' . $template_to_include, ['item' => $item]);
+      ?>
     </td>
   </tr>
   {% else %}
