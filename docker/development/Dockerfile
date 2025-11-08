@@ -69,9 +69,11 @@ RUN mkdir -p /run/php &&\
     sed -i -e "s/;catch_workers_output\s*=\s*yes/catch_workers_output = yes/g" ${fpm_conf} && \
     sed -i -e "s/pm.max_children = 4/pm.max_children = 4/g" ${fpm_conf} && \
     sed -i -e "s/memory_limit = 128M/memory_limit = 512M/" ${php_conf} &&\
+    sed -i -e "s/max_execution_time\s*=\s*30/max_execution_time = 120/" ${php_conf} &&\
     ln -s ${php_conf} /etc/php/7.0/fpm/conf.d/php.ini && \
     find /etc/php/7.0/fpm/conf.d/ -name "*.ini" -exec sed -i -re 's/^(\s*)#(.*)/\1;\2/g' {} \; && \
     sed -i -e "s/memory_limit = 128M/memory_limit = 512M/" /etc/php/7.0/fpm/conf.d/php.ini &&\
+    sed -i -e "s/max_execution_time\s*=\s*30/max_execution_time = 120/" /etc/php/7.0/fpm/conf.d/php.ini &&\
     echo "extension=phalcon.so" > /etc/php/7.0/fpm/conf.d/30-phalcon.ini && \
     echo "extension=phalcon.so" > /etc/php/7.0/cli/conf.d/30-phalcon.ini
 
@@ -98,7 +100,7 @@ ADD ./rds-combined-ca-bundle.pem /src/rds-combined-ca-bundle.pem
 # Config Crontab
 RUN echo "/usr/bin/php /var/www/html/cli.php Distribution update" > /usr/bin/run-php-cli.sh && \
     chmod +x /usr/bin/run-php-cli.sh && \
-    echo '*/10 * * * * /usr/bin/run-php-cli.sh >> /dev/stdout 2>&1' > /etc/cron.d/cronjob && \
+    echo '0 * * * * /usr/bin/run-php-cli.sh >> /dev/stdout 2>&1' > /etc/cron.d/cronjob && \
     crontab /etc/cron.d/cronjob
 
 EXPOSE 443 8000
