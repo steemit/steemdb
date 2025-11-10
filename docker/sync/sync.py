@@ -25,6 +25,7 @@ steemd_url = config.get('steemd_url', 'https://api.steemit.com')
 last_block_env = config.get('last_block_env')
 mongodb_url = config.get('mongodb_url')
 batch_size = config.get('batch_size', 50)
+block_interval = config.get('block_interval', 60)
 
 if not mongodb_url:
     print(f"{log_tag}NEED MONGODB")
@@ -570,8 +571,7 @@ def props_history_updater(rpc, block_interval):
 if __name__ == '__main__':
     print(f"{log_tag}[STEEM] - Starting SteemDB Sync Service")
     sys.stdout.flush()
-    config = rpc.get_config()
-    block_interval = config["STEEM_BLOCK_INTERVAL"]
+    # block_interval is loaded from config.json (default: 60 seconds)
     
     # Start background thread for props history updates
     # This ensures props history is updated every block_interval regardless of block processing time
