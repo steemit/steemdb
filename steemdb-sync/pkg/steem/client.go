@@ -108,8 +108,11 @@ func (c *Client) call(ctx context.Context, method string, params []interface{}) 
 
 		// Wait before retry (except on last attempt)
 		if attempt < c.retryPolicy.MaxRetries {
-			delay := time.Duration(float64(c.retryPolicy.InitialDelay) * 
-				(1 << attempt)) // Exponential backoff
+			multiplier := 1.0
+			for i := 0; i < attempt; i++ {
+				multiplier *= c.retryPolicy.Multiplier
+			}
+			delay := time.Duration(float64(c.retryPolicy.InitialDelay) * multiplier)
 			if delay > c.retryPolicy.MaxDelay {
 				delay = c.retryPolicy.MaxDelay
 			}

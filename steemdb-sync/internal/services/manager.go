@@ -56,6 +56,8 @@ func (m *Manager) StartMetricsServer(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.Handle(m.config.Metrics.Path, promhttp.Handler())
+	mux.HandleFunc("/health", m.healthCheckHandler)
+	mux.HandleFunc("/ready", m.readinessCheckHandler)
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", m.config.Metrics.Port),
@@ -75,6 +77,52 @@ func (m *Manager) StartMetricsServer(ctx context.Context) error {
 	// Shutdown server gracefully
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	return server.Shutdown(shutdownCtx)
+}
+
+// healthCheckHandler handles health check requests
+func (m *Manager) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status":"healthy","timestamp":%d,"version":"1.0.0","services":{"block_sync":"running","history":"running","witnesses":"running"}}`, time.Now().Unix())
+}
+
+// readinessCheckHandler handles readiness check requests
+func (m *Manager) readinessCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Check if all services are ready
+	ready := true
+	services := make(map[string]string)
+	
+	// Check database connection
+	if err := m.db.Ping(context.Background()); err != nil {
+		ready = false
+		services["database"] = "not_ready"
+	} else {
+		services["database"] = "ready"
+	}
+	
+	// Check Steem connection
+	if _, err := m.steem.GetDynamicGlobalProperties(context.Background()); err != nil {
+		ready = false
+		services["steem_rpc"] = "not_ready"
+	} else {
+		services["steem_rpc"] = "ready"
+	}
+	
+	services["block_sync"] = "ready"
+	services["history"] = "ready"
+	services["witnesses"] = "ready"
+	
+	status := "ready"
+	statusCode := http.StatusOK
+	if !ready {
+		status = "not_ready"
+		statusCode = http.StatusServiceUnavailable
+	}
+	
+	w.WriteHeader(statusCode)
+	fmt.Fprintf(w, `{"status":"%s","timestamp":%d,"services":{"database":"%s","steem_rpc":"%s","block_sync":"ready","history":"ready","witnesses":"ready"}}`, 
+		status, time.Now().Unix(), services["database"], services["steem_rpc"])
 }

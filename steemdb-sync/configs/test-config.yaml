@@ -1,0 +1,58 @@
+server:
+  port: 9090
+  host: "127.0.0.1"
+  mode: "development"
+
+steem:
+  nodes:
+    - "https://api.steemit.com"
+  timeout: 30s
+  retry_attempts: 3
+
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "steemdb_test"
+  pool_size: 10
+  timeout: 10s
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 1
+  pool_size: 10
+
+sync:
+  batch_size: 5
+  workers: 2
+  queue_size: 100
+  block_interval: 10s
+  start_block: 1
+
+history:
+  batch_size: 10
+  workers: 1
+  interval: 1h
+  account_scan_limit: 100
+
+witnesses:
+  workers: 1
+  interval: 5m
+  check_interval: 30s
+
+log:
+  level: "debug"
+  format: "text"
+  file: ""
+  max_size: 10
+  max_backups: 3
+  max_age: 7
+
+metrics:
+  enabled: true
+  port: 9091
+  path: "/metrics"
+
+monitoring:
+  health_check_interval: 30s
+  error_threshold: 5
+  recovery_timeout: 1m

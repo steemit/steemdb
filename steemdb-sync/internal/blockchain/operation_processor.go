@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/steemdb/sync/internal/database"
@@ -503,19 +501,102 @@ func (p *OperationProcessor) handleReblog(ctx context.Context, op *Operation, da
 	return nil
 }
 
-// Placeholder handlers for operations we don't fully implement yet
+// handlePow processes proof of work operations
 func (p *OperationProcessor) handlePow(ctx context.Context, op *Operation) error {
-	// TODO: Implement POW operation handling
+	opData, ok := op.Operation.Op[1].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid pow operation data")
+	}
+
+	pow := &database.Pow{
+		ID:        fmt.Sprintf("%d/%s", op.Block.Number, getString(opData, "worker")),
+		Worker:    getString(opData, "worker"),
+		Signature: getString(opData, "signature"),
+		Timestamp: op.Operation.Timestamp,
+		BlockNum:  op.Block.Number,
+	}
+
+	// Parse input and work as maps
+	if input, ok := opData["input"].(map[string]interface{}); ok {
+		pow.Input = input
+	}
+	if work, ok := opData["work"].(map[string]interface{}); ok {
+		pow.Work = work
+	}
+
+	collection := p.db.Collection("pow")
+	_, err := collection.InsertOne(ctx, pow)
+	if err != nil {
+		return fmt.Errorf("failed to save pow: %w", err)
+	}
+
 	return nil
 }
 
+// handleCommentOptions processes comment options operations
 func (p *OperationProcessor) handleCommentOptions(ctx context.Context, op *Operation) error {
-	// TODO: Implement comment options handling
+	opData, ok := op.Operation.Op[1].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid comment options operation data")
+	}
+
+	// Update the comment with options
+	commentID := fmt.Sprintf("%s/%s", getString(opData, "author"), getString(opData, "permlink"))
+	
+	update := map[string]interface{}{
+		"$set": map[string]interface{}{
+			"last_update": op.Operation.Timestamp,
+		},
+	}
+
+	// Add specific options if present
+	if maxPayout := getString(opData, "max_accepted_payout"); maxPayout != "" {
+		update["$set"].(map[string]interface{})["max_accepted_payout"] = parseAmountValue(maxPayout)
+	}
+	if percentSBD, ok := opData["percent_steem_dollars"].(float64); ok {
+		update["$set"].(map[string]interface{})["percent_steem_dollars"] = int(percentSBD)
+	}
+	if allowVotes, ok := opData["allow_votes"].(bool); ok {
+		update["$set"].(map[string]interface{})["allow_votes"] = allowVotes
+	}
+	if allowCurationRewards, ok := opData["allow_curation_rewards"].(bool); ok {
+		update["$set"].(map[string]interface{})["allow_curation_rewards"] = allowCurationRewards
+	}
+
+	collection := p.db.Collection("comment")
+	_, err := collection.UpdateOne(ctx, map[string]interface{}{"_id": commentID}, update)
+	if err != nil {
+		return fmt.Errorf("failed to update comment options: %w", err)
+	}
+
 	return nil
 }
 
+// handleBenefactorReward processes benefactor reward operations
 func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Operation) error {
-	// TODO: Implement benefactor reward handling
+	opData, ok := op.Operation.Op[1].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid benefactor reward operation data")
+	}
+
+	reward := &database.BenefactorReward{
+		ID:              fmt.Sprintf("%d/%s/%s/%s", op.Block.Number, getString(opData, "benefactor"), getString(opData, "author"), getString(opData, "permlink")),
+		Benefactor:      getString(opData, "benefactor"),
+		Author:          getString(opData, "author"),
+		Permlink:        getString(opData, "permlink"),
+		SBDPayout:       parseAmountValue(getString(opData, "sbd_payout")),
+		SteemPayout:     parseAmountValue(getString(opData, "steem_payout")),
+		VestingPayout:   parseAmountValue(getString(opData, "vesting_payout")),
+		Timestamp:       op.Operation.Timestamp,
+		BlockNum:        op.Block.Number,
+	}
+
+	collection := p.db.Collection("benefactor_reward")
+	_, err := collection.InsertOne(ctx, reward)
+	if err != nil {
+		return fmt.Errorf("failed to save benefactor reward: %w", err)
+	}
+
 	return nil
 }
 
@@ -555,20 +636,9 @@ func getBool(data map[string]interface{}, key string) bool {
 }
 
 func parseAmount(amountStr string) (float64, string) {
-	parts := strings.Fields(amountStr)
-	if len(parts) != 2 {
-		return 0, ""
-	}
-
-	amount, err := strconv.ParseFloat(parts[0], 64)
-	if err != nil {
-		return 0, parts[1]
-	}
-
-	return amount, parts[1]
+	return utils.ParseAmount(amountStr)
 }
 
 func parseAmountValue(amountStr string) float64 {
-	amount, _ := parseAmount(amountStr)
-	return amount
+	return utils.ParseAmountValue(amountStr)
 }

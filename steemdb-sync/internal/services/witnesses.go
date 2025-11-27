@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -157,10 +156,10 @@ func (w *WitnessService) updateWitnesses(ctx context.Context) error {
 // processWitnessData processes raw witness data from blockchain
 func (w *WitnessService) processWitnessData(witness *steem.Witness, scanTime time.Time) *database.Witness {
 	// Parse numeric values
-	votes := parseFloat64Value(witness.Votes)
-	virtualLastUpdate := parseFloat64Value(witness.VirtualLastUpdate)
-	virtualPosition := parseFloat64Value(witness.VirtualPosition)
-	virtualScheduledTime := parseFloat64Value(witness.VirtualScheduledTime)
+	votes := utils.ParseFloat64Value(witness.Votes)
+	virtualLastUpdate := utils.ParseFloat64Value(witness.VirtualLastUpdate)
+	virtualPosition := utils.ParseFloat64Value(witness.VirtualPosition)
+	virtualScheduledTime := utils.ParseFloat64Value(witness.VirtualScheduledTime)
 
 	// Convert props to map
 	propsMap := map[string]interface{}{
@@ -268,10 +267,3 @@ func (w *WitnessService) checkWitnessMisses(ctx context.Context) error {
 	return nil
 }
 
-// Utility function
-func parseFloat64Value(str string) float64 {
-	if val, err := strconv.ParseFloat(str, 64); err == nil {
-		return val
-	}
-	return 0
-}

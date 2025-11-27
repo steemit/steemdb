@@ -3,8 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -254,14 +252,14 @@ func (h *HistoryService) processAccountData(account *steem.Account) *database.Ac
 	// Parse numeric values
 	reputation := int64(0)
 	if account.Reputation != "" {
-		if rep, err := parseFloat64(account.Reputation); err == nil {
+		if rep, err := utils.ParseFloat64(account.Reputation); err == nil {
 			reputation = int64(rep)
 		}
 	}
 
-	vestingShares := parseAmountValue(account.VestingShares)
-	balance := parseAmountValue(account.Balance)
-	sbdBalance := parseAmountValue(account.SBDBalance)
+	vestingShares := utils.ParseAmountValue(account.VestingShares)
+	balance := utils.ParseAmountValue(account.Balance)
+	sbdBalance := utils.ParseAmountValue(account.SBDBalance)
 
 	return &database.Account{
 		ID:                    account.Name,
@@ -277,7 +275,7 @@ func (h *HistoryService) processAccountData(account *steem.Account) *database.Ac
 		LastPost:              account.LastPost,
 		LastVoteTime:          account.LastVoteTime,
 		NextVestingWithdrawal: account.NextVestingWithdrawal,
-		VestingWithdrawRate:   parseAmountValue(account.VestingWithdrawRate),
+		VestingWithdrawRate:   utils.ParseAmountValue(account.VestingWithdrawRate),
 		WitnessVotes:          account.WitnessVotes,
 		JsonMetadata:          account.JsonMetadata,
 		Scanned:               time.Now(),
@@ -312,9 +310,9 @@ func (h *HistoryService) updateFundHistory(ctx context.Context) error {
 	fundHistory := &database.FundsHistory{
 		ID:                      fmt.Sprintf("post|%d", time.Now().Unix()),
 		Name:                    fund.Name,
-		RewardBalance:           parseAmountValue(fund.RewardBalance),
-		RecentClaims:            parseFloat64Value(fund.RecentClaims),
-		ContentConstant:         parseFloat64Value(fund.ContentConstant),
+		RewardBalance:           utils.ParseAmountValue(fund.RewardBalance),
+		RecentClaims:            utils.ParseFloat64Value(fund.RecentClaims),
+		ContentConstant:         utils.ParseFloat64Value(fund.ContentConstant),
 		PercentCuration:         fund.PercentCurationRewards,
 		PercentContent:          fund.PercentContentRewards,
 		LastUpdate:              fund.LastUpdate,
@@ -331,26 +329,3 @@ func (h *HistoryService) updateFundHistory(ctx context.Context) error {
 	return nil
 }
 
-// Utility functions
-func parseAmountValue(amountStr string) float64 {
-	parts := strings.Fields(amountStr)
-	if len(parts) == 0 {
-		return 0
-	}
-	
-	if amount, err := strconv.ParseFloat(parts[0], 64); err == nil {
-		return amount
-	}
-	return 0
-}
-
-func parseFloat64(str string) (float64, error) {
-	return strconv.ParseFloat(str, 64)
-}
-
-func parseFloat64Value(str string) float64 {
-	if val, err := parseFloat64(str); err == nil {
-		return val
-	}
-	return 0
-}

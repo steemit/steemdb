@@ -198,11 +198,16 @@ func (s *BlockSyncService) blockProcessor(ctx context.Context, workerID int) {
 					utils.Error(err),
 				)
 				s.incrementErrorCount()
+				utils.ErrorsTotal.WithLabelValues("block_sync", "block_processing").Inc()
 				continue
 			}
 
 			s.updateLastBlock(blockNum)
 			s.incrementBlockCount()
+			
+			// Update metrics
+			utils.BlocksProcessed.WithLabelValues("block_sync").Inc()
+			utils.CurrentBlock.WithLabelValues("block_sync").Set(float64(blockNum))
 		}
 	}
 }
@@ -272,6 +277,13 @@ func (s *BlockSyncService) operationProcessor(ctx context.Context, workerID int)
 				continue
 			}
 			s.incrementOperationCount()
+			
+			// Update metrics
+			if len(op.Operation.Op) > 0 {
+				if opType, ok := op.Operation.Op[0].(string); ok {
+					utils.OperationsProcessed.WithLabelValues(opType).Inc()
+				}
+			}
 		}
 	}
 }

@@ -122,6 +122,19 @@ type CurationReward struct {
 	BlockNum        int64     `bson:"block_num" json:"block_num"`
 }
 
+// BenefactorReward represents a benefactor reward
+type BenefactorReward struct {
+	ID            string    `bson:"_id" json:"id"`
+	Benefactor    string    `bson:"benefactor" json:"benefactor"`
+	Author        string    `bson:"author" json:"author"`
+	Permlink      string    `bson:"permlink" json:"permlink"`
+	SBDPayout     float64   `bson:"sbd_payout" json:"sbd_payout"`
+	SteemPayout   float64   `bson:"steem_payout" json:"steem_payout"`
+	VestingPayout float64   `bson:"vesting_payout" json:"vesting_payout"`
+	Timestamp     time.Time `bson:"_ts" json:"timestamp"`
+	BlockNum      int64     `bson:"block_num" json:"block_num"`
+}
+
 // VestingDeposit represents a vesting deposit operation
 type VestingDeposit struct {
 	ID        string    `bson:"_id" json:"id"`
