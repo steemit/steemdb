@@ -36,12 +36,18 @@ See `project.mdc` for detailed package management rules and guidelines.
 ## Git Commit Policy
 
 - **Never automatically commit changes without explicit user confirmation**
+- **All git commit messages must be written in English**
 - Before creating any commit:
   1. Show the user what files will be committed (`git status`)
   2. Present the proposed commit message
   3. Wait for explicit user approval before executing `git commit`
 - Only use `git add` and prepare commits, but always ask for confirmation before committing
 - This ensures the user maintains full control over the git history and commit timing
+- English commit messages ensure:
+  - Consistency with international development standards
+  - Better collaboration with global development teams
+  - Improved readability for open-source contributions
+  - Standard practice in professional software development
 
 ## Documentation Update Policy
 

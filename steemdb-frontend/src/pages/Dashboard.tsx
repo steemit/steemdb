@@ -1,0 +1,245 @@
+import React, { useEffect } from 'react';
+import { Activity, Blocks, Users, Shield, TrendingUp, Clock } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
+import { useBlockchainStore, useWebSocketStore } from '../store';
+import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
+import { wsClient } from '../lib/websocket';
+
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  description?: string;
+  icon: React.ReactNode;
+  trend?: {
+    value: number;
+    isPositive: boolean;
+  };
+}
+
+function StatCard({ title, value, description, icon, trend }: StatCardProps) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <div className="text-muted-foreground">{icon}</div>
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        {description && (
+          <p className="text-xs text-muted-foreground">{description}</p>
+        )}
+        {trend && (
+          <div className="flex items-center pt-1">
+            <TrendingUp className={`h-3 w-3 mr-1 ${trend.isPositive ? 'text-green-600' : 'text-red-600'}`} />
+            <span className={`text-xs ${trend.isPositive ? 'text-green-600' : 'text-red-600'}`}>
+              {trend.isPositive ? '+' : ''}{trend.value}%
+            </span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface RecentBlockProps {
+  block: {
+    number: number;
+    timestamp: string;
+    witness: string;
+    transactions: number;
+    operations: number;
+  };
+}
+
+function RecentBlock({ block }: RecentBlockProps) {
+  return (
+    <div className="flex items-center justify-between p-3 border rounded-lg">
+      <div className="flex items-center space-x-3">
+        <div className="flex items-center justify-center w-8 h-8 bg-primary/10 rounded-full">
+          <Blocks className="h-4 w-4 text-primary" />
+        </div>
+        <div>
+          <div className="font-medium">Block #{formatNumber(block.number)}</div>
+          <div className="text-sm text-muted-foreground">
+            by @{block.witness}
+          </div>
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-sm font-medium">
+          {block.transactions} txs, {block.operations} ops
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {formatTimeAgo(block.timestamp)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Dashboard() {
+  const { props, stats, latestBlocks } = useBlockchainStore();
+  const { state: wsState } = useWebSocketStore();
+
+  useEffect(() => {
+    // Subscribe to real-time data
+    const unsubscribeProps = wsClient.on('props', (message) => {
+      useBlockchainStore.getState().setProps(message.data);
+    });
+
+    const unsubscribeBlocks = wsClient.on('blocks', (message) => {
+      useBlockchainStore.getState().addBlock(message.data);
+    });
+
+    const unsubscribeState = wsClient.on('state', (message) => {
+      useBlockchainStore.getState().setStats(message.data);
+    });
+
+    // Subscribe to channels
+    wsClient.subscribe('props');
+    wsClient.subscribe('blocks');
+    wsClient.subscribe('state');
+
+    return () => {
+      unsubscribeProps();
+      unsubscribeBlocks();
+      unsubscribeState();
+      wsClient.unsubscribe('props');
+      wsClient.unsubscribe('blocks');
+      wsClient.unsubscribe('state');
+    };
+  }, []);
+
+  const getConnectionStatus = () => {
+    switch (wsState) {
+      case 'connected':
+        return <Badge variant="success">Live</Badge>;
+      case 'connecting':
+        return <Badge variant="warning">Connecting</Badge>;
+      case 'disconnected':
+        return <Badge variant="destructive">Offline</Badge>;
+      default:
+        return <Badge variant="outline">Unknown</Badge>;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Real-time overview of the Steem blockchain
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Clock className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">
+            {new Date().toLocaleTimeString()}
+          </span>
+          {getConnectionStatus()}
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          title="Current Block"
+          value={props ? formatNumber(props.head_block_number) : '-'}
+          description="Latest block height"
+          icon={<Blocks className="h-4 w-4" />}
+        />
+        <StatCard
+          title="Current Witness"
+          value={props ? `@${props.current_witness}` : '-'}
+          description="Block producer"
+          icon={<Shield className="h-4 w-4" />}
+        />
+        <StatCard
+          title="Total Accounts"
+          value={stats ? formatNumber(stats.accounts) : '-'}
+          description="Registered users"
+          icon={<Users className="h-4 w-4" />}
+        />
+        <StatCard
+          title="Virtual Supply"
+          value={props ? formatCurrency(props.virtual_supply) : '-'}
+          description="Total STEEM supply"
+          icon={<Activity className="h-4 w-4" />}
+        />
+      </div>
+
+      {/* Additional Stats */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">SBD Supply</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {props ? formatCurrency(props.current_sbd_supply, 'SBD') : '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Current SBD in circulation
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Vesting Fund</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {props ? formatCurrency(props.total_vesting_fund_steem) : '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Total vested STEEM
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Reward Fund</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {props ? formatCurrency(props.total_reward_fund_steem) : '-'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Available for rewards
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Blocks */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Blocks</CardTitle>
+          <CardDescription>
+            Latest blocks produced on the Steem blockchain
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {latestBlocks.length > 0 ? (
+              latestBlocks.slice(0, 5).map((block) => (
+                <RecentBlock key={block.number} block={block} />
+              ))
+            ) : (
+              <div className="text-center py-6 text-muted-foreground">
+                <Blocks className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No recent blocks available</p>
+                <p className="text-sm">Connect to see live data</p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

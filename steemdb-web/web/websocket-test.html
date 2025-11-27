@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SteemDB WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .connecting { background-color: #fff3cd; color: #856404; }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-success { background-color: #28a745; color: white; }
+        .btn-warning { background-color: #ffc107; color: #212529; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .message {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .message.props { background-color: #e3f2fd; }
+        .message.block { background-color: #e8f5e8; }
+        .message.state { background-color: #fff3e0; }
+        .message.operation { background-color: #fce4ec; }
+        .message.error { background-color: #ffebee; color: #c62828; }
+        
+        .subscription-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>SteemDB WebSocket Test</h1>
+    
+    <div class="container">
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="controls">
+            <button id="connectBtn" class="btn-primary">Connect</button>
+            <button id="disconnectBtn" class="btn-danger" disabled>Disconnect</button>
+            <button id="clearBtn" class="btn-warning">Clear Messages</button>
+        </div>
+        
+        <div class="subscription-form">
+            <input type="text" id="channelInput" placeholder="Enter channel name (e.g., blocks, props, state, @username)" value="blocks">
+            <button id="subscribeBtn" class="btn-success" disabled>Subscribe</button>
+            <button id="unsubscribeBtn" class="btn-warning" disabled>Unsubscribe</button>
+        </div>
+        
+        <div>
+            <strong>Active Subscriptions:</strong>
+            <span id="subscriptions">None</span>
+        </div>
+    </div>
+    
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-value" id="messagesCount">0</div>
+            <div class="stat-label">Messages Received</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="lastBlock">-</div>
+            <div class="stat-label">Last Block</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="currentWitness">-</div>
+            <div class="stat-label">Current Witness</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="connectionTime">-</div>
+            <div class="stat-label">Connection Time</div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h3>Messages</h3>
+        <div id="messages" class="messages"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        let connectionStartTime = null;
+        let subscriptions = new Set();
+        
+        const statusEl = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const subscribeBtn = document.getElementById('subscribeBtn');
+        const unsubscribeBtn = document.getElementById('unsubscribeBtn');
+        const channelInput = document.getElementById('channelInput');
+        const messagesEl = document.getElementById('messages');
+        const subscriptionsEl = document.getElementById('subscriptions');
+        
+        // Stats elements
+        const messagesCountEl = document.getElementById('messagesCount');
+        const lastBlockEl = document.getElementById('lastBlock');
+        const currentWitnessEl = document.getElementById('currentWitness');
+        const connectionTimeEl = document.getElementById('connectionTime');
+        
+        function updateStatus(status, className) {
+            statusEl.textContent = status;
+            statusEl.className = `status ${className}`;
+        }
+        
+        function addMessage(type, data) {
+            messageCount++;
+            messagesCountEl.textContent = messageCount;
+            
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+            
+            messageEl.innerHTML = `<strong>[${timestamp}] ${type.toUpperCase()}:</strong><br>${content}`;
+            
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            
+            // Update stats based on message type
+            if (type === 'block' && data.number) {
+                lastBlockEl.textContent = data.number;
+            } else if (type === 'props' && data.current_witness) {
+                currentWitnessEl.textContent = data.current_witness;
+                if (data.head_block_number) {
+                    lastBlockEl.textContent = data.head_block_number;
+                }
+            }
+        }
+        
+        function updateConnectionTime() {
+            if (connectionStartTime) {
+                const elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                connectionTimeEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+        
+        function updateSubscriptions() {
+            subscriptionsEl.textContent = subscriptions.size > 0 ? Array.from(subscriptions).join(', ') : 'None';
+        }
+        
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                return;
+            }
+            
+            updateStatus('Connecting...', 'connecting');
+            connectBtn.disabled = true;
+            
+            const wsUrl = `ws://${window.location.host}/ws`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                updateStatus('Connected', 'connected');
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                subscribeBtn.disabled = false;
+                unsubscribeBtn.disabled = false;
+                connectionStartTime = Date.now();
+                
+                addMessage('info', 'WebSocket connected');
+                
+                // Auto-subscribe to blocks channel
+                subscribe('blocks');
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    addMessage(message.type || 'unknown', message.data || message);
+                } catch (e) {
+                    addMessage('error', `Failed to parse message: ${event.data}`);
+                }
+            };
+            
+            ws.onclose = function(event) {
+                updateStatus('Disconnected', 'disconnected');
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                subscribeBtn.disabled = true;
+                unsubscribeBtn.disabled = true;
+                connectionStartTime = null;
+                connectionTimeEl.textContent = '-';
+                
+                addMessage('info', `WebSocket closed (code: ${event.code})`);
+            };
+            
+            ws.onerror = function(error) {
+                addMessage('error', `WebSocket error: ${error}`);
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                subscriptions.clear();
+                updateSubscriptions();
+            }
+        }
+        
+        function subscribe(channel) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('error', 'Not connected');
+                return;
+            }
+            
+            const message = {
+                action: 'subscribe',
+                channel: channel
+            };
+            
+            ws.send(JSON.stringify(message));
+            subscriptions.add(channel);
+            updateSubscriptions();
+            addMessage('info', `Subscribed to channel: ${channel}`);
+        }
+        
+        function unsubscribe(channel) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('error', 'Not connected');
+                return;
+            }
+            
+            const message = {
+                action: 'unsubscribe',
+                channel: channel
+            };
+            
+            ws.send(JSON.stringify(message));
+            subscriptions.delete(channel);
+            updateSubscriptions();
+            addMessage('info', `Unsubscribed from channel: ${channel}`);
+        }
+        
+        // Event listeners
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+        clearBtn.addEventListener('click', () => {
+            messagesEl.innerHTML = '';
+            messageCount = 0;
+            messagesCountEl.textContent = '0';
+        });
+        
+        subscribeBtn.addEventListener('click', () => {
+            const channel = channelInput.value.trim();
+            if (channel) {
+                subscribe(channel);
+                channelInput.value = '';
+            }
+        });
+        
+        unsubscribeBtn.addEventListener('click', () => {
+            const channel = channelInput.value.trim();
+            if (channel) {
+                unsubscribe(channel);
+                channelInput.value = '';
+            }
+        });
+        
+        channelInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                subscribeBtn.click();
+            }
+        });
+        
+        // Update connection time every second
+        setInterval(updateConnectionTime, 1000);
+        
+        // Auto-connect on page load
+        window.addEventListener('load', () => {
+            setTimeout(connect, 1000);
+        });
+    </script>
+</body>
+</html>
