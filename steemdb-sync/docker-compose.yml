@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  steemdb-sync:
+    build: .
+    restart: unless-stopped
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/steemdb
+      - REDIS_ADDR=redis:6379
+      - STEEM_NODES=https://api.steemit.com,https://api.steemitdev.com
+      - LOG_LEVEL=info
+    volumes:
+      - ./configs:/app/configs
+      - ./logs:/var/log
+    ports:
+      - "9091:9091"  # Metrics port
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - steemdb
+
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_DATABASE=steemdb
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - steemdb
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - steemdb
+
+  # Optional: MongoDB Express for database management
+  mongo-express:
+    image: mongo-express:latest
+    restart: unless-stopped
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongo
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin123
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mongo
+    networks:
+      - steemdb
+
+  # Optional: Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - steemdb
+
+  # Optional: Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - steemdb
+
+volumes:
+  mongo_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  steemdb:
+    driver: bridge
