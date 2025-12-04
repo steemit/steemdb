@@ -5,39 +5,44 @@ import (
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.uber.org/zap"
+
+	"github.com/steemdb/sync/internal/utils"
 	"github.com/steemdb/sync/pkg/steem"
 )
 
 // MockLogger for testing
 type MockLogger struct{}
 
-func (m *MockLogger) Debug(msg string, fields ...interface{}) {}
-func (m *MockLogger) Info(msg string, fields ...interface{})  {}
-func (m *MockLogger) Warn(msg string, fields ...interface{})  {}
-func (m *MockLogger) Error(msg string, fields ...interface{}) {}
-func (m *MockLogger) Fatal(msg string, fields ...interface{}) {}
-func (m *MockLogger) With(fields ...interface{}) interface{}  { return m }
-func (m *MockLogger) Sync() error                             { return nil }
+func (m *MockLogger) Debug(msg string, fields ...zap.Field) {}
+func (m *MockLogger) Info(msg string, fields ...zap.Field)  {}
+func (m *MockLogger) Warn(msg string, fields ...zap.Field)  {}
+func (m *MockLogger) Error(msg string, fields ...zap.Field) {}
+func (m *MockLogger) Fatal(msg string, fields ...zap.Field) {}
+func (m *MockLogger) With(fields ...zap.Field) utils.Logger { return m }
+func (m *MockLogger) Sync() error                           { return nil }
 
 // MockDatabase for testing
 type MockDatabase struct{}
 
-func (m *MockDatabase) Collection(name string) interface{} {
+func (m *MockDatabase) Collection(name string) Collection {
 	return &MockCollection{}
 }
 
 type MockCollection struct{}
 
-func (m *MockCollection) InsertOne(ctx context.Context, document interface{}) (interface{}, error) {
-	return nil, nil
+func (m *MockCollection) InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error) {
+	return &mongo.InsertOneResult{InsertedID: nil}, nil
 }
 
-func (m *MockCollection) UpdateOne(ctx context.Context, filter, update interface{}, opts ...interface{}) (interface{}, error) {
-	return nil, nil
+func (m *MockCollection) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return &mongo.UpdateResult{MatchedCount: 1, ModifiedCount: 1}, nil
 }
 
-func (m *MockCollection) FindOne(ctx context.Context, filter interface{}) interface{} {
-	return &MockSingleResult{}
+func (m *MockCollection) FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult {
+	return mongo.NewSingleResultFromDocument(nil, nil, nil)
 }
 
 type MockSingleResult struct{}
@@ -50,14 +55,14 @@ func TestOperationProcessor_Process(t *testing.T) {
 	// Create mock dependencies
 	mockDB := &MockDatabase{}
 	mockLogger := &MockLogger{}
-	
+
 	// Create processor
 	processor := &OperationProcessor{
 		db:       mockDB,
 		logger:   mockLogger,
 		handlers: make(map[string]OperationHandler),
 	}
-	
+
 	// Register a simple handler for testing
 	processor.handlers["test_op"] = func(ctx context.Context, op *Operation) error {
 		return nil
@@ -135,9 +140,9 @@ func TestGetString(t *testing.T) {
 
 func TestGetFloat64(t *testing.T) {
 	data := map[string]interface{}{
-		"float_field":  123.456,
-		"int_field":    123,
-		"string_field": "456.789",
+		"float_field":    123.456,
+		"int_field":      123,
+		"string_field":   "456.789",
 		"invalid_string": "not_a_number",
 	}
 
@@ -170,13 +175,13 @@ func BenchmarkOperationProcessor_Process(b *testing.B) {
 	// Create mock dependencies
 	mockDB := &MockDatabase{}
 	mockLogger := &MockLogger{}
-	
+
 	processor := &OperationProcessor{
 		db:       mockDB,
 		logger:   mockLogger,
 		handlers: make(map[string]OperationHandler),
 	}
-	
+
 	processor.handlers["vote"] = func(ctx context.Context, op *Operation) error {
 		return nil
 	}

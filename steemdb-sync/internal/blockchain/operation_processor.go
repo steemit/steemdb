@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/steemdb/sync/internal/database"
@@ -20,9 +21,47 @@ type Operation struct {
 	Operation *steem.Operation
 }
 
+// Collection interface for collection operations
+type Collection interface {
+	InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error)
+	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult
+}
+
+// mongoCollectionAdapter adapts *mongo.Collection to Collection interface
+type mongoCollectionAdapter struct {
+	*mongo.Collection
+}
+
+func (a *mongoCollectionAdapter) InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error) {
+	return a.Collection.InsertOne(ctx, document)
+}
+
+func (a *mongoCollectionAdapter) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+	return a.Collection.UpdateOne(ctx, filter, update, opts...)
+}
+
+func (a *mongoCollectionAdapter) FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult {
+	return a.Collection.FindOne(ctx, filter)
+}
+
+// Database interface for database operations
+type Database interface {
+	Collection(name string) Collection
+}
+
+// mongoDatabaseAdapter adapts *database.MongoDB to Database interface
+type mongoDatabaseAdapter struct {
+	db *database.MongoDB
+}
+
+func (a *mongoDatabaseAdapter) Collection(name string) Collection {
+	return &mongoCollectionAdapter{Collection: a.db.Collection(name)}
+}
+
 // OperationProcessor processes blockchain operations
 type OperationProcessor struct {
-	db       *database.MongoDB
+	db       Database
 	logger   utils.Logger
 	handlers map[string]OperationHandler
 }
@@ -33,7 +72,7 @@ type OperationHandler func(ctx context.Context, op *Operation) error
 // NewOperationProcessor creates a new operation processor
 func NewOperationProcessor(db *database.MongoDB, logger utils.Logger) *OperationProcessor {
 	p := &OperationProcessor{
-		db:       db,
+		db:       &mongoDatabaseAdapter{db: db},
 		logger:   logger,
 		handlers: make(map[string]OperationHandler),
 	}
