@@ -185,32 +185,84 @@ api:
 
 ## 🐳 Docker Deployment
 
+### Directory Structure
+
+Docker-related configuration files are organized in the `docker/` directory:
+
+```
+steemdb-web/
+├── docker/                    # Docker configuration files
+│   ├── nginx/                 # Nginx configuration
+│   ├── supervisor/            # Supervisord configuration
+│   └── CONFIGURATION.md       # Configuration guide
+├── configs/                   # Application configuration (mounted at runtime)
+│   └── config.yaml           # Default configuration
+└── docker-compose.yml        # Docker Compose configuration
+```
+
+### Configuration Mounting
+
+The application configuration (`config.yaml`) is mounted from the host system into the container. This allows you to modify configuration without rebuilding the image.
+
+**Default mount location:**
+- Host: `./configs/config.yaml`
+- Container: `/app/configs/config.yaml`
+
+**To use a custom configuration:**
+
+1. Edit `configs/config.yaml` on the host system
+2. The changes will be available in the container (restart required for changes to take effect)
+
+For detailed configuration instructions, see [docker/CONFIGURATION.md](docker/CONFIGURATION.md).
+
 ### Using Docker Compose
 
-1. **Build and start all services**
+1. **Configure the application**
    ```bash
-   docker-compose up --build
+   # Edit configuration file
+   vim configs/config.yaml
    ```
 
-2. **Scale the web service**
+2. **Build and start all services**
    ```bash
-   docker-compose up --scale web=3
+   docker-compose up --build -d
+   ```
+
+3. **View logs**
+   ```bash
+   docker-compose logs -f steemdb-web
+   ```
+
+4. **Restart after configuration changes**
+   ```bash
+   docker-compose restart steemdb-web
    ```
 
 ### Using Docker
 
 1. **Build the image**
    ```bash
-   docker build -t steemdb-web .
+   # From project root
+   docker build -f steemdb-web/Dockerfile -t steemdb-web .
    ```
 
 2. **Run the container**
    ```bash
-   docker run -p 8080:8080 \
+   docker run -d \
+     -p 80:80 \
+     -v $(pwd)/steemdb-web/configs:/app/configs \
      -e MONGODB_URI=mongodb://mongo:27017 \
      -e REDIS_ADDR=redis:6379 \
+     --name steemdb-web \
      steemdb-web
    ```
+
+### Access Points
+
+- Frontend: `http://localhost/`
+- API: `http://localhost/api/v1/...`
+- WebSocket: `ws://localhost/ws`
+- Health Check: `http://localhost/health`
 
 ## 📊 Monitoring
 

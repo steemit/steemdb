@@ -1,17 +1,22 @@
 version: '3.8'
 
 services:
-  # SteemDB Web Service
+  # SteemDB Web Service (includes Nginx + Go backend)
   steemdb-web:
-    build: .
+    build:
+      context: ..
+      dockerfile: steemdb-web/Dockerfile
     ports:
-      - "8080:8080"
-      - "9090:9090"  # Metrics port
+      - "80:80"  # Nginx port
+      - "9090:9090"  # Metrics port (if exposed)
     environment:
       - SERVER_MODE=production
       - MONGODB_URI=mongodb://mongo:27017
       - REDIS_ADDR=redis:6379
     volumes:
+      # Mount configuration directory from host to container
+      # Edit configs/config.yaml on host to change application settings
+      # Restart container after configuration changes: docker-compose restart steemdb-web
       - ./configs:/app/configs
       - ./logs:/app/logs
     depends_on:
@@ -21,7 +26,7 @@ services:
     networks:
       - steemdb-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -105,21 +110,7 @@ services:
     depends_on:
       - prometheus
 
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - nginx_logs:/var/log/nginx
-    depends_on:
-      - steemdb-web
-    restart: unless-stopped
-    networks:
-      - steemdb-network
+  # Note: Nginx is now integrated into steemdb-web container
 
 volumes:
   mongo_data:

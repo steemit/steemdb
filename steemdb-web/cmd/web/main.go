@@ -132,12 +132,6 @@ func main() {
 		})
 	})
 
-	// Setup static files
-	router.Static("/static", "./web")
-	router.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, "/static/websocket-test.html")
-	})
-
 	// Setup WebSocket endpoint
 	if config.WebSocket.Enabled && wsService != nil {
 		router.GET(config.WebSocket.Path, func(c *gin.Context) {

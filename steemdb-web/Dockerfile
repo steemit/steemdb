@@ -1,5 +1,27 @@
-# Build stage
-FROM golang:1.21-alpine AS builder
+# Frontend build stage
+FROM node:20-alpine AS frontend-builder
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Set working directory
+WORKDIR /app
+
+# Copy frontend package files
+COPY steemdb-frontend/package.json steemdb-frontend/pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy frontend source code
+COPY steemdb-frontend/ ./
+
+# Build frontend (set NODE_ENV=production for production build)
+ENV NODE_ENV=production
+RUN pnpm build
+
+# Go build stage
+FROM golang:1.21-alpine AS go-builder
 
 # Install git and ca-certificates
 RUN apk add --no-cache git ca-certificates
@@ -8,13 +30,13 @@ RUN apk add --no-cache git ca-certificates
 WORKDIR /app
 
 # Copy go mod files
-COPY go.mod go.sum ./
+COPY steemdb-web/go.mod steemdb-web/go.sum ./
 
 # Download dependencies
 RUN go mod download
 
 # Copy source code
-COPY . .
+COPY steemdb-web/ .
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o steemdb-web cmd/web/main.go
@@ -22,8 +44,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o steemdb-web cmd/w
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+# Install required packages
+RUN apk --no-cache add \
+    ca-certificates \
+    nginx \
+    supervisor \
+    wget
+
+# Create directories
+RUN mkdir -p /app /var/log/nginx /var/log/steemdb-web /var/log/supervisor \
+    && mkdir -p /etc/nginx/conf.d /etc/supervisor/conf.d
 
 # Create non-root user
 RUN addgroup -g 1001 -S steemdb && \
@@ -32,24 +62,32 @@ RUN addgroup -g 1001 -S steemdb && \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from builder stage
-COPY --from=builder /app/steemdb-web .
+# Copy Go binary from builder stage
+COPY --from=go-builder /app/steemdb-web .
 
 # Copy configuration files
-COPY --from=builder /app/configs ./configs
+COPY --from=go-builder /app/configs ./configs
 
-# Change ownership
-RUN chown -R steemdb:steemdb /app
+# Copy frontend build artifacts
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 
-# Switch to non-root user
-USER steemdb
+# Copy Nginx configuration
+COPY steemdb-web/docker/nginx/nginx.conf /etc/nginx/nginx.conf
 
-# Expose port
-EXPOSE 8080
+# Copy Supervisord configuration
+COPY steemdb-web/docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+# Create log directories and set permissions
+RUN chown -R steemdb:steemdb /app /var/log/steemdb-web && \
+    chown -R nginx:nginx /var/log/nginx /usr/share/nginx/html && \
+    chmod -R 755 /usr/share/nginx/html
 
-# Run the application
-CMD ["./steemdb-web", "configs/config.yaml"]
+# Expose port 80 (Nginx)
+EXPOSE 80
+
+# Health check (check Nginx)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost/health || exit 1
+
+# Run supervisord
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
