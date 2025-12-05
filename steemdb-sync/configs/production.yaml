@@ -7,7 +7,6 @@ steem:
   nodes:
     - "https://api.steemit.com"
     - "https://api.steemitdev.com"
-    - "https://steemd.steemit.com"
   timeout: 30s
   retry_attempts: 5
 
