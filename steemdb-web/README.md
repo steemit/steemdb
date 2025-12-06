@@ -64,7 +64,7 @@ steemdb-web/
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.23 or later
 - MongoDB 4.4 or later
 - Redis 6.0 or later
 - Node.js 18+ (for frontend development)

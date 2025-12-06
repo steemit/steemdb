@@ -28,7 +28,7 @@ SteemDB Sync Service
 ### Prerequisites
 
 - Docker and Docker Compose
-- Go 1.21+ (for development)
+- Go 1.23+ (for development)
 - MongoDB 6.0+
 - Redis 7+
 
