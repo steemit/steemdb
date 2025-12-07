@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   # SteemDB Web Service (includes Nginx + Go backend)
   steemdb-web:
     build:
-      context: ..
+      context: .
       dockerfile: steemdb-web/Dockerfile
     ports:
       - "80:80"  # Nginx port
@@ -15,10 +13,10 @@ services:
       - REDIS_ADDR=redis:6379
     volumes:
       # Mount configuration directory from host to container
-      # Edit configs/config.yaml on host to change application settings
+      # Edit steemdb-web/configs/config.yaml on host to change application settings
       # Restart container after configuration changes: docker-compose restart steemdb-web
-      - ./configs:/app/configs
-      - ./logs:/app/logs
+      - ./steemdb-web/configs:/app/configs
+      - ./steemdb-web/logs:/app/logs
     depends_on:
       - mongo
       - redis
@@ -41,7 +39,8 @@ services:
       - MONGO_INITDB_DATABASE=steemdb
     volumes:
       - mongo_data:/data/db
-      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      # Uncomment and create mongo-init.js if you need initialization scripts
+      # - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     restart: unless-stopped
     networks:
       - steemdb-network
@@ -60,11 +59,13 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-      - ./configs/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      # Uncomment and create redis.conf if you need custom Redis configuration
+      # - ./steemdb-web/configs/redis.conf:/usr/local/etc/redis/redis.conf:ro
     restart: unless-stopped
     networks:
       - steemdb-network
-    command: redis-server /usr/local/etc/redis/redis.conf
+    # Uncomment if using custom redis.conf
+    # command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -77,8 +78,8 @@ services:
     ports:
       - "9091:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - ./steemdb-sync/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./steemdb-sync/monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -102,8 +103,9 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      # Create monitoring/grafana directories if you need Grafana provisioning
+      # - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     restart: unless-stopped
     networks:
       - steemdb-network
@@ -127,3 +129,4 @@ volumes:
 networks:
   steemdb-network:
     driver: bridge
+

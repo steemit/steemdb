@@ -34,15 +34,17 @@ SteemDB Sync Service
 
 ### Using Docker Compose (Recommended)
 
-1. Clone and navigate to the project:
+The sync service is part of the unified Docker Compose setup at the project root.
+
+1. Navigate to the project root:
 ```bash
-cd steemdb-sync
+cd /path/to/steemdb
 ```
 
-2. Configure the service:
+2. Configure the service (optional):
 ```bash
-# Edit configs/config.yaml if needed
-cp configs/config.yaml configs/config.yaml.local
+# Edit sync service configuration
+vim steemdb-sync/configs/config.yaml
 ```
 
 3. Start all services:
@@ -52,8 +54,14 @@ docker-compose up -d
 
 4. Monitor logs:
 ```bash
+# View all logs
+docker-compose logs -f
+
+# View sync service logs only
 docker-compose logs -f steemdb-sync
 ```
+
+**Note**: The unified `docker-compose.yml` at the project root orchestrates all services including MongoDB, Redis, Prometheus, and Grafana.
 
 ### Manual Setup
 
@@ -205,16 +213,41 @@ go test -bench=. ./...
 
 ## Deployment
 
-### Production Deployment
+### Docker Compose Deployment (Recommended)
+
+The sync service is deployed as part of the unified Docker Compose setup:
+
+```bash
+# From project root
+cd /path/to/steemdb
+
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f steemdb-sync
+
+# Restart service
+docker-compose restart steemdb-sync
+```
+
+### Standalone Docker Deployment
 
 1. Build production image:
 ```bash
+cd steemdb-sync
 docker build -t steemdb/sync:latest .
 ```
 
-2. Deploy with production compose:
+2. Run container:
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+docker run -d \
+  -p 9091:9091 \
+  -v $(pwd)/configs:/app/configs \
+  -e MONGODB_URI=mongodb://mongo:27017 \
+  -e REDIS_ADDR=redis:6379 \
+  --name steemdb-sync \
+  steemdb/sync:latest
 ```
 
 ### Environment Variables

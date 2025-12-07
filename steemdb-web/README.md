@@ -29,7 +29,7 @@ A modern, high-performance web service for SteemDB blockchain explorer, built wi
 
 ## 🛠 Technology Stack
 
-- **Backend**: Go 1.21, Gin Web Framework
+- **Backend**: Go 1.23, Gin Web Framework
 - **Database**: MongoDB (primary), Redis (cache)
 - **WebSocket**: Gorilla WebSocket
 - **Authentication**: JWT tokens
@@ -217,26 +217,39 @@ For detailed configuration instructions, see [docker/CONFIGURATION.md](docker/CO
 
 ### Using Docker Compose
 
-1. **Configure the application**
+The web service is part of the unified Docker Compose setup at the project root.
+
+1. **Navigate to project root**
    ```bash
-   # Edit configuration file
-   vim configs/config.yaml
+   cd /path/to/steemdb
    ```
 
-2. **Build and start all services**
+2. **Configure the application** (optional)
+   ```bash
+   # Edit configuration file
+   vim steemdb-web/configs/config.yaml
+   ```
+
+3. **Build and start all services**
    ```bash
    docker-compose up --build -d
    ```
 
-3. **View logs**
+4. **View logs**
    ```bash
+   # View all logs
+   docker-compose logs -f
+   
+   # View web service logs only
    docker-compose logs -f steemdb-web
    ```
 
-4. **Restart after configuration changes**
+5. **Restart after configuration changes**
    ```bash
    docker-compose restart steemdb-web
    ```
+
+**Note**: The unified `docker-compose.yml` at the project root orchestrates all services including MongoDB, Redis, Prometheus, and Grafana.
 
 ### Using Docker
 
