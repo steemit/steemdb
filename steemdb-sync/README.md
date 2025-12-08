@@ -245,14 +245,14 @@ docker run -d \
   -p 9091:9091 \
   -v $(pwd)/configs:/app/configs \
   -e MONGODB_URI=mongodb://mongo:27017 \
-  -e REDIS_ADDR=redis:6379 \
+  -e REDIS_URI=redis://redis:6379 \
   --name steemdb-sync \
   steemdb/sync:latest
 ```
 
 ### Environment Variables
 - `MONGODB_URI` - MongoDB connection string
-- `REDIS_ADDR` - Redis address
+- `REDIS_URI` - Redis connection URI (format: `redis://[password@]host:port[/db]` or `host:port`)
 - `STEEM_NODES` - Comma-separated Steem node URLs
 - `LOG_LEVEL` - Logging level (debug, info, warn, error)
 

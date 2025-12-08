@@ -16,7 +16,7 @@ mongodb:
   timeout: 10s
 
 redis:
-  addr: "localhost:6379"
+  uri: "redis://localhost:6379"
   password: ""
   db: 1
   pool_size: 10

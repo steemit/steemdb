@@ -17,7 +17,7 @@ mongodb:
   timeout: 30s
 
 redis:
-  addr: "${REDIS_ADDR}"
+  uri: "${REDIS_URI}"
   password: "${REDIS_PASSWORD}"
   db: 0
   pool_size: 200

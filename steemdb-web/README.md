@@ -167,7 +167,7 @@ database:
     database: "steemdb"
     pool_size: 100
   redis:
-    addr: "localhost:6379"
+    uri: "redis://localhost:6379"
     db: 0
     pool_size: 100
 ```
@@ -265,7 +265,7 @@ The web service is part of the unified Docker Compose setup at the project root.
      -p 80:80 \
      -v $(pwd)/steemdb-web/configs:/app/configs \
      -e MONGODB_URI=mongodb://mongo:27017 \
-     -e REDIS_ADDR=redis:6379 \
+     -e REDIS_URI=redis://redis:6379 \
      --name steemdb-web \
      steemdb-web
    ```
@@ -324,7 +324,7 @@ hey -n 1000 -c 10 http://localhost:8080/api/v1/blocks
 ```bash
 export SERVER_MODE=production
 export MONGODB_URI=mongodb://prod-mongo:27017
-export REDIS_ADDR=prod-redis:6379
+export REDIS_URI=redis://prod-redis:6379
 export JWT_SECRET=your-production-secret
 ```
 

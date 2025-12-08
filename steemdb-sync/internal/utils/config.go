@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/viper"
@@ -40,7 +41,7 @@ type MongoDBConfig struct {
 }
 
 type RedisConfig struct {
-	Addr     string `mapstructure:"addr"`
+	URI      string `mapstructure:"uri"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
 	PoolSize int    `mapstructure:"pool_size"`
@@ -96,15 +97,49 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Set default values
 	setDefaults()
 
+	// Enable environment variable override
+	viper.AutomaticEnv()
+	
+	// Bind specific environment variables for nested configs
+	viper.BindEnv("mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
+	viper.BindEnv("redis.uri", "DATABASE_REDIS_URI", "REDIS_URI")
+
 	// Read config file
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Explicitly check and override with environment variables if they exist
+	// This ensures environment variables always take precedence
+	if envURI := os.Getenv("DATABASE_MONGODB_URI"); envURI != "" {
+		viper.Set("mongodb.uri", envURI)
+	} else if envURI := os.Getenv("MONGODB_URI"); envURI != "" {
+		viper.Set("mongodb.uri", envURI)
+	}
+
+	if envURI := os.Getenv("DATABASE_REDIS_URI"); envURI != "" {
+		viper.Set("redis.uri", envURI)
+	} else if envURI := os.Getenv("REDIS_URI"); envURI != "" {
+		viper.Set("redis.uri", envURI)
 	}
 
 	// Unmarshal config
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// After unmarshal, explicitly override with environment variables if they exist
+	if envURI := os.Getenv("DATABASE_MONGODB_URI"); envURI != "" {
+		config.MongoDB.URI = envURI
+	} else if envURI := os.Getenv("MONGODB_URI"); envURI != "" {
+		config.MongoDB.URI = envURI
+	}
+
+	if envURI := os.Getenv("DATABASE_REDIS_URI"); envURI != "" {
+		config.Redis.URI = envURI
+	} else if envURI := os.Getenv("REDIS_URI"); envURI != "" {
+		config.Redis.URI = envURI
 	}
 
 	return &config, nil
@@ -124,7 +159,7 @@ func setDefaults() {
 	viper.SetDefault("mongodb.pool_size", 100)
 	viper.SetDefault("mongodb.timeout", "30s")
 
-	viper.SetDefault("redis.addr", "localhost:6379")
+	viper.SetDefault("redis.uri", "redis://localhost:6379")
 	viper.SetDefault("redis.password", "")
 	viper.SetDefault("redis.db", 0)
 	viper.SetDefault("redis.pool_size", 100)

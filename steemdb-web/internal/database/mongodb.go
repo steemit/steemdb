@@ -24,6 +24,11 @@ func NewMongoDB(config utils.MongoDBConfig, logger utils.Logger) (*MongoDB, erro
 	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
 	defer cancel()
 
+	// Log the URI being used for debugging
+	logger.Info("Connecting to MongoDB",
+		utils.String("uri", config.URI),
+		utils.String("database", config.Database))
+
 	// Set client options
 	clientOptions := options.Client().
 		ApplyURI(config.URI).

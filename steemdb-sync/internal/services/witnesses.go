@@ -177,7 +177,7 @@ func (w *WitnessService) processWitnessData(witness *steem.Witness, scanTime tim
 	return &database.Witness{
 		ID:                     witness.Owner,
 		Owner:                  witness.Owner,
-		CreatedTime:            witness.CreatedTime,
+		CreatedTime:            witness.CreatedTime.Time,
 		URL:                    witness.URL,
 		Votes:                  votes,
 		VirtualLastUpdate:      virtualLastUpdate,
@@ -189,11 +189,11 @@ func (w *WitnessService) processWitnessData(witness *steem.Witness, scanTime tim
 		SigningKey:             witness.SigningKey,
 		Props:                  propsMap,
 		SBDExchangeRate:        exchangeRateMap,
-		LastSBDExchangeUpdate:  witness.LastSBDExchangeUpdate,
+		LastSBDExchangeUpdate:  witness.LastSBDExchangeUpdate.Time,
 		LastWork:               witness.LastWork,
 		RunningVersion:         witness.RunningVersion,
 		HardforkVersionVote:    witness.HardforkVersionVote,
-		HardforkTimeVote:       witness.HardforkTimeVote,
+		HardforkTimeVote:       witness.HardforkTimeVote.Time,
 	}
 }
 

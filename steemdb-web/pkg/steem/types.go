@@ -3,8 +3,49 @@ package steem
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// SteemTime is a custom time type that can parse Steem API time formats
+type SteemTime struct {
+	time.Time
+}
+
+// UnmarshalJSON implements json.Unmarshaler for SteemTime
+func (t *SteemTime) UnmarshalJSON(data []byte) error {
+	// Remove quotes if present
+	timeStr := strings.Trim(string(data), `"`)
+	
+	// Try parsing with Steem format (2006-01-02T15:04:05)
+	layouts := []string{
+		"2006-01-02T15:04:05",           // Steem format without timezone
+		time.RFC3339,                    // RFC3339 with timezone
+		time.RFC3339Nano,                // RFC3339Nano with timezone
+		"2006-01-02T15:04:05Z",         // Steem format with Z
+		"2006-01-02T15:04:05.000Z",     // Steem format with milliseconds and Z
+	}
+	
+	var err error
+	for _, layout := range layouts {
+		if layout == "2006-01-02T15:04:05" {
+			// Parse without timezone, assume UTC
+			t.Time, err = time.ParseInLocation(layout, timeStr, time.UTC)
+		} else {
+			t.Time, err = time.Parse(layout, timeStr)
+		}
+		if err == nil {
+			return nil
+		}
+	}
+	
+	return err
+}
+
+// MarshalJSON implements json.Marshaler for SteemTime
+func (t SteemTime) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.Time.Format(time.RFC3339))
+}
 
 // DynamicGlobalProperties represents the dynamic global properties
 type DynamicGlobalProperties struct {
@@ -100,12 +141,12 @@ type Account struct {
 	MemoKey                   string    `json:"memo_key"`
 	JsonMetadata              string    `json:"json_metadata"`
 	Proxy                     string    `json:"proxy"`
-	LastOwnerUpdate           time.Time `json:"last_owner_update"`
-	LastAccountUpdate         time.Time `json:"last_account_update"`
-	Created                   time.Time `json:"created"`
+	LastOwnerUpdate           SteemTime `json:"last_owner_update"`
+	LastAccountUpdate         SteemTime `json:"last_account_update"`
+	Created                   SteemTime `json:"created"`
 	Mined                     bool      `json:"mined"`
 	RecoveryAccount           string    `json:"recovery_account"`
-	LastAccountRecovery       time.Time `json:"last_account_recovery"`
+	LastAccountRecovery       SteemTime `json:"last_account_recovery"`
 	ResetAccount              string    `json:"reset_account"`
 	CommentCount              int       `json:"comment_count"`
 	LifetimeBandwidth         string    `json:"lifetime_bandwidth"`
@@ -119,11 +160,11 @@ type Account struct {
 	SavingsBalance            string    `json:"savings_balance"`
 	SBDBalance                string    `json:"sbd_balance"`
 	SBDSeconds                string    `json:"sbd_seconds"`
-	SBDSecondsLastUpdate      time.Time `json:"sbd_seconds_last_update"`
-	SBDLastInterestPayment    time.Time `json:"sbd_last_interest_payment"`
+	SBDSecondsLastUpdate      SteemTime `json:"sbd_seconds_last_update"`
+	SBDLastInterestPayment    SteemTime `json:"sbd_last_interest_payment"`
 	SavingsSBDBalance         string    `json:"savings_sbd_balance"`
-	SavingsSBDSecondsLastUpdate time.Time `json:"savings_sbd_seconds_last_update"`
-	SavingsSBDLastInterestPayment time.Time `json:"savings_sbd_last_interest_payment"`
+	SavingsSBDSecondsLastUpdate SteemTime `json:"savings_sbd_seconds_last_update"`
+	SavingsSBDLastInterestPayment SteemTime `json:"savings_sbd_last_interest_payment"`
 	SavingsWithdrawRequests   int       `json:"savings_withdraw_requests"`
 	RewardSBDBalance          string    `json:"reward_sbd_balance"`
 	RewardSteemBalance        string    `json:"reward_steem_balance"`
@@ -133,7 +174,7 @@ type Account struct {
 	DelegatedVestingShares    string    `json:"delegated_vesting_shares"`
 	ReceivedVestingShares     string    `json:"received_vesting_shares"`
 	VestingWithdrawRate       string    `json:"vesting_withdraw_rate"`
-	NextVestingWithdrawal     time.Time `json:"next_vesting_withdrawal"`
+	NextVestingWithdrawal     SteemTime `json:"next_vesting_withdrawal"`
 	Withdrawn                 string    `json:"withdrawn"`
 	ToWithdraw                string    `json:"to_withdraw"`
 	WithdrawRoutes            int       `json:"withdraw_routes"`
@@ -141,9 +182,9 @@ type Account struct {
 	PostingRewards            string    `json:"posting_rewards"`
 	ProxiedVSFVotes           []string  `json:"proxied_vsf_votes"`
 	WitnessesVotedFor         int       `json:"witnesses_voted_for"`
-	LastPost                  time.Time `json:"last_post"`
-	LastRootPost              time.Time `json:"last_root_post"`
-	LastVoteTime              time.Time `json:"last_vote_time"`
+	LastPost                  SteemTime `json:"last_post"`
+	LastRootPost              SteemTime `json:"last_root_post"`
+	LastVoteTime              SteemTime `json:"last_vote_time"`
 	PostBandwidth             int       `json:"post_bandwidth"`
 	PendingClaimedAccounts    int       `json:"pending_claimed_accounts"`
 	Reputation                string    `json:"reputation"`
@@ -178,7 +219,7 @@ type Manabar struct {
 type Witness struct {
 	ID                        int                    `json:"id"`
 	Owner                     string                 `json:"owner"`
-	CreatedTime               time.Time              `json:"created"`
+	CreatedTime               SteemTime              `json:"created"`
 	URL                       string                 `json:"url"`
 	Votes                     string                 `json:"votes"`
 	VirtualLastUpdate         string                 `json:"virtual_last_update"`
@@ -191,11 +232,11 @@ type Witness struct {
 	SigningKey                string                 `json:"signing_key"`
 	Props                     WitnessProps           `json:"props"`
 	SBDExchangeRate           ExchangeRate           `json:"sbd_exchange_rate"`
-	LastSBDExchangeUpdate     time.Time              `json:"last_sbd_exchange_update"`
+	LastSBDExchangeUpdate     SteemTime              `json:"last_sbd_exchange_update"`
 	LastWork                  string                 `json:"last_work"`
 	RunningVersion            string                 `json:"running_version"`
 	HardforkVersionVote       string                 `json:"hardfork_version_vote"`
-	HardforkTimeVote          time.Time              `json:"hardfork_time_vote"`
+	HardforkTimeVote          SteemTime              `json:"hardfork_time_vote"`
 	AvailableWitnessSignatures int                   `json:"available_witness_signatures"`
 }
 

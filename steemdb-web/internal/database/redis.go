@@ -3,6 +3,9 @@ package database
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -17,12 +20,77 @@ type Redis struct {
 	logger utils.Logger
 }
 
+// parseRedisURI parses Redis URI and extracts connection parameters
+// Supports formats:
+//   - redis://[password@]host:port/db
+//   - redis://host:port
+//   - host:port (simple format for backward compatibility)
+func parseRedisURI(uri string) (addr, password string, db int, err error) {
+	// Handle simple format: host:port
+	if !strings.Contains(uri, "://") {
+		parts := strings.Split(uri, ":")
+		if len(parts) != 2 {
+			return "", "", 0, fmt.Errorf("invalid Redis URI format: %s", uri)
+		}
+		return uri, "", 0, nil
+	}
+
+	// Parse full URI format
+	parsedURL, err := url.Parse(uri)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to parse Redis URI: %w", err)
+	}
+
+	// Extract address
+	addr = parsedURL.Host
+	if addr == "" {
+		return "", "", 0, fmt.Errorf("missing host in Redis URI: %s", uri)
+	}
+
+	// Extract password from user info
+	if parsedURL.User != nil {
+		password, _ = parsedURL.User.Password()
+	}
+
+	// Extract database number from path
+	db = 0
+	if parsedURL.Path != "" && parsedURL.Path != "/" {
+		dbStr := strings.TrimPrefix(parsedURL.Path, "/")
+		if dbStr != "" {
+			db, err = strconv.Atoi(dbStr)
+			if err != nil {
+				return "", "", 0, fmt.Errorf("invalid database number in Redis URI: %s", dbStr)
+			}
+		}
+	}
+
+	return addr, password, db, nil
+}
+
 // NewRedis creates a new Redis connection
 func NewRedis(config utils.RedisConfig, logger utils.Logger) (*Redis, error) {
+	// Parse Redis URI
+	addr, passwordFromURI, dbFromURI, err := parseRedisURI(config.URI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Redis URI: %w", err)
+	}
+
+	// Use password from URI if provided, otherwise use config password
+	password := passwordFromURI
+	if password == "" {
+		password = config.Password
+	}
+
+	// Use database from URI if provided, otherwise use config DB
+	db := dbFromURI
+	if db == 0 && config.DB != 0 {
+		db = config.DB
+	}
+
 	rdb := redis.NewClient(&redis.Options{
-		Addr:         config.Addr,
-		Password:     config.Password,
-		DB:           config.DB,
+		Addr:         addr,
+		Password:     password,
+		DB:           db,
 		PoolSize:     config.PoolSize,
 		DialTimeout:  config.DialTimeout,
 		ReadTimeout:  config.ReadTimeout,
@@ -38,8 +106,9 @@ func NewRedis(config utils.RedisConfig, logger utils.Logger) (*Redis, error) {
 	}
 
 	logger.Info("Connected to Redis",
-		utils.String("addr", config.Addr),
-		utils.Int("db", config.DB))
+		utils.String("uri", config.URI),
+		utils.String("addr", addr),
+		utils.Int("db", db))
 
 	return &Redis{
 		client: rdb,

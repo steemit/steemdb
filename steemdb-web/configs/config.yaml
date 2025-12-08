@@ -14,7 +14,7 @@ database:
     timeout: 30s
   
   redis:
-    addr: "localhost:6379"
+    uri: "redis://localhost:6379"
     password: ""
     db: 0
     pool_size: 100
@@ -53,8 +53,6 @@ websocket:
 steem:
   nodes:
     - "https://api.steemit.com"
-    - "https://api.steemitdev.com"
-    - "https://anyx.io"
   timeout: 30s
   retry_attempts: 3
 

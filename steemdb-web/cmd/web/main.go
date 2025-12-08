@@ -42,6 +42,11 @@ func main() {
 		utils.String("version", "1.0.0"),
 		utils.String("config", configPath))
 
+	// Log loaded configuration for debugging
+	logger.Info("Loaded configuration",
+		utils.String("mongodb_uri", config.Database.MongoDB.URI),
+		utils.String("redis_uri", config.Database.Redis.URI))
+
 	// Initialize MongoDB
 	mongodb, err := database.NewMongoDB(config.Database.MongoDB, logger)
 	if err != nil {
@@ -82,7 +87,7 @@ func main() {
 		wsService = services.NewWebSocketService(steemClient, mongodb, logger)
 		wsService.Start()
 		defer wsService.Stop()
-		
+
 		logger.Info("WebSocket service started", utils.String("path", config.WebSocket.Path))
 	}
 
@@ -93,7 +98,7 @@ func main() {
 
 	// Initialize Gin router
 	router := gin.New()
-	
+
 	// Add middleware
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
@@ -156,7 +161,7 @@ func main() {
 		logger.Info("Starting HTTP server",
 			utils.String("addr", server.Addr),
 			utils.String("mode", config.Server.Mode))
-		
+
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("Failed to start server", utils.Error(err))
 		}
