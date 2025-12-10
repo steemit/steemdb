@@ -175,6 +175,65 @@ func (c *Client) GetOpsInBlock(ctx context.Context, blockNum int64, onlyVirtual 
 	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
+// GetBlocksRange gets multiple blocks in the range [startBlock, endBlock)
+// Uses steemgosdk's GetBlocks which fetches blocks concurrently
+func (c *Client) GetBlocksRange(ctx context.Context, startBlock, endBlock int64) ([]*Block, error) {
+	// Validate parameters
+	if startBlock >= endBlock {
+		return nil, fmt.Errorf("invalid block range: startBlock (%d) must be less than endBlock (%d)", startBlock, endBlock)
+	}
+
+	// Limit batch size to prevent excessive memory usage
+	maxBatchSize := int64(100)
+	if endBlock-startBlock > maxBatchSize {
+		return nil, fmt.Errorf("block range too large: %d blocks (max: %d)", endBlock-startBlock, maxBatchSize)
+	}
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		api := c.getCurrentAPI()
+		
+		// Call steemgosdk's GetBlocks which uses concurrent goroutines
+		wrapBlocks, err := api.GetBlocks(uint(startBlock), uint(endBlock))
+		if err == nil {
+			// Convert WrapBlock to Block
+			blocks := make([]*Block, len(wrapBlocks))
+			for i, wrapBlock := range wrapBlocks {
+				if wrapBlock == nil || wrapBlock.Block == nil {
+					return nil, fmt.Errorf("received nil block at index %d (blockNum: %d)", i, startBlock+int64(i))
+				}
+				blocks[i] = convertBlock(wrapBlock.Block, int64(wrapBlock.BlockNum))
+			}
+			return blocks, nil
+		}
+
+		lastErr = err
+		c.logger.Warn("RPC call failed, retrying",
+			utils.String("method", "get_blocks_range"),
+			utils.Int64("start_block", startBlock),
+			utils.Int64("end_block", endBlock),
+			utils.Int("attempt", attempt+1),
+			utils.Error(err),
+		)
+
+		// Switch to next node on error
+		c.switchNode()
+
+		// Wait before retry (except on last attempt)
+		if attempt < maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
 // GetAccounts gets account information
 func (c *Client) GetAccounts(ctx context.Context, names []string) ([]Account, error) {
 	var lastErr error

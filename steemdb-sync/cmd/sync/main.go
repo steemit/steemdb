@@ -41,6 +41,14 @@ func main() {
 		utils.String("config", configPath),
 	)
 
+	// Debug: Log actual configuration values
+	logger.Info("Configuration loaded",
+		utils.String("mongodb_uri", cfg.MongoDB.URI),
+		utils.String("redis_uri", cfg.Redis.URI),
+		utils.String("env_database_mongodb_uri", os.Getenv("DATABASE_MONGODB_URI")),
+		utils.String("env_mongodb_uri", os.Getenv("MONGODB_URI")),
+	)
+
 	// Initialize database
 	db, err := database.NewMongoDB(cfg.MongoDB, logger)
 	if err != nil {

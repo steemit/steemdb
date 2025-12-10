@@ -137,7 +137,8 @@ steemdb-sync/
 go mod download
 
 # 构建二进制
-go build -o steemdb-sync cmd/sync/main.go
+mkdir -p ../bin
+go build -o ../bin/steemdb-sync cmd/sync/main.go
 ```
 
 ### 2. 配置设置

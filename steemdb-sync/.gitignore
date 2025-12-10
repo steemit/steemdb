@@ -1,6 +1,8 @@
-# Binaries
+# Binaries (now built to ../bin/)
 steemdb-sync
 steemdb-sync.exe
+sync
+validate
 
 # Test binary, built with `go test -c`
 *.test

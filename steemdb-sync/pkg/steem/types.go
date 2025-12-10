@@ -83,6 +83,43 @@ type Operation struct {
 	Op         []interface{} `json:"op"`
 }
 
+// UnmarshalJSON implements custom JSON unmarshaling for Operation
+// to handle time strings without timezone information
+func (o *Operation) UnmarshalJSON(data []byte) error {
+	// Define a temporary struct with timestamp as string
+	type Alias Operation
+	aux := &struct {
+		Timestamp string `json:"timestamp"`
+		*Alias
+	}{
+		Alias: (*Alias)(o),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Parse timestamp - try multiple formats
+	if aux.Timestamp != "" {
+		// Try RFC3339 format first (with timezone)
+		if t, err := time.Parse(time.RFC3339, aux.Timestamp); err == nil {
+			o.Timestamp = t
+		} else if t, err := time.Parse("2006-01-02T15:04:05", aux.Timestamp); err == nil {
+			// Try format without timezone (assume UTC)
+			o.Timestamp = t.UTC()
+		} else if t, err := time.Parse("2006-01-02T15:04:05.000", aux.Timestamp); err == nil {
+			// Try format with milliseconds (assume UTC)
+			o.Timestamp = t.UTC()
+		} else {
+			// If all parsing fails, log but don't fail unmarshaling
+			// Set to zero time
+			o.Timestamp = time.Time{}
+		}
+	}
+
+	return nil
+}
+
 // Account represents a Steem account
 type Account struct {
 	ID                            int       `json:"id"`
@@ -130,8 +167,8 @@ type Account struct {
 	Withdrawn                     string        `json:"withdrawn"`
 	ToWithdraw                    string        `json:"to_withdraw"`
 	WithdrawRoutes                int           `json:"withdraw_routes"`
-	CurationRewards               string        `json:"curation_rewards"`
-	PostingRewards                string        `json:"posting_rewards"`
+	CurationRewards               int64         `json:"curation_rewards"`
+	PostingRewards                int64         `json:"posting_rewards"`
 	ProxiedVSFVotes               []string      `json:"proxied_vsf_votes"`
 	WitnessesVotedFor             int           `json:"witnesses_voted_for"`
 	LastPost                      protocol.Time `json:"last_post"`

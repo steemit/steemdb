@@ -9,6 +9,9 @@ DEPLOYMENT.md
 *.so
 *.dylib
 
+# Binary output directory
+bin/
+
 # Test binary, built with `go test -c`
 *.test
 

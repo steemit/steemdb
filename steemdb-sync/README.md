@@ -74,8 +74,9 @@ go mod download
 
 3. Build and run:
 ```bash
-go build -o steemdb-sync cmd/sync/main.go
-./steemdb-sync configs/config.yaml
+mkdir -p ../bin
+go build -o ../bin/steemdb-sync cmd/sync/main.go
+../bin/steemdb-sync configs/config.yaml
 ```
 
 ## Configuration

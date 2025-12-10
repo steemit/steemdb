@@ -63,7 +63,7 @@ services:
 
   # MongoDB Database
   mongo:
-    image: mongo:6.0
+    image: mongo:4.4
     # ports:
     #   - "27017:27017"
     environment:
@@ -77,7 +77,7 @@ services:
       - steemdb-network
     command: mongod --bind_ip_all --replSet rs0
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
       retries: 3

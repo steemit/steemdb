@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -166,18 +167,17 @@ func (m *MongoDB) CreateIndexes(ctx context.Context) error {
 			{Keys: map[string]interface{}{"vesting_shares": -1}},
 		},
 		"block_30d": {
-			{Keys: map[string]interface{}{"_id": -1}},
-			{Keys: map[string]interface{}{"_ts": -1}},
+			{Keys: bson.D{{Key: "_ts", Value: -1}}},
 		},
 		"comment": {
-			{Keys: map[string]interface{}{"author": 1, "permlink": 1}},
-			{Keys: map[string]interface{}{"created": -1}},
-			{Keys: map[string]interface{}{"depth": 1}},
+			{Keys: bson.D{{Key: "author", Value: 1}, {Key: "permlink", Value: 1}}},
+			{Keys: bson.D{{Key: "created", Value: -1}}},
+			{Keys: bson.D{{Key: "depth", Value: 1}}},
 		},
 		"vote": {
-			{Keys: map[string]interface{}{"voter": 1}},
-			{Keys: map[string]interface{}{"author": 1, "permlink": 1}},
-			{Keys: map[string]interface{}{"_ts": -1}},
+			{Keys: bson.D{{Key: "voter", Value: 1}}},
+			{Keys: bson.D{{Key: "author", Value: 1}, {Key: "permlink", Value: 1}}},
+			{Keys: bson.D{{Key: "_ts", Value: -1}}},
 		},
 		"transfer": {
 			{Keys: map[string]interface{}{"from": 1}},

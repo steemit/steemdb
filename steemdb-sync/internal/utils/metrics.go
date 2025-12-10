@@ -96,4 +96,42 @@ var (
 		},
 		[]string{"type"},
 	)
+
+	// BatchFetchDuration tracks batch fetch operation duration
+	BatchFetchDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "steemdb_batch_fetch_duration_seconds",
+			Help:    "Time spent fetching blocks in batches",
+			Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0},
+		},
+		[]string{"service"},
+	)
+
+	// BatchWriteDuration tracks batch write operation duration
+	BatchWriteDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "steemdb_batch_write_duration_seconds",
+			Help:    "Time spent writing batches to database",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0},
+		},
+		[]string{"service", "collection"},
+	)
+
+	// OperationsBatched tracks total batched operations
+	OperationsBatched = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "steemdb_operations_batched_total",
+			Help: "The total number of operations batched before write",
+		},
+		[]string{"service"},
+	)
+
+	// ValidationErrors tracks validation discrepancies
+	ValidationErrors = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "steemdb_validation_errors_total",
+			Help: "The total number of validation discrepancies found",
+		},
+		[]string{"validation_type", "field"},
+	)
 )

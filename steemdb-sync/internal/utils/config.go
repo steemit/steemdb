@@ -48,11 +48,14 @@ type RedisConfig struct {
 }
 
 type SyncConfig struct {
-	BatchSize     int           `mapstructure:"batch_size"`
-	Workers       int           `mapstructure:"workers"`
-	QueueSize     int           `mapstructure:"queue_size"`
-	BlockInterval time.Duration `mapstructure:"block_interval"`
-	StartBlock    int64         `mapstructure:"start_block"`
+	BatchSize          int           `mapstructure:"batch_size"`
+	BlockBatchSize     int           `mapstructure:"block_batch_size"`
+	OperationBatchSize int           `mapstructure:"operation_batch_size"`
+	BatchWriteInterval time.Duration `mapstructure:"batch_write_interval"`
+	Workers            int           `mapstructure:"workers"`
+	QueueSize          int           `mapstructure:"queue_size"`
+	BlockInterval      time.Duration `mapstructure:"block_interval"`
+	StartBlock         int64         `mapstructure:"start_block"`
 }
 
 type HistoryConfig struct {
@@ -165,6 +168,9 @@ func setDefaults() {
 	viper.SetDefault("redis.pool_size", 100)
 
 	viper.SetDefault("sync.batch_size", 50)
+	viper.SetDefault("sync.block_batch_size", 50)
+	viper.SetDefault("sync.operation_batch_size", 100)
+	viper.SetDefault("sync.batch_write_interval", "5s")
 	viper.SetDefault("sync.workers", 10)
 	viper.SetDefault("sync.queue_size", 1000)
 	viper.SetDefault("sync.block_interval", "3s")

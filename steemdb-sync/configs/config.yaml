@@ -11,19 +11,22 @@ steem:
   retry_attempts: 3
 
 mongodb:
-  uri: "mongodb://localhost:27017"
+  uri: "mongodb://mongo:27017/steemdb?replicaSet=rs0"
   database: "steemdb"
   pool_size: 100
   timeout: 30s
 
 redis:
-  uri: "redis://localhost:6379"
+  uri: "redis://redis:6379"
   password: ""
   db: 0
   pool_size: 100
 
 sync:
   batch_size: 50
+  block_batch_size: 50  # Blocks to fetch in one batch
+  operation_batch_size: 100  # Operations to batch before write
+  batch_write_interval: 5s  # Interval for flushing batches
   workers: 10
   queue_size: 1000
   block_interval: 3s
