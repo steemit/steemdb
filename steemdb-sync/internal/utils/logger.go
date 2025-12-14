@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"go.uber.org/zap"
@@ -87,18 +88,46 @@ func NewLogger(config LogConfig) (Logger, error) {
 	// Create writer syncer
 	var writeSyncer zapcore.WriteSyncer
 	if config.File != "" {
-		// File output with rotation
-		fileWriter := &lumberjack.Logger{
-			Filename:   config.File,
-			MaxSize:    config.MaxSize,
-			MaxBackups: config.MaxBackups,
-			MaxAge:     config.MaxAge,
-			Compress:   true,
+		// Resolve log file path (handle relative paths)
+		logFile := config.File
+		if !filepath.IsAbs(logFile) {
+			// If relative path, resolve relative to current working directory
+			// Users can also use absolute paths like /var/log/steemdb-sync.log
+			cwd, err := os.Getwd()
+			if err == nil {
+				logFile = filepath.Join(cwd, logFile)
+			}
 		}
-		writeSyncer = zapcore.NewMultiWriteSyncer(
-			zapcore.AddSync(fileWriter),
-			zapcore.AddSync(os.Stdout),
-		)
+		
+		// Ensure log directory exists
+		logDir := filepath.Dir(logFile)
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			// If cannot create directory, fall back to console only
+			fmt.Fprintf(os.Stderr, "Warning: failed to create log directory %s: %v, using console output only\n", logDir, err)
+			writeSyncer = zapcore.AddSync(os.Stdout)
+		} else {
+			// Try to open log file to check write permissions
+			testFile, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+			if err != nil {
+				// If cannot write to log file, fall back to console only
+				fmt.Fprintf(os.Stderr, "Warning: cannot write to log file %s: %v, using console output only\n", logFile, err)
+				writeSyncer = zapcore.AddSync(os.Stdout)
+			} else {
+				testFile.Close()
+				// File output with rotation
+				fileWriter := &lumberjack.Logger{
+					Filename:   logFile,
+					MaxSize:    config.MaxSize,
+					MaxBackups: config.MaxBackups,
+					MaxAge:     config.MaxAge,
+					Compress:   true,
+				}
+				writeSyncer = zapcore.NewMultiWriteSyncer(
+					zapcore.AddSync(fileWriter),
+					zapcore.AddSync(os.Stdout),
+				)
+			}
+		}
 	} else {
 		// Console output only
 		writeSyncer = zapcore.AddSync(os.Stdout)

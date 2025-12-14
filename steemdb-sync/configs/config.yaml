@@ -6,7 +6,6 @@ server:
 steem:
   nodes:
     - "https://api.steemit.com"
-    - "https://api.steemitdev.com"
   timeout: 30s
   retry_attempts: 3
 
@@ -32,6 +31,8 @@ sync:
   block_interval: 3s
   start_block: 1
 
+# History and Witnesses configurations are now integrated into CronTab service
+# These configs are kept for backward compatibility but are no longer used as separate services
 history:
   batch_size: 50
   workers: 5
@@ -46,7 +47,7 @@ witnesses:
 log:
   level: "info" # debug, info, warn, error
   format: "json" # json, text
-  file: "/var/log/steemdb-sync.log"
+  file: "logs/steemdb-sync.log" # Relative to project root, or use absolute path like /var/log/steemdb-sync.log
   max_size: 100 # MB
   max_backups: 5
   max_age: 30 # days

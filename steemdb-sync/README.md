@@ -7,7 +7,7 @@ A high-performance Go service that synchronizes Steem blockchain data to MongoDB
 - **Unified Service**: Combines block sync, account history, and witness monitoring in a single Go service
 - **High Performance**: 3-5x faster than the original Python implementation
 - **Reliable**: Comprehensive error handling and automatic recovery
-- **Scalable**: Concurrent processing with configurable worker pools
+- **Scalable**: Single goroutine architecture for sequential processing (ensures operation order)
 - **Monitored**: Built-in Prometheus metrics and health checks
 - **Containerized**: Docker and Docker Compose support
 
@@ -91,7 +91,6 @@ server:
 steem:
   nodes:
     - "https://api.steemit.com"
-    - "https://api.steemitdev.com"
   timeout: 30s
 
 mongodb:
@@ -112,15 +111,128 @@ history:
 witnesses:
   interval: 1m
   check_interval: 10s
+
+log:
+  level: "info"        # debug, info, warn, error
+  format: "json"       # json, text
+  file: "logs/steemdb-sync.log"  # Log file path (see Logging section below)
+  max_size: 100        # Maximum log file size in MB
+  max_backups: 5       # Number of backup log files to keep
+  max_age: 30          # Maximum age of log files in days
+```
+
+### Logging Configuration
+
+The service supports flexible logging configuration with automatic log rotation and graceful error handling.
+
+#### Log File Path Options
+
+**1. Relative Path (Recommended for Development)**
+```yaml
+log:
+  file: "logs/steemdb-sync.log"  # Relative to current working directory
+```
+- The log directory will be automatically created if it doesn't exist
+- Path is resolved relative to the directory where the service is run
+
+**2. Absolute Path (Recommended for Production)**
+```yaml
+log:
+  file: "/var/log/steemdb-sync.log"  # Absolute path
+```
+- Requires appropriate write permissions
+- Useful for system-wide logging locations
+
+**3. Console Output Only**
+```yaml
+log:
+  file: ""  # Empty string disables file logging
+```
+- All logs will be output to stdout/stderr only
+- Useful for containerized deployments where logs are captured by the container runtime
+
+#### Log Rotation
+
+The service automatically rotates log files when they reach the configured size:
+- **max_size**: Maximum size per log file (in MB)
+- **max_backups**: Number of rotated log files to keep
+- **max_age**: Maximum age of log files before deletion (in days)
+- Old log files are automatically compressed (`.gz` format)
+
+#### Error Handling
+
+If the service cannot write to the specified log file (e.g., permission denied):
+- A warning message is displayed on stderr
+- The service automatically falls back to console output only
+- The service continues running normally (no crash)
+
+**Example warning:**
+```
+Warning: cannot write to log file /var/log/steemdb-sync.log: permission denied, using console output only
+```
+
+#### Log Format Options
+
+- **json**: Structured JSON format (recommended for production, easier to parse)
+- **text**: Human-readable text format (recommended for development)
+
+#### Log Levels
+
+- **debug**: Detailed debugging information
+- **info**: General informational messages (default)
+- **warn**: Warning messages
+- **error**: Error messages only
+
+#### Examples
+
+**Development Configuration:**
+```yaml
+log:
+  level: "debug"
+  format: "text"
+  file: "logs/steemdb-sync.log"
+  max_size: 10
+  max_backups: 3
+  max_age: 7
+```
+
+**Production Configuration:**
+```yaml
+log:
+  level: "info"
+  format: "json"
+  file: "/var/log/steemdb-sync.log"
+  max_size: 500
+  max_backups: 10
+  max_age: 30
+```
+
+**Docker/Container Configuration:**
+```yaml
+log:
+  level: "info"
+  format: "json"
+  file: ""  # Let Docker capture stdout/stderr
+  max_size: 100
+  max_backups: 5
+  max_age: 30
 ```
 
 ## Services Overview
 
 ### Block Sync Service
+- **Single goroutine architecture**: Sequential processing ensures operation order correctness
 - Synchronizes blockchain data in real-time
 - Processes 15+ operation types (votes, comments, transfers, rewards, etc.)
 - Handles 200-500 blocks/second
 - Automatic error recovery and retry logic
+- **Account update marking**: Marks accounts for update instead of calculating balances
+
+### CronTab Service
+- **Single goroutine**: Waits for Block Sync to catch up before starting
+- **Account Updater**: Batch updates accounts using `condenser_api.get_accounts` (every 6 hours)
+- **Stats Updater**: Updates hourly operation statistics
+- **30-day Aggregations**: Calculates 30-day aggregated data (daily)
 
 ### History Service
 - Scans all accounts every 6 hours
@@ -161,7 +273,9 @@ Access Grafana at `http://localhost:3000` (admin/admin123) for visual monitoring
 | CPU Usage | 60-80% | 20-40% | 2x |
 
 ### Optimization Features
-- Concurrent processing with worker pools
+- **Sequential processing**: Single goroutine ensures operation order correctness
+- **Denormalized data models**: Avoids JOIN operations for faster queries
+- **Account operations index**: Fast account operation history queries
 - Batch database operations
 - Connection pooling and reuse
 - Intelligent retry mechanisms
@@ -257,6 +371,8 @@ docker run -d \
 - `STEEM_NODES` - Comma-separated Steem node URLs
 - `LOG_LEVEL` - Logging level (debug, info, warn, error)
 
+**Note**: Log file path and other log settings (format, rotation, etc.) are configured in `config.yaml` under the `log` section, not via environment variables. See the [Logging Configuration](#logging-configuration) section for details.
+
 ## Migration from Python Services
 
 This Go service replaces the following Python services:
@@ -279,20 +395,28 @@ This Go service replaces the following Python services:
 
 **High Memory Usage**
 - Reduce `batch_size` in config
-- Decrease number of `workers`
 - Check for memory leaks in logs
 
 **Slow Synchronization**
-- Increase `workers` count
 - Use faster Steem nodes
 - Optimize MongoDB indexes
+- Note: Single goroutine architecture ensures correctness over raw speed
 
 **Connection Errors**
 - Verify Steem node availability
 - Check MongoDB/Redis connectivity
 - Review firewall settings
 
+**Log File Permission Errors**
+- Check log directory permissions: `ls -la logs/`
+- Ensure the service user has write access to the log directory
+- The service will automatically fall back to console output if file writing fails
+- For production, use absolute paths with proper permissions: `/var/log/steemdb-sync.log`
+- Fix permissions: `chmod 755 logs/` or `chown user:group logs/`
+
 ### Logs Analysis
+
+**Docker Deployment:**
 ```bash
 # View real-time logs
 docker-compose logs -f steemdb-sync
@@ -303,6 +427,31 @@ docker-compose logs steemdb-sync | grep ERROR
 # Check specific service logs
 docker-compose logs steemdb-sync | grep "Block sync"
 ```
+
+**Standalone Deployment:**
+```bash
+# View log file (if configured)
+tail -f logs/steemdb-sync.log
+
+# Search for errors
+grep ERROR logs/steemdb-sync.log
+
+# View rotated log files
+ls -lh logs/steemdb-sync*.log*
+
+# Monitor real-time logs (JSON format)
+tail -f logs/steemdb-sync.log | jq '.'
+
+# Filter by log level
+grep '"level":"error"' logs/steemdb-sync.log | jq '.'
+```
+
+**Log File Permissions:**
+If you encounter permission errors when writing to log files:
+1. Ensure the log directory exists and is writable
+2. Check file ownership: `ls -la logs/`
+3. Fix permissions: `chmod 755 logs/` or `chown user:group logs/`
+4. The service will automatically fall back to console output if file writing fails
 
 ## Contributing
 

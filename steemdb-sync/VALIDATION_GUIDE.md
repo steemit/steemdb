@@ -1,330 +1,329 @@
-# Data Validation Framework Usage Guide
-
-This guide explains how to use the data validation framework to compare data between the new Go implementation and the legacy Python implementation.
+# SteemDB Sync - Cold Start Validation and Performance Testing Guide
 
 ## Overview
 
-The validation framework allows you to:
-- Compare block data between new and legacy databases
-- Validate operation counts per block
-- Compare collection document counts
-- Generate detailed validation reports
+This guide provides instructions for validating the cold start process and testing performance of the SteemDB Sync service.
 
-## Prerequisites
+## Quick Start
 
-1. **Two MongoDB instances**:
-   - New database: Running the optimized Go sync service
-   - Legacy database: Running the original Python sync service
+### Option A: Using Docker Test Environment (Recommended)
 
-2. **Both databases should have synchronized data** for the block range you want to validate
-
-## Building the Validation Tool
-
-First, build the validation tool:
+The easiest way to run tests is using the Docker test environment, which automatically creates and cleans up a temporary MongoDB instance:
 
 ```bash
 cd steemdb-sync
-mkdir -p ../bin
-go build -o ../bin/validate ./cmd/validate
-```
 
-## Basic Usage
+# Run all tests with Docker
+./scripts/run_tests_with_docker.sh
 
-### Command Syntax
-
-```bash
-../bin/validate <new_mongodb_uri> <legacy_mongodb_uri> <start_block> [end_block] [sample_rate]
-```
-
-### Parameters
-
-- `new_mongodb_uri`: MongoDB connection string for the new Go implementation database
-- `legacy_mongodb_uri`: MongoDB connection string for the legacy Python implementation database
-- `start_block`: Starting block number to validate
-- `end_block`: (Optional) Ending block number. Defaults to `start_block + 100`
-- `sample_rate`: (Optional) Percentage of blocks to sample (0.01 = 1%). Defaults to 0.01 (1%)
-
-### Examples
-
-#### Example 1: Validate a specific block range with default 1% sampling
-
-```bash
-../bin/validate \
-  mongodb://localhost:27017 \
-  mongodb://localhost:27018 \
-  1000000 \
-  1000100
+# Or run specific tests
+./scripts/run_tests_with_docker.sh validation   # Cold start validation only
+./scripts/run_tests_with_docker.sh performance # Performance tests only
 ```
 
 This will:
-- Validate blocks 1,000,000 to 1,000,100
-- Sample 1% of blocks (approximately 1 block)
-- Compare block metadata, transaction counts, and operation counts
+- ✅ Automatically start a temporary MongoDB container
+- ✅ Run the tests
+- ✅ Clean up containers and volumes when done
 
-#### Example 2: Validate with custom sample rate (10%)
+### Option B: Using Existing MongoDB
 
-```bash
-../bin/validate \
-  mongodb://localhost:27017 \
-  mongodb://localhost:27018 \
-  1000000 \
-  1000100 \
-  0.1
-```
-
-This will sample 10% of blocks (approximately 10 blocks) for validation.
-
-#### Example 3: Full validation (100% sampling)
+If you have MongoDB running locally, you can run tests directly:
 
 ```bash
-../bin/validate \
-  mongodb://localhost:27017 \
-  mongodb://localhost:27018 \
-  1000000 \
-  1000100 \
-  1.0
+cd steemdb-sync
+./scripts/cold_start_validation.sh
 ```
 
-This will validate all blocks in the range (100% sampling).
+### 1. Cold Start Validation
 
-#### Example 4: Validate using Docker containers
+Before starting the sync service for the first time, run the validation script:
 
-If your databases are in Docker containers:
+**With Docker (recommended):**
+```bash
+./scripts/run_tests_with_docker.sh validation
+```
+
+**Without Docker:**
+```bash
+./scripts/cold_start_validation.sh
+```
+
+This script checks:
+- ✅ MongoDB connection
+- ✅ Sync binary exists
+- ✅ Configuration file exists
+- ✅ Initial database state (ready for cold start)
+- ✅ Database indexes (will be created automatically)
+
+### 2. Start Sync Service
+
+After validation passes, start the sync service:
 
 ```bash
-../bin/validate \
-  mongodb://mongo:27017 \
-  mongodb://legacy-mongo:27017 \
-  1000000 \
-  1000100
+./bin/steemdb-sync ./configs/config.yaml
 ```
 
-Or if running from host machine:
+Monitor the logs to verify:
+- Service starts from block 1
+- Indexes are created automatically
+- Blocks are being processed
+
+### 3. Performance Testing
+
+After the service has processed some blocks (recommended: 1000+ blocks), run performance tests:
+
+**With Docker (recommended):**
+```bash
+./scripts/run_tests_with_docker.sh performance
+```
+
+**Without Docker:**
+```bash
+# Shell-based performance test
+./scripts/performance_test.sh
+
+# Or use the Go-based performance test tool
+go build -o bin/validate ./cmd/validate
+./bin/validate ./configs/config.yaml
+```
+
+## Docker Test Environment
+
+### Overview
+
+The Docker test environment provides an isolated MongoDB instance for testing, ensuring:
+- ✅ No interference with existing databases
+- ✅ Consistent test environment
+- ✅ Automatic cleanup after tests
+
+### Configuration
+
+The test environment uses `docker-compose.test.yml` which:
+- Creates a MongoDB 7.0 container
+- Uses port 27018 (to avoid conflicts with main MongoDB on 27017)
+- Creates a named volume for data (automatically removed on cleanup)
+- Sets up health checks
+
+### Usage
+
+**Automatic (recommended):**
+```bash
+# Run all tests
+./scripts/run_tests_with_docker.sh
+
+# Run specific test
+./scripts/run_tests_with_docker.sh validation
+./scripts/run_tests_with_docker.sh performance
+```
+
+**Manual:**
+```bash
+# Start test environment
+docker-compose -f docker-compose.test.yml up -d
+
+# Run tests with USE_DOCKER=true
+USE_DOCKER=true ./scripts/cold_start_validation.sh
+USE_DOCKER=true ./scripts/performance_test.sh
+
+# Cleanup
+docker-compose -f docker-compose.test.yml down -v
+```
+
+### Environment Variables
+
+When using Docker test environment, scripts automatically use:
+- `MONGODB_URI=mongodb://localhost:27018` (test port)
+- `MONGODB_DB=steemdb`
+
+You can override these if needed:
+```bash
+USE_DOCKER=true MONGODB_URI=mongodb://localhost:27018 ./scripts/cold_start_validation.sh
+```
+
+### Cleanup
+
+The test scripts automatically clean up Docker containers and volumes on exit. If you need to manually clean up:
 
 ```bash
-../bin/validate \
-  mongodb://localhost:27017 \
-  mongodb://localhost:27018 \
-  1000000 \
-  1000100
+# Stop and remove containers and volumes
+docker-compose -f docker-compose.test.yml down -v
+
+# Remove orphaned containers (if any)
+docker ps -a | grep steemdb-sync-test | awk '{print $1}' | xargs docker rm -f
+
+# Remove test volumes (if any)
+docker volume ls | grep steemdb-sync-test | awk '{print $2}' | xargs docker volume rm
 ```
 
-## What Gets Validated
+## Detailed Instructions
 
-### 1. Block Metadata
+### Cold Start Validation
 
-The framework compares:
-- **Block number** (`_id`)
-- **Timestamp** (`_ts`)
-- **Witness** (block producer)
-- **Previous block hash**
-- **Transaction count**
+The cold start validation script (`scripts/cold_start_validation.sh`) ensures the system is ready for a fresh start.
 
-### 2. Operation Counts
+**Prerequisites:**
+- MongoDB running and accessible
+- Sync binary built (`./bin/steemdb-sync`)
+- Configuration file exists (`./configs/config.yaml`)
 
-For each validated block, the framework compares operation counts in:
-- `vote` collection
-- `transfer` collection
-- `comment` collection
-- `author_reward` collection
-- `curation_reward` collection
-
-### 3. Collection Document Counts
-
-The framework compares total document counts across all collections:
-- `block_30d`
-- `vote`
-- `transfer`
-- `comment`
-- `author_reward`
-- `curation_reward`
-
-## Output Format
-
-### Validation Report
-
-The tool generates a report with:
-
-```
-Validation Report
-==================
-Total Blocks: 100
-Validated Blocks: 1 (1.00%)
-Valid Blocks: 1
-Invalid Blocks: 0
-Duration: 2.5s
-
-Discrepancies:
-  Block 1000050: 2 discrepancies
-    - Field: timestamp, New: 2020-03-21T13:04:57Z, Legacy: 2020-03-21T13:04:58Z, Match: false
-    - Field: transaction_count, New: 5, Legacy: 6, Match: false
+**Environment Variables:**
+```bash
+export MONGODB_URI="mongodb://localhost:27017"
+export MONGODB_DB="steemdb"
+export SYNC_BINARY="./bin/steemdb-sync"
+export CONFIG_FILE="./configs/config.yaml"
 ```
 
-### Collection Count Comparison
-
+**Expected Output:**
 ```
-Collection Count Discrepancies:
-  - Field: document_count_vote, New: 1234567, Legacy: 1234568, Match: false
-```
-
-Or if all counts match:
-
-```
-All collection counts match!
+✓ MongoDB Connection: Connected successfully
+✓ Sync Binary: Found at ./bin/steemdb-sync
+✓ Config File: Found at ./configs/config.yaml
+✓ Initial State Check: No height record found (cold start ready)
+⚠ Indexes: No indexes found (will be created on first run)
 ```
 
-## Exit Codes
+### Performance Testing
 
-- `0`: Validation passed (no discrepancies found)
-- `1`: Validation failed (discrepancies found or errors occurred)
+#### Shell Script (`scripts/performance_test.sh`)
 
-## Programmatic Usage
+Tests query performance using MongoDB shell commands.
 
-You can also use the validation framework programmatically in your Go code:
+**Tests:**
+- Block query by number (target: < 10ms)
+- Latest blocks query
+- Account query by name (target: < 50ms)
+- Account operations query (target: < 100ms)
+- Database statistics
+- Index verification
 
-```go
-package main
+**Usage:**
+```bash
+export MONGODB_URI="mongodb://localhost:27017"
+export MONGODB_DB="steemdb"
+export METRICS_URL="http://localhost:9091/metrics"
 
-import (
-    "context"
-    "github.com/steemdb/sync/internal/database"
-    "github.com/steemdb/sync/internal/validation"
-    "github.com/steemdb/sync/internal/utils"
-    "go.mongodb.org/mongo-driver/mongo"
-)
-
-func main() {
-    // Initialize databases
-    newDB := // ... initialize new database
-    legacyDB := // ... initialize legacy database
-    logger := // ... initialize logger
-    
-    // Create validator with 1% sample rate
-    validator := validation.NewValidator(newDB, legacyDB, logger, 0.01)
-    
-    // Validate block range
-    ctx := context.Background()
-    report, err := validator.ValidateBlockRange(ctx, 1000000, 1000100)
-    if err != nil {
-        // Handle error
-    }
-    
-    // Check results
-    if report.InvalidBlocks > 0 {
-        // Handle discrepancies
-        for _, result := range report.Discrepancies {
-            if !result.Valid {
-                // Process discrepancies
-            }
-        }
-    }
-    
-    // Validate collection counts
-    countDiscrepancies, err := validator.ValidateCollectionCounts(ctx)
-    // Process count discrepancies
-}
+./scripts/performance_test.sh
 ```
 
-## Validation Methods
+#### Go Tool (`cmd/validate/main.go`)
 
-### ValidateBlockRange
+More comprehensive performance testing using Go.
 
-Validates a range of blocks using random sampling:
+**Tests:**
+- Block query by number
+- Latest blocks query
+- Account query by name
+- Account operations query
+- Operations query by type
+- Comments query by author
 
-```go
-report, err := validator.ValidateBlockRange(ctx, startBlock, endBlock)
+**Usage:**
+```bash
+# Build the tool
+go build -o bin/validate ./cmd/validate
+
+# Run tests
+./bin/validate ./configs/config.yaml
 ```
 
-### ValidateBlock
-
-Validates a single specific block:
-
-```go
-result := validator.ValidateBlock(ctx, blockNum)
+**Output:**
+```
+✓ Block Query (by number): 2.5ms (target: < 10ms)
+✓ Latest Blocks Query: 15ms
+✓ Account Query (by name): 8ms (target: < 50ms)
+✓ Account Operations Query: 45ms (target: < 100ms)
+...
 ```
 
-### ValidateCollectionCounts
+## Performance Targets
 
-Compares total document counts across collections:
+Based on the architecture plan, the following performance targets should be met:
 
-```go
-discrepancies, err := validator.ValidateCollectionCounts(ctx)
+| Metric | Target | Description |
+|--------|--------|-------------|
+| Block Processing | 500+ blocks/sec | Blocks processed per second |
+| Operation Processing | 5000+ ops/sec | Operations processed per second |
+| Block Query | < 10ms | Query block by number |
+| Account Query | < 50ms | Query account by name |
+| Account History | < 100ms | Query account operations (100 records) |
+| Latest Blocks | < 50ms | Query latest 20 blocks |
+
+## Monitoring
+
+### Prometheus Metrics
+
+Monitor performance metrics at:
+```
+http://localhost:9091/metrics
 ```
 
-## Best Practices
+**Key Metrics:**
+- `steemdb_blocks_processed_total` - Total blocks processed
+- `steemdb_operations_processed_total` - Total operations processed
+- `steemdb_current_block` - Current block number
+- `steemdb_processing_duration_seconds` - Processing time
+- `steemdb_batch_write_duration_seconds` - Batch write time
 
-1. **Start with small ranges**: Test with a small block range first (e.g., 100 blocks)
+### Health Checks
 
-2. **Use appropriate sample rates**:
-   - For quick checks: 0.01 (1%)
-   - For thorough validation: 0.1 (10%)
-   - For complete validation: 1.0 (100%)
-
-3. **Validate after major changes**: Run validation after implementing optimizations or bug fixes
-
-4. **Compare at different stages**: Validate both historical blocks and recent blocks
-
-5. **Monitor collection counts**: Regularly check collection counts to ensure overall data consistency
+- Health endpoint: `http://localhost:9091/health`
+- Readiness endpoint: `http://localhost:9091/ready`
 
 ## Troubleshooting
 
-### Connection Issues
+### Validation Fails
 
-If you get connection errors:
-- Verify MongoDB URIs are correct
-- Check network connectivity
-- Ensure MongoDB instances are running
-- Verify authentication credentials if required
-
-### Missing Blocks
-
-If blocks are missing in one database:
-- Check if sync services are running
-- Verify block ranges are synchronized
-- Check for sync errors in logs
-
-### Discrepancies Found
-
-If discrepancies are found:
-1. Review the detailed discrepancy report
-2. Check if the difference is expected (e.g., due to different processing logic)
-3. Investigate the specific blocks with discrepancies
-4. Compare operation-level data if needed
-
-## Integration with CI/CD
-
-You can integrate validation into your CI/CD pipeline:
-
+**MongoDB Connection Failed:**
 ```bash
-#!/bin/bash
-# validate.sh
+# Check if MongoDB is running
+docker-compose ps mongo
 
-NEW_DB="mongodb://new-db:27017"
-LEGACY_DB="mongodb://legacy-db:27017"
-START_BLOCK=1000000
-END_BLOCK=1000100
-
-../bin/validate $NEW_DB $LEGACY_DB $START_BLOCK $END_BLOCK 0.1
-
-if [ $? -ne 0 ]; then
-    echo "Validation failed!"
-    exit 1
-fi
+# Check connection string
+echo $MONGODB_URI
 ```
 
-## Performance Considerations
+**Binary Not Found:**
+```bash
+# Build the binary
+go build -o bin/steemdb-sync ./cmd/sync
+```
 
-- **Sampling rate**: Lower sample rates (0.01) are faster but less thorough
-- **Block range**: Smaller ranges validate faster
-- **Database load**: Validation reads from both databases, consider running during low-traffic periods
-- **Network latency**: If databases are on different networks, validation may be slower
+### Performance Targets Not Met
+
+**Slow Queries:**
+1. Check if indexes are created:
+   ```bash
+   mongosh $MONGODB_URI/$MONGODB_DB --eval "db.blocks.getIndexes()"
+   ```
+
+2. Verify MongoDB resources (CPU, memory, disk I/O)
+
+3. Check query execution plans:
+   ```bash
+   mongosh $MONGODB_URI/$MONGODB_DB --eval "db.blocks.find({number: 1}).explain('executionStats')"
+   ```
+
+**Low Processing Speed:**
+1. Check sync service logs for errors
+2. Verify Steem RPC nodes are responsive
+3. Check MongoDB write performance
+4. Monitor system resources (CPU, memory, network)
 
 ## Next Steps
 
-After validation:
-1. Review any discrepancies found
-2. Investigate root causes
-3. Fix issues if found
-4. Re-run validation to confirm fixes
-5. Gradually increase validation scope as confidence grows
+After successful validation and performance testing:
 
+1. ✅ Cold start validation passed
+2. ✅ Performance tests passed
+3. ✅ System ready for production
+4. 📊 Set up Grafana dashboards
+5. 🔔 Configure alerting rules
+6. 📝 Document operational runbooks
+
+## Additional Resources
+
+- [Architecture Plan](../.cursor/plans/steemdb_sync_架构重构与查询优化.plan.md)
+- [Progress Analysis](../.cursor/plans/steemdb_sync_进度分析.md)
+- [Scripts README](./scripts/README.md)

@@ -46,4 +46,23 @@ logs/
 # Temporary files
 tmp/
 temp/
+test-tmp/
+
+# Test and validation artifacts
+test_data/
+validation_output/
+cold_start_test/
+performance_test_results/
+test_db/
+*.dump
+*.bson
+
+# Test binaries (in subdirectories)
+**/bin/validate
+**/bin/validate.exe
+test_validate
+
+# Benchmark results
+benchmark_results/
+*.bench
 

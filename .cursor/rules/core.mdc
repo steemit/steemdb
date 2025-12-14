@@ -49,6 +49,27 @@ See `project.mdc` for detailed package management rules and guidelines.
   - Improved readability for open-source contributions
   - Standard practice in professional software development
 
+## Network Issue Handling Policy
+
+- **If network-related errors occur, pause and notify the user to fix proxy server**
+- When encountering network errors (e.g., Docker pull failures, connection timeouts, DNS resolution failures):
+  1. **Stop immediately** - Do not retry automatically
+  2. **Identify the error** - Clearly state what network operation failed
+  3. **Notify the user** - Inform the user that network/proxy issues need to be resolved
+  4. **Wait for user confirmation** - Only proceed after the user confirms the network issue is fixed
+- Common network error scenarios:
+  - Docker image pull failures (`docker pull` errors)
+  - Package download failures (`go get`, `npm install`, etc.)
+  - API connection timeouts
+  - DNS resolution failures
+  - Proxy authentication failures
+- Example error message format:
+  ```
+  ⚠️ Network Error Detected: [specific error]
+  Please check and fix your proxy server configuration.
+  Once fixed, please confirm and I will retry the operation.
+  ```
+
 ## Documentation Update Policy
 
 - **Always update related documentation when completing TODO tasks**
