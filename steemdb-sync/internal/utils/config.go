@@ -28,9 +28,9 @@ type ServerConfig struct {
 }
 
 type SteemConfig struct {
-	Nodes          []string      `mapstructure:"nodes"`
-	Timeout        time.Duration `mapstructure:"timeout"`
-	RetryAttempts  int           `mapstructure:"retry_attempts"`
+	Nodes         []string      `mapstructure:"nodes"`
+	Timeout       time.Duration `mapstructure:"timeout"`
+	RetryAttempts int           `mapstructure:"retry_attempts"`
 }
 
 type MongoDBConfig struct {
@@ -51,6 +51,7 @@ type SyncConfig struct {
 	BatchSize          int           `mapstructure:"batch_size"`
 	BlockBatchSize     int           `mapstructure:"block_batch_size"`
 	OperationBatchSize int           `mapstructure:"operation_batch_size"`
+	AccountBatchSize   int           `mapstructure:"account_batch_size"`
 	BatchWriteInterval time.Duration `mapstructure:"batch_write_interval"`
 	Workers            int           `mapstructure:"workers"`
 	QueueSize          int           `mapstructure:"queue_size"`
@@ -102,7 +103,7 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	// Enable environment variable override
 	viper.AutomaticEnv()
-	
+
 	// Bind specific environment variables for nested configs
 	viper.BindEnv("mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
 	viper.BindEnv("redis.uri", "DATABASE_REDIS_URI", "REDIS_URI")
@@ -170,8 +171,9 @@ func setDefaults() {
 	viper.SetDefault("sync.batch_size", 50)
 	viper.SetDefault("sync.block_batch_size", 50)
 	viper.SetDefault("sync.operation_batch_size", 100)
+	viper.SetDefault("sync.account_batch_size", 100)
 	viper.SetDefault("sync.batch_write_interval", "5s")
-	viper.SetDefault("sync.workers", 10)
+	viper.SetDefault("sync.workers", 1) // Single goroutine
 	viper.SetDefault("sync.queue_size", 1000)
 	viper.SetDefault("sync.block_interval", "3s")
 	viper.SetDefault("sync.start_block", 1)

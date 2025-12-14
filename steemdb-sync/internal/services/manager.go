@@ -15,15 +15,14 @@ import (
 
 // Manager manages all sync services
 type Manager struct {
-	config    *utils.Config
-	db        *database.MongoDB
-	steem     *steem.Client
-	logger    utils.Logger
+	config *utils.Config
+	db     *database.MongoDB
+	steem  *steem.Client
+	logger utils.Logger
 
 	// Services
 	BlockSync *BlockSyncService
-	History   *HistoryService
-	Witnesses *WitnessService
+	CronTab   *CronTabService
 }
 
 // NewManager creates a new service manager
@@ -42,8 +41,7 @@ func NewManager(
 
 	// Initialize services
 	manager.BlockSync = NewBlockSyncService(config, db, steemClient, logger)
-	manager.History = NewHistoryService(config, db, steemClient, logger)
-	manager.Witnesses = NewWitnessService(config, db, steemClient, logger)
+	manager.CronTab = NewCronTabService(config, db, steemClient, logger, manager.BlockSync)
 
 	return manager
 }
@@ -84,17 +82,17 @@ func (m *Manager) StartMetricsServer(ctx context.Context) error {
 func (m *Manager) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"healthy","timestamp":%d,"version":"1.0.0","services":{"block_sync":"running","history":"running","witnesses":"running"}}`, time.Now().Unix())
+	fmt.Fprintf(w, `{"status":"healthy","timestamp":%d,"version":"1.0.0","services":{"block_sync":"running","crontab":"running"}}`, time.Now().Unix())
 }
 
 // readinessCheckHandler handles readiness check requests
 func (m *Manager) readinessCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Check if all services are ready
 	ready := true
 	services := make(map[string]string)
-	
+
 	// Check database connection
 	if err := m.db.Ping(context.Background()); err != nil {
 		ready = false
@@ -102,7 +100,7 @@ func (m *Manager) readinessCheckHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		services["database"] = "ready"
 	}
-	
+
 	// Check Steem connection
 	if _, err := m.steem.GetDynamicGlobalProperties(context.Background()); err != nil {
 		ready = false
@@ -110,19 +108,18 @@ func (m *Manager) readinessCheckHandler(w http.ResponseWriter, r *http.Request) 
 	} else {
 		services["steem_rpc"] = "ready"
 	}
-	
+
 	services["block_sync"] = "ready"
-	services["history"] = "ready"
-	services["witnesses"] = "ready"
-	
+	services["crontab"] = "ready"
+
 	status := "ready"
 	statusCode := http.StatusOK
 	if !ready {
 		status = "not_ready"
 		statusCode = http.StatusServiceUnavailable
 	}
-	
+
 	w.WriteHeader(statusCode)
-	fmt.Fprintf(w, `{"status":"%s","timestamp":%d,"services":{"database":"%s","steem_rpc":"%s","block_sync":"ready","history":"ready","witnesses":"ready"}}`, 
+	fmt.Fprintf(w, `{"status":"%s","timestamp":%d,"services":{"database":"%s","steem_rpc":"%s","block_sync":"ready","crontab":"ready"}}`,
 		status, time.Now().Unix(), services["database"], services["steem_rpc"])
 }

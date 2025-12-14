@@ -15,7 +15,7 @@ import (
 	"github.com/steemdb/sync/pkg/steem"
 )
 
-// BlockSyncService handles blockchain synchronization
+// BlockSyncService handles blockchain synchronization (single goroutine)
 type BlockSyncService struct {
 	config *utils.Config
 	db     *database.MongoDB
@@ -26,21 +26,19 @@ type BlockSyncService struct {
 	lastBlock int64
 	mutex     sync.RWMutex
 
-	// Work queues
-	blockQueue chan int64
-	opQueue    chan *blockchain.Operation
-
-	// Block cache (maps block number to block)
-	blockCache      map[int64]*steem.Block
-	blockCacheMutex sync.RWMutex
+	// Processor
+	operationProcessor *blockchain.OperationProcessor
 
 	// Batch buffers
-	blockBuffer      []*steem.Block
-	operationBuffer  []*blockchain.Operation
-	bufferMutex      sync.Mutex
+	blockBuffer []*steem.Block
+	bufferMutex sync.Mutex
 
 	// Statistics
 	stats *SyncStats
+
+	// Sync status (for CronTab to check)
+	syncCaughtUp bool
+	syncMutex    sync.RWMutex
 }
 
 // SyncStats holds synchronization statistics
@@ -61,56 +59,38 @@ func NewBlockSyncService(
 	logger utils.Logger,
 ) *BlockSyncService {
 	return &BlockSyncService{
-		config:          config,
-		db:              db,
-		steem:           steemClient,
-		logger:          logger,
-		blockQueue:      make(chan int64, config.Sync.QueueSize),
-		opQueue:         make(chan *blockchain.Operation, config.Sync.QueueSize*10),
-		blockCache:      make(map[int64]*steem.Block),
-		blockBuffer:     make([]*steem.Block, 0, config.Sync.BlockBatchSize),
-		operationBuffer: make([]*blockchain.Operation, 0, config.Sync.OperationBatchSize),
+		config:      config,
+		db:          db,
+		steem:       steemClient,
+		logger:      logger,
+		blockBuffer: make([]*steem.Block, 0, config.Sync.BlockBatchSize),
 		stats: &SyncStats{
 			StartTime: time.Now(),
 		},
+		syncCaughtUp: false,
 	}
 }
 
-// Start starts the block synchronization service
+// Start starts the block synchronization service (single goroutine)
 func (s *BlockSyncService) Start(ctx context.Context) error {
-	s.logger.Info("Starting block sync service")
+	s.logger.Info("Starting block sync service (single goroutine)")
 
 	// Load last processed block
 	if err := s.loadLastBlock(ctx); err != nil {
 		return fmt.Errorf("failed to load last block: %w", err)
 	}
 
+	// Initialize operation processor
+	s.operationProcessor = blockchain.NewOperationProcessor(s.db, s.logger)
+
 	var wg sync.WaitGroup
 
-	// Start block fetcher
+	// Start single goroutine sync loop
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.blockFetcher(ctx)
+		s.syncLoop(ctx)
 	}()
-
-	// Start block processors
-	for i := 0; i < s.config.Sync.Workers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			s.blockProcessor(ctx, workerID)
-		}(i)
-	}
-
-	// Start operation processors
-	for i := 0; i < s.config.Sync.Workers*2; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			s.operationProcessor(ctx, workerID)
-		}(i)
-	}
 
 	// Start statistics reporter
 	wg.Add(1)
@@ -124,6 +104,13 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		s.batchWriter(ctx)
+	}()
+
+	// Start account operations buffer flusher
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.flushAccountOperationsBuffer(ctx)
 	}()
 
 	wg.Wait()
@@ -145,8 +132,8 @@ func (s *BlockSyncService) loadLastBlock(ctx context.Context) error {
 	return nil
 }
 
-// blockFetcher fetches blocks from the blockchain
-func (s *BlockSyncService) blockFetcher(ctx context.Context) {
+// syncLoop is the main sync loop (single goroutine, serial processing)
+func (s *BlockSyncService) syncLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.config.Sync.BlockInterval)
 	defer ticker.Stop()
 
@@ -155,126 +142,94 @@ func (s *BlockSyncService) blockFetcher(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.fetchNextBlocks(ctx); err != nil {
-				s.logger.Error("Error fetching blocks", utils.Error(err))
+			// Get blockchain head
+			props, err := s.steem.GetDynamicGlobalProperties(ctx)
+			if err != nil {
+				s.logger.Error("Error getting dynamic global properties", utils.Error(err))
 				s.incrementErrorCount()
-			}
-		}
-	}
-}
-
-// fetchNextBlocks fetches the next batch of blocks using batch API
-func (s *BlockSyncService) fetchNextBlocks(ctx context.Context) error {
-	// Get blockchain head
-	props, err := s.steem.GetDynamicGlobalProperties(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get dynamic global properties: %w", err)
-	}
-
-	headBlock := props.LastIrreversibleBlockNum
-
-	s.mutex.RLock()
-	currentBlock := s.lastBlock
-	s.mutex.RUnlock()
-
-	// Calculate blocks to process
-	blocksToProcess := headBlock - currentBlock
-	if blocksToProcess <= 0 {
-		return nil
-	}
-
-	// Limit batch size to configured block batch size
-	batchSize := int64(s.config.Sync.BlockBatchSize)
-	if blocksToProcess > batchSize {
-		blocksToProcess = batchSize
-	}
-
-	// Use batch API to fetch multiple blocks at once
-	startBlock := currentBlock + 1
-	endBlock := currentBlock + blocksToProcess + 1
-
-	startTime := time.Now()
-	blocks, err := s.steem.GetBlocksRange(ctx, startBlock, endBlock)
-	duration := time.Since(startTime).Seconds()
-	utils.BatchFetchDuration.WithLabelValues("block_sync").Observe(duration)
-	
-	if err != nil {
-		return fmt.Errorf("failed to get blocks range [%d, %d): %w", startBlock, endBlock, err)
-	}
-
-	// Cache blocks and queue for processing
-	s.blockCacheMutex.Lock()
-	for _, block := range blocks {
-		s.blockCache[block.Number] = block
-	}
-	s.blockCacheMutex.Unlock()
-
-	// Queue blocks for processing
-	for _, block := range blocks {
-		select {
-		case s.blockQueue <- block.Number:
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			// Queue is full, skip this batch
-			return nil
-		}
-	}
-
-	return nil
-}
-
-// blockProcessor processes blocks from the queue
-func (s *BlockSyncService) blockProcessor(ctx context.Context, workerID int) {
-	processor := blockchain.NewOperationProcessor(s.db, s.logger)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case blockNum := <-s.blockQueue:
-			if err := s.processBlock(ctx, blockNum, processor); err != nil {
-				s.logger.Error("Error processing block",
-					utils.Int64("block", blockNum),
-					utils.Int("worker", workerID),
-					utils.Error(err),
-				)
-				s.incrementErrorCount()
-				utils.ErrorsTotal.WithLabelValues("block_sync", "block_processing").Inc()
 				continue
 			}
 
-			s.updateLastBlock(blockNum)
-			s.incrementBlockCount()
-			
-			// Update metrics
-			utils.BlocksProcessed.WithLabelValues("block_sync").Inc()
-			utils.CurrentBlock.WithLabelValues("block_sync").Set(float64(blockNum))
+			headBlock := props.LastIrreversibleBlockNum
+
+			s.mutex.RLock()
+			currentBlock := s.lastBlock
+			s.mutex.RUnlock()
+
+			// Check if we're caught up
+			if currentBlock >= headBlock {
+				s.setSyncCaughtUp(true)
+				continue
+			}
+
+			// Calculate blocks to process
+			blocksToProcess := headBlock - currentBlock
+			if blocksToProcess <= 0 {
+				s.setSyncCaughtUp(true)
+				continue
+			}
+
+			// Limit batch size
+			batchSize := int64(s.config.Sync.BlockBatchSize)
+			if blocksToProcess > batchSize {
+				blocksToProcess = batchSize
+			}
+
+			// Fetch blocks in batch
+			startBlock := currentBlock + 1
+			endBlock := currentBlock + blocksToProcess
+
+			blocks, err := s.steem.GetBlocksRange(ctx, startBlock, endBlock)
+			if err != nil {
+				s.logger.Error("Error fetching blocks range", utils.Error(err))
+				s.incrementErrorCount()
+				continue
+			}
+
+			// Process blocks sequentially
+			for _, block := range blocks {
+				if err := s.processBlockSequentially(ctx, block); err != nil {
+					s.logger.Error("Error processing block",
+						utils.Int64("block", block.Number),
+						utils.Error(err),
+					)
+					s.incrementErrorCount()
+					continue
+				}
+
+				s.updateLastBlock(block.Number)
+				s.incrementBlockCount()
+
+				// Update metrics
+				utils.BlocksProcessed.WithLabelValues("block_sync").Inc()
+				utils.CurrentBlock.WithLabelValues("block_sync").Set(float64(block.Number))
+			}
+
+			// Flush buffers
+			s.flushBuffers(ctx)
 		}
 	}
 }
 
-// processBlock processes a single block
-func (s *BlockSyncService) processBlock(ctx context.Context, blockNum int64, processor *blockchain.OperationProcessor) error {
-	// Try to get block from cache first
-	s.blockCacheMutex.RLock()
-	block, found := s.blockCache[blockNum]
-	s.blockCacheMutex.RUnlock()
+// IsSyncCaughtUp returns whether sync has caught up with the latest block
+func (s *BlockSyncService) IsSyncCaughtUp() bool {
+	s.syncMutex.RLock()
+	defer s.syncMutex.RUnlock()
+	return s.syncCaughtUp
+}
 
-	// If not in cache, fetch individually (fallback)
-	if !found {
-		var err error
-		block, err = s.steem.GetBlock(ctx, blockNum)
-		if err != nil {
-			return fmt.Errorf("failed to get block %d: %w", blockNum, err)
-		}
-	} else {
-		// Remove from cache after use to free memory
-		s.blockCacheMutex.Lock()
-		delete(s.blockCache, blockNum)
-		s.blockCacheMutex.Unlock()
+// setSyncCaughtUp sets the sync caught up status
+func (s *BlockSyncService) setSyncCaughtUp(caughtUp bool) {
+	s.syncMutex.Lock()
+	defer s.syncMutex.Unlock()
+	if !s.syncCaughtUp && caughtUp {
+		s.logger.Info("Block sync caught up with latest block")
 	}
+	s.syncCaughtUp = caughtUp
+}
 
+// processBlockSequentially processes a single block sequentially (serial processing of operations)
+func (s *BlockSyncService) processBlockSequentially(ctx context.Context, block *steem.Block) error {
 	// Add block to buffer for batch saving
 	s.bufferMutex.Lock()
 	s.blockBuffer = append(s.blockBuffer, block)
@@ -295,108 +250,41 @@ func (s *BlockSyncService) processBlock(ctx context.Context, blockNum int64, pro
 	}
 
 	// Get operations in block
-	ops, err := s.steem.GetOpsInBlock(ctx, blockNum, true)
+	ops, err := s.steem.GetOpsInBlock(ctx, block.Number, true)
 	if err != nil {
-		return fmt.Errorf("failed to get ops in block %d: %w", blockNum, err)
+		return fmt.Errorf("failed to get ops in block %d: %w", block.Number, err)
 	}
 
-	// Add operations to buffer
-	s.bufferMutex.Lock()
+	// Process operations sequentially (in order)
 	for _, op := range ops {
 		operation := &blockchain.Operation{
 			Block:     block,
 			Operation: &op,
 		}
-		s.operationBuffer = append(s.operationBuffer, operation)
-	}
-	shouldFlushOps := len(s.operationBuffer) >= s.config.Sync.OperationBatchSize
-	opsBufferCopy := make([]*blockchain.Operation, len(s.operationBuffer))
-	copy(opsBufferCopy, s.operationBuffer)
-	if shouldFlushOps {
-		s.operationBuffer = s.operationBuffer[:0]
-	}
-	s.bufferMutex.Unlock()
 
-	// Queue operations for processing (or process in batch if buffer is full)
-	if shouldFlushOps {
-		// Process operations in batch
-		for _, op := range opsBufferCopy {
-			select {
-			case s.opQueue <- op:
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				// Queue is full, process synchronously
-				if err := processor.Process(op); err != nil {
-					s.logger.Error("Error processing operation",
-						utils.String("type", op.Operation.Op[0].(string)),
-						utils.Int64("block", op.Block.Number),
-						utils.Error(err),
-					)
-				}
-			}
+		// Process operation synchronously (serial processing)
+		if err := s.operationProcessor.Process(operation); err != nil {
+			s.logger.Error("Error processing operation",
+				utils.String("type", op.Op[0].(string)),
+				utils.Int64("block", block.Number),
+				utils.Error(err),
+			)
+			s.incrementErrorCount()
+			// Continue processing other operations even if one fails
+			continue
 		}
-	} else {
-		// Queue operations individually
-		for _, op := range ops {
-			operation := &blockchain.Operation{
-				Block:     block,
-				Operation: &op,
-			}
-			select {
-			case s.opQueue <- operation:
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				// Queue is full, process synchronously
-				if err := processor.Process(operation); err != nil {
-					s.logger.Error("Error processing operation",
-						utils.String("type", op.Op[0].(string)),
-						utils.Int64("block", blockNum),
-						utils.Error(err),
-					)
-				}
+
+		s.incrementOperationCount()
+
+		// Update metrics
+		if len(op.Op) > 0 {
+			if opType, ok := op.Op[0].(string); ok {
+				utils.OperationsProcessed.WithLabelValues(opType).Inc()
 			}
 		}
 	}
 
 	return nil
-}
-
-// operationProcessor processes operations from the queue
-func (s *BlockSyncService) operationProcessor(ctx context.Context, workerID int) {
-	processor := blockchain.NewOperationProcessor(s.db, s.logger)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case op := <-s.opQueue:
-			if err := processor.Process(op); err != nil {
-				s.logger.Error("Error processing operation",
-					utils.String("type", op.Operation.Op[0].(string)),
-					utils.Int64("block", op.Block.Number),
-					utils.Int("worker", workerID),
-					utils.Error(err),
-				)
-				s.incrementErrorCount()
-				continue
-			}
-			s.incrementOperationCount()
-			
-			// Update metrics
-			if len(op.Operation.Op) > 0 {
-				if opType, ok := op.Operation.Op[0].(string); ok {
-					utils.OperationsProcessed.WithLabelValues(opType).Inc()
-				}
-			}
-		}
-	}
-}
-
-// saveBlock saves a block to the database (kept for backward compatibility)
-func (s *BlockSyncService) saveBlock(ctx context.Context, block *steem.Block) error {
-	return s.saveBlocksBatch(ctx, []*steem.Block{block})
 }
 
 // saveBlocksBatch saves multiple blocks to the database using bulk write
@@ -408,21 +296,24 @@ func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*steem.
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime).Seconds()
-		utils.BatchWriteDuration.WithLabelValues("block_sync", "block_30d").Observe(duration)
+		utils.BatchWriteDuration.WithLabelValues("block_sync", "blocks").Observe(duration)
 	}()
 
 	// Convert blocks to database models
 	operations := make([]mongo.WriteModel, 0, len(blocks))
 	for _, block := range blocks {
-		dbBlock := &database.Block{
-			ID:        block.Number,
-			Number:    block.Number,
-			Timestamp: block.Timestamp,
-			Previous:  block.Previous,
-			Witness:   block.Witness,
-		}
+		// Calculate date index
+		dateIndex := block.Timestamp.Format("2006-01-02")
 
-		// Convert transactions
+		// Count operations and transactions
+		txCount := len(block.Transactions)
+		opCount := 0
+		transferCount := 0
+		voteCount := 0
+		commentCount := 0
+
+		// Convert transactions and count operations
+		transactions := make([]map[string]interface{}, 0, txCount)
 		for _, tx := range block.Transactions {
 			txMap := map[string]interface{}{
 				"ref_block_num":    tx.RefBlockNum,
@@ -431,8 +322,26 @@ func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*steem.
 				"operations":       tx.Operations,
 				"extensions":       tx.Extensions,
 				"signatures":       tx.Signatures,
+				"transaction_id":   tx.TransactionID, // Add transaction ID for tx_id query
 			}
-			dbBlock.Transactions = append(dbBlock.Transactions, txMap)
+			transactions = append(transactions, txMap)
+			opCount += len(tx.Operations)
+		}
+
+		dbBlock := &database.Block{
+			ID:               block.Number,
+			Number:           block.Number,
+			Hash:             block.BlockID, // Add block hash (block_id)
+			Timestamp:        block.Timestamp,
+			Previous:         block.Previous,
+			Witness:          block.Witness,
+			TransactionCount: txCount,
+			OperationCount:   opCount,
+			Transactions:     transactions,
+			DateIndex:        dateIndex,
+			TransferCount:    transferCount,
+			VoteCount:        voteCount,
+			CommentCount:     commentCount,
 		}
 
 		// Create upsert operation
@@ -446,7 +355,7 @@ func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*steem.
 	}
 
 	// Execute bulk write
-	collection := s.db.Collection("block_30d")
+	collection := s.db.Collection("blocks")
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := collection.BulkWrite(ctx, operations, opts)
 	if err != nil {
@@ -473,15 +382,12 @@ func (s *BlockSyncService) batchWriter(ctx context.Context) {
 	}
 }
 
-// flushBuffers flushes block and operation buffers
+// flushBuffers flushes block buffer
 func (s *BlockSyncService) flushBuffers(ctx context.Context) {
 	s.bufferMutex.Lock()
 	blockBuffer := make([]*steem.Block, len(s.blockBuffer))
 	copy(blockBuffer, s.blockBuffer)
 	s.blockBuffer = s.blockBuffer[:0]
-	operationBuffer := make([]*blockchain.Operation, len(s.operationBuffer))
-	copy(operationBuffer, s.operationBuffer)
-	s.operationBuffer = s.operationBuffer[:0]
 	s.bufferMutex.Unlock()
 
 	// Flush blocks
@@ -490,24 +396,27 @@ func (s *BlockSyncService) flushBuffers(ctx context.Context) {
 			s.logger.Error("Error flushing block buffer", utils.Error(err))
 		}
 	}
+}
 
-	// Flush operations (queue them for processing)
-	if len(operationBuffer) > 0 {
-		utils.OperationsBatched.WithLabelValues("block_sync").Add(float64(len(operationBuffer)))
-		processor := blockchain.NewOperationProcessor(s.db, s.logger)
-		for _, op := range operationBuffer {
-			select {
-			case s.opQueue <- op:
-			case <-ctx.Done():
-				return
-			default:
-				// Queue is full, process synchronously
-				if err := processor.Process(op); err != nil {
-					s.logger.Error("Error processing operation in flush",
-						utils.String("type", op.Operation.Op[0].(string)),
-						utils.Int64("block", op.Block.Number),
-						utils.Error(err),
-					)
+// flushAccountOperationsBuffer periodically flushes account operations buffer
+func (s *BlockSyncService) flushAccountOperationsBuffer(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second) // Flush every 5 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Flush remaining buffer on shutdown
+			if s.operationProcessor != nil {
+				if err := s.operationProcessor.FlushAccountOperationsBuffer(ctx); err != nil {
+					s.logger.Error("Error flushing account operations buffer on shutdown", utils.Error(err))
+				}
+			}
+			return
+		case <-ticker.C:
+			if s.operationProcessor != nil {
+				if err := s.operationProcessor.FlushAccountOperationsBuffer(ctx); err != nil {
+					s.logger.Error("Error flushing account operations buffer", utils.Error(err))
 				}
 			}
 		}

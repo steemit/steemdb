@@ -83,23 +83,13 @@ func main() {
 		}
 	}()
 
-	// Start history service
+	// Start cron tab service (waits for sync to catch up)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Info("Starting history service")
-		if err := serviceManager.History.Start(ctx); err != nil {
-			logger.Error("History service error", utils.Error(err))
-		}
-	}()
-
-	// Start witnesses service
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		logger.Info("Starting witnesses service")
-		if err := serviceManager.Witnesses.Start(ctx); err != nil {
-			logger.Error("Witnesses service error", utils.Error(err))
+		logger.Info("Starting cron tab service")
+		if err := serviceManager.CronTab.Start(ctx); err != nil {
+			logger.Error("Cron tab service error", utils.Error(err))
 		}
 	}()
 

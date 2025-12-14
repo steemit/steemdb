@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -24,6 +28,7 @@ type Operation struct {
 // Collection interface for collection operations
 type Collection interface {
 	InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error)
+	InsertMany(ctx context.Context, documents []interface{}) (*mongo.InsertManyResult, error)
 	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
 	FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult
 }
@@ -37,6 +42,10 @@ func (a *mongoCollectionAdapter) InsertOne(ctx context.Context, document interfa
 	return a.Collection.InsertOne(ctx, document)
 }
 
+func (a *mongoCollectionAdapter) InsertMany(ctx context.Context, documents []interface{}) (*mongo.InsertManyResult, error) {
+	return a.Collection.InsertMany(ctx, documents)
+}
+
 func (a *mongoCollectionAdapter) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	return a.Collection.UpdateOne(ctx, filter, update, opts...)
 }
@@ -48,6 +57,7 @@ func (a *mongoCollectionAdapter) FindOne(ctx context.Context, filter interface{}
 // Database interface for database operations
 type Database interface {
 	Collection(name string) Collection
+	MarkAccountNeedsUpdate(ctx context.Context, accountName string) error
 }
 
 // mongoDatabaseAdapter adapts *database.MongoDB to Database interface
@@ -59,11 +69,20 @@ func (a *mongoDatabaseAdapter) Collection(name string) Collection {
 	return &mongoCollectionAdapter{Collection: a.db.Collection(name)}
 }
 
+func (a *mongoDatabaseAdapter) MarkAccountNeedsUpdate(ctx context.Context, accountName string) error {
+	return a.db.MarkAccountNeedsUpdate(ctx, accountName)
+}
+
 // OperationProcessor processes blockchain operations
 type OperationProcessor struct {
 	db       Database
 	logger   utils.Logger
 	handlers map[string]OperationHandler
+
+	// Batch buffers for account_operations
+	accountOpBuffer []interface{}
+	bufferMutex     sync.Mutex
+	bufferSize      int
 }
 
 // OperationHandler is a function that processes a specific operation type
@@ -72,9 +91,11 @@ type OperationHandler func(ctx context.Context, op *Operation) error
 // NewOperationProcessor creates a new operation processor
 func NewOperationProcessor(db *database.MongoDB, logger utils.Logger) *OperationProcessor {
 	p := &OperationProcessor{
-		db:       &mongoDatabaseAdapter{db: db},
-		logger:   logger,
-		handlers: make(map[string]OperationHandler),
+		db:              &mongoDatabaseAdapter{db: db},
+		logger:          logger,
+		handlers:        make(map[string]OperationHandler),
+		accountOpBuffer: make([]interface{}, 0, 100), // Initial capacity for batch writes
+		bufferSize:      100,                          // Flush when buffer reaches this size
 	}
 
 	// Register operation handlers
@@ -112,16 +133,293 @@ func (p *OperationProcessor) Process(op *Operation) error {
 		return fmt.Errorf("invalid operation type")
 	}
 
-	handler, exists := p.handlers[opType]
-	if !exists {
-		p.logger.Debug("Unknown operation type", utils.String("type", opType))
-		return nil
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	return handler(ctx, op)
+	// Save operation to operations collection first
+	opID, err := p.saveOperation(ctx, op, opType)
+	if err != nil {
+		p.logger.Error("Failed to save operation",
+			utils.String("type", opType),
+			utils.Int64("block", op.Block.Number),
+			utils.Error(err),
+		)
+		// Continue processing even if save fails
+	}
+
+	// Process with handler
+	handler, exists := p.handlers[opType]
+	if !exists {
+		p.logger.Debug("Unknown operation type", utils.String("type", opType))
+		// Still add to account_operations buffer even if no handler
+		if opID != nil {
+			if err := p.addAccountOperationsToBuffer(ctx, op, opType, *opID); err != nil {
+				p.logger.Error("Failed to add account operations to buffer",
+					utils.String("type", opType),
+					utils.Int64("block", op.Block.Number),
+					utils.Error(err),
+				)
+			}
+		}
+		return nil
+	}
+
+	if err := handler(ctx, op); err != nil {
+		return err
+	}
+
+	// Add to account_operations buffer (will be flushed in batch)
+	if opID != nil {
+		if err := p.addAccountOperationsToBuffer(ctx, op, opType, *opID); err != nil {
+			p.logger.Error("Failed to add account operations to buffer",
+				utils.String("type", opType),
+				utils.Int64("block", op.Block.Number),
+				utils.Error(err),
+			)
+			// Don't fail the whole operation if buffer add fails
+		}
+	}
+
+	return nil
+}
+
+// FlushAccountOperationsBuffer flushes the account_operations buffer
+func (p *OperationProcessor) FlushAccountOperationsBuffer(ctx context.Context) error {
+	p.bufferMutex.Lock()
+	if len(p.accountOpBuffer) == 0 {
+		p.bufferMutex.Unlock()
+		return nil
+	}
+
+	buffer := make([]interface{}, len(p.accountOpBuffer))
+	copy(buffer, p.accountOpBuffer)
+	p.accountOpBuffer = p.accountOpBuffer[:0]
+	p.bufferMutex.Unlock()
+
+	if len(buffer) > 0 {
+		collection := p.db.Collection("account_operations")
+		_, err := collection.InsertMany(ctx, buffer)
+		if err != nil {
+			return fmt.Errorf("failed to flush account operations buffer: %w", err)
+		}
+		p.logger.Debug("Flushed account operations buffer",
+			utils.Int("count", len(buffer)),
+		)
+	}
+
+	return nil
+}
+
+// saveOperation saves operation to operations collection
+func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, opType string) (*primitive.ObjectID, error) {
+	opData, ok := op.Operation.Op[1].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid operation data")
+	}
+
+	// Extract accounts from operation
+	accounts := p.extractAccounts(opType, opData)
+	primaryAccount := ""
+	if len(accounts) > 0 {
+		primaryAccount = accounts[0]
+	}
+
+	// Calculate date and hour indices
+	dateIndex := op.Operation.Timestamp.Format("2006-01-02")
+	hourIndex := op.Operation.Timestamp.Hour()
+
+	// Determine op_index (operation index in transaction)
+	opIndex := op.Operation.OpInTrx
+	if opIndex < 0 {
+		opIndex = 0
+	}
+
+	dbOp := &database.Operation{
+		ID:             primitive.NewObjectID(),
+		BlockNum:       op.Block.Number,
+		BlockTime:      op.Operation.Timestamp,
+		TrxID:          op.Operation.TrxID,
+		OpType:         opType,
+		OpIndex:        opIndex,
+		Data:           opData,
+		Accounts:       accounts,
+		PrimaryAccount: primaryAccount,
+		DateIndex:      dateIndex,
+		HourIndex:      hourIndex,
+	}
+
+	collection := p.db.Collection("operations")
+	_, err := collection.InsertOne(ctx, dbOp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save operation: %w", err)
+	}
+
+	return &dbOp.ID, nil
+}
+
+// addAccountOperationsToBuffer adds account operations to buffer for batch writing
+func (p *OperationProcessor) addAccountOperationsToBuffer(ctx context.Context, op *Operation, opType string, opID primitive.ObjectID) error {
+	opData, ok := op.Operation.Op[1].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid operation data")
+	}
+
+	// Extract accounts
+	accounts := p.extractAccounts(opType, opData)
+	if len(accounts) == 0 {
+		return nil // No accounts to index
+	}
+
+	// Create summary (key information to avoid JOIN)
+	summary := p.createOperationSummary(opType, opData)
+
+	// Add account_operations to buffer
+	p.bufferMutex.Lock()
+	defer p.bufferMutex.Unlock()
+
+	for _, account := range accounts {
+		accountOp := &database.AccountOperation{
+			ID:        primitive.NewObjectID(),
+			Account:   account,
+			BlockNum:  op.Block.Number,
+			BlockTime: op.Operation.Timestamp,
+			OpType:    opType,
+			OpID:      opID,
+			TrxID:     op.Operation.TrxID,
+			Summary:   summary,
+		}
+		p.accountOpBuffer = append(p.accountOpBuffer, accountOp)
+
+		// Flush buffer if it reaches the threshold
+		if len(p.accountOpBuffer) >= p.bufferSize {
+			buffer := make([]interface{}, len(p.accountOpBuffer))
+			copy(buffer, p.accountOpBuffer)
+			p.accountOpBuffer = p.accountOpBuffer[:0]
+			p.bufferMutex.Unlock()
+
+			// Flush buffer asynchronously
+			go func(buf []interface{}) {
+				flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				collection := p.db.Collection("account_operations")
+				if _, err := collection.InsertMany(flushCtx, buf); err != nil {
+					p.logger.Error("Failed to flush account operations buffer",
+						utils.Int("count", len(buf)),
+						utils.Error(err),
+					)
+				}
+			}(buffer)
+
+			p.bufferMutex.Lock()
+		}
+	}
+
+	return nil
+}
+
+// extractAccounts extracts account names from operation data
+func (p *OperationProcessor) extractAccounts(opType string, opData map[string]interface{}) []string {
+	accounts := make([]string, 0)
+
+	switch opType {
+	case "transfer":
+		if from := getString(opData, "from"); from != "" {
+			accounts = append(accounts, from)
+		}
+		if to := getString(opData, "to"); to != "" {
+			accounts = append(accounts, to)
+		}
+	case "vote":
+		if voter := getString(opData, "voter"); voter != "" {
+			accounts = append(accounts, voter)
+		}
+		if author := getString(opData, "author"); author != "" {
+			accounts = append(accounts, author)
+		}
+	case "comment":
+		if author := getString(opData, "author"); author != "" {
+			accounts = append(accounts, author)
+		}
+	case "transfer_to_vesting":
+		if from := getString(opData, "from"); from != "" {
+			accounts = append(accounts, from)
+		}
+		if to := getString(opData, "to"); to != "" {
+			accounts = append(accounts, to)
+		}
+	case "fill_vesting_withdraw":
+		if fromAccount := getString(opData, "from_account"); fromAccount != "" {
+			accounts = append(accounts, fromAccount)
+		}
+		if toAccount := getString(opData, "to_account"); toAccount != "" {
+			accounts = append(accounts, toAccount)
+		}
+	case "account_witness_vote":
+		if account := getString(opData, "account"); account != "" {
+			accounts = append(accounts, account)
+		}
+	case "author_reward":
+		if author := getString(opData, "author"); author != "" {
+			accounts = append(accounts, author)
+		}
+	case "curation_reward":
+		if curator := getString(opData, "curator"); curator != "" {
+			accounts = append(accounts, curator)
+		}
+	case "comment_benefactor_reward":
+		if benefactor := getString(opData, "benefactor"); benefactor != "" {
+			accounts = append(accounts, benefactor)
+		}
+	case "convert":
+		if owner := getString(opData, "owner"); owner != "" {
+			accounts = append(accounts, owner)
+		}
+	}
+
+	// Remove duplicates
+	seen := make(map[string]bool)
+	result := make([]string, 0)
+	for _, acc := range accounts {
+		if !seen[acc] {
+			seen[acc] = true
+			result = append(result, acc)
+		}
+	}
+
+	return result
+}
+
+// createOperationSummary creates a summary of operation for account_operations
+func (p *OperationProcessor) createOperationSummary(opType string, opData map[string]interface{}) bson.M {
+	summary := bson.M{
+		"op_type": opType,
+	}
+
+	switch opType {
+	case "transfer":
+		summary["from"] = getString(opData, "from")
+		summary["to"] = getString(opData, "to")
+		summary["amount"] = getString(opData, "amount")
+	case "vote":
+		summary["voter"] = getString(opData, "voter")
+		summary["author"] = getString(opData, "author")
+		summary["permlink"] = getString(opData, "permlink")
+		summary["weight"] = getFloat64(opData, "weight")
+	case "comment":
+		summary["author"] = getString(opData, "author")
+		summary["permlink"] = getString(opData, "permlink")
+		summary["title"] = getString(opData, "title")
+	case "author_reward":
+		summary["author"] = getString(opData, "author")
+		summary["permlink"] = getString(opData, "permlink")
+		summary["sbd_payout"] = getString(opData, "sbd_payout")
+		summary["steem_payout"] = getString(opData, "steem_payout")
+	case "curation_reward":
+		summary["curator"] = getString(opData, "curator")
+		summary["reward"] = getString(opData, "reward")
+	}
+
+	return summary
 }
 
 // handleComment processes comment operations
@@ -131,18 +429,25 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 		return fmt.Errorf("invalid comment operation data")
 	}
 
+	author := getString(opData, "author")
+	permlink := getString(opData, "permlink")
+	parentPermlink := getString(opData, "parent_permlink")
+
 	comment := &database.Comment{
-		ID:             fmt.Sprintf("%s/%s", opData["author"], opData["permlink"]),
-		Author:         getString(opData, "author"),
-		Permlink:       getString(opData, "permlink"),
+		ID:             fmt.Sprintf("%s/%s", author, permlink),
+		Author:         author,
+		Permlink:       permlink,
 		Title:          getString(opData, "title"),
 		Body:           getString(opData, "body"),
 		ParentAuthor:   getString(opData, "parent_author"),
-		ParentPermlink: getString(opData, "parent_permlink"),
+		ParentPermlink: parentPermlink,
 		Created:        op.Operation.Timestamp,
 		LastUpdate:     op.Operation.Timestamp,
 		BlockNum:       op.Block.Number,
 		Scanned:        time.Now(),
+		AuthorLower:    strings.ToLower(author),
+		CategoryLower:  strings.ToLower(parentPermlink),
+		DateIndex:      op.Operation.Timestamp.Format("2006-01-02"),
 	}
 
 	// Parse JSON metadata
@@ -161,7 +466,7 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 	// Calculate depth
 	if comment.ParentAuthor != "" {
 		// This is a reply, find parent depth
-		parentCollection := p.db.Collection("comment")
+		parentCollection := p.db.Collection("comments")
 		var parent database.Comment
 		err := parentCollection.FindOne(ctx, map[string]interface{}{
 			"_id": fmt.Sprintf("%s/%s", comment.ParentAuthor, comment.ParentPermlink),
@@ -173,8 +478,8 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 		}
 	}
 
-	// Save comment
-	collection := p.db.Collection("comment")
+	// Save comment to comments collection
+	collection := p.db.Collection("comments")
 	filter := map[string]interface{}{"_id": comment.ID}
 	update := map[string]interface{}{"$set": comment}
 	opts := options.Update().SetUpsert(true)
@@ -182,6 +487,16 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 	_, err := collection.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		return fmt.Errorf("failed to save comment: %w", err)
+	}
+
+	// Mark author account needs update
+	if author := getString(opData, "author"); author != "" {
+		if err := p.db.MarkAccountNeedsUpdate(ctx, author); err != nil {
+			p.logger.Debug("Failed to mark account needs update",
+				utils.String("account", author),
+				utils.Error(err),
+			)
+		}
 	}
 
 	return nil
@@ -208,6 +523,14 @@ func (p *OperationProcessor) handleVote(ctx context.Context, op *Operation) erro
 	_, err := collection.InsertOne(ctx, vote)
 	if err != nil {
 		return fmt.Errorf("failed to save vote: %w", err)
+	}
+
+	// Mark voter and author accounts need update
+	if voter := getString(opData, "voter"); voter != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, voter)
+	}
+	if author := getString(opData, "author"); author != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, author)
 	}
 
 	return nil
@@ -240,6 +563,14 @@ func (p *OperationProcessor) handleTransfer(ctx context.Context, op *Operation) 
 		return fmt.Errorf("failed to save transfer: %w", err)
 	}
 
+	// Mark from and to accounts need update
+	if from := getString(opData, "from"); from != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, from)
+	}
+	if to := getString(opData, "to"); to != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, to)
+	}
+
 	return nil
 }
 
@@ -265,6 +596,11 @@ func (p *OperationProcessor) handleAuthorReward(ctx context.Context, op *Operati
 	_, err := collection.InsertOne(ctx, reward)
 	if err != nil {
 		return fmt.Errorf("failed to save author reward: %w", err)
+	}
+
+	// Mark author account needs update
+	if author := getString(opData, "author"); author != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, author)
 	}
 
 	return nil
@@ -293,6 +629,11 @@ func (p *OperationProcessor) handleCurationReward(ctx context.Context, op *Opera
 		return fmt.Errorf("failed to save curation reward: %w", err)
 	}
 
+	// Mark curator account needs update
+	if curator := getString(opData, "curator"); curator != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, curator)
+	}
+
 	return nil
 }
 
@@ -316,6 +657,14 @@ func (p *OperationProcessor) handleVestingDeposit(ctx context.Context, op *Opera
 	_, err := collection.InsertOne(ctx, deposit)
 	if err != nil {
 		return fmt.Errorf("failed to save vesting deposit: %w", err)
+	}
+
+	// Mark from and to accounts need update
+	if from := getString(opData, "from"); from != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, from)
+	}
+	if to := getString(opData, "to"); to != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, to)
 	}
 
 	return nil
@@ -342,6 +691,14 @@ func (p *OperationProcessor) handleVestingWithdraw(ctx context.Context, op *Oper
 	_, err := collection.InsertOne(ctx, withdraw)
 	if err != nil {
 		return fmt.Errorf("failed to save vesting withdraw: %w", err)
+	}
+
+	// Mark from_account and to_account need update
+	if fromAccount := getString(opData, "from_account"); fromAccount != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, fromAccount)
+	}
+	if toAccount := getString(opData, "to_account"); toAccount != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, toAccount)
 	}
 
 	return nil
@@ -371,6 +728,11 @@ func (p *OperationProcessor) handleConvert(ctx context.Context, op *Operation) e
 	_, err := collection.InsertOne(ctx, convert)
 	if err != nil {
 		return fmt.Errorf("failed to save convert: %w", err)
+	}
+
+	// Mark owner account needs update
+	if owner := getString(opData, "owner"); owner != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, owner)
 	}
 
 	return nil
@@ -428,6 +790,11 @@ func (p *OperationProcessor) handleWitnessVote(ctx context.Context, op *Operatio
 	_, err := collection.InsertOne(ctx, vote)
 	if err != nil {
 		return fmt.Errorf("failed to save witness vote: %w", err)
+	}
+
+	// Mark account needs update
+	if account := getString(opData, "account"); account != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, account)
 	}
 
 	return nil
@@ -508,6 +875,11 @@ func (p *OperationProcessor) handleFollow(ctx context.Context, op *Operation, da
 		return fmt.Errorf("failed to save follow: %w", err)
 	}
 
+	// Mark follower account needs update
+	if follower := getString(followData, "follower"); follower != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, follower)
+	}
+
 	return nil
 }
 
@@ -535,6 +907,11 @@ func (p *OperationProcessor) handleReblog(ctx context.Context, op *Operation, da
 	_, err := collection.InsertOne(ctx, reblog)
 	if err != nil {
 		return fmt.Errorf("failed to save reblog: %w", err)
+	}
+
+	// Mark account needs update
+	if account := getString(reblogData, "account"); account != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, account)
 	}
 
 	return nil
@@ -581,7 +958,7 @@ func (p *OperationProcessor) handleCommentOptions(ctx context.Context, op *Opera
 
 	// Update the comment with options
 	commentID := fmt.Sprintf("%s/%s", getString(opData, "author"), getString(opData, "permlink"))
-	
+
 	update := map[string]interface{}{
 		"$set": map[string]interface{}{
 			"last_update": op.Operation.Timestamp,
@@ -602,10 +979,15 @@ func (p *OperationProcessor) handleCommentOptions(ctx context.Context, op *Opera
 		update["$set"].(map[string]interface{})["allow_curation_rewards"] = allowCurationRewards
 	}
 
-	collection := p.db.Collection("comment")
+	collection := p.db.Collection("comments")
 	_, err := collection.UpdateOne(ctx, map[string]interface{}{"_id": commentID}, update)
 	if err != nil {
 		return fmt.Errorf("failed to update comment options: %w", err)
+	}
+
+	// Mark author account needs update
+	if author := getString(opData, "author"); author != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, author)
 	}
 
 	return nil
@@ -619,21 +1001,26 @@ func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Ope
 	}
 
 	reward := &database.BenefactorReward{
-		ID:              fmt.Sprintf("%d/%s/%s/%s", op.Block.Number, getString(opData, "benefactor"), getString(opData, "author"), getString(opData, "permlink")),
-		Benefactor:      getString(opData, "benefactor"),
-		Author:          getString(opData, "author"),
-		Permlink:        getString(opData, "permlink"),
-		SBDPayout:       parseAmountValue(getString(opData, "sbd_payout")),
-		SteemPayout:     parseAmountValue(getString(opData, "steem_payout")),
-		VestingPayout:   parseAmountValue(getString(opData, "vesting_payout")),
-		Timestamp:       op.Operation.Timestamp,
-		BlockNum:        op.Block.Number,
+		ID:            fmt.Sprintf("%d/%s/%s/%s", op.Block.Number, getString(opData, "benefactor"), getString(opData, "author"), getString(opData, "permlink")),
+		Benefactor:    getString(opData, "benefactor"),
+		Author:        getString(opData, "author"),
+		Permlink:      getString(opData, "permlink"),
+		SBDPayout:     parseAmountValue(getString(opData, "sbd_payout")),
+		SteemPayout:   parseAmountValue(getString(opData, "steem_payout")),
+		VestingPayout: parseAmountValue(getString(opData, "vesting_payout")),
+		Timestamp:     op.Operation.Timestamp,
+		BlockNum:      op.Block.Number,
 	}
 
 	collection := p.db.Collection("benefactor_reward")
 	_, err := collection.InsertOne(ctx, reward)
 	if err != nil {
 		return fmt.Errorf("failed to save benefactor reward: %w", err)
+	}
+
+	// Mark benefactor account needs update
+	if benefactor := getString(opData, "benefactor"); benefactor != "" {
+		p.db.MarkAccountNeedsUpdate(ctx, benefactor)
 	}
 
 	return nil

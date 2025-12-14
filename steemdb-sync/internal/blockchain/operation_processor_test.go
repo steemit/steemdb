@@ -31,10 +31,22 @@ func (m *MockDatabase) Collection(name string) Collection {
 	return &MockCollection{}
 }
 
+func (m *MockDatabase) MarkAccountNeedsUpdate(ctx context.Context, accountName string) error {
+	return nil
+}
+
 type MockCollection struct{}
 
 func (m *MockCollection) InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error) {
 	return &mongo.InsertOneResult{InsertedID: nil}, nil
+}
+
+func (m *MockCollection) InsertMany(ctx context.Context, documents []interface{}) (*mongo.InsertManyResult, error) {
+	insertedIDs := make([]interface{}, len(documents))
+	for i := range documents {
+		insertedIDs[i] = i
+	}
+	return &mongo.InsertManyResult{InsertedIDs: insertedIDs}, nil
 }
 
 func (m *MockCollection) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
@@ -56,7 +68,9 @@ func TestOperationProcessor_Process(t *testing.T) {
 	mockDB := &MockDatabase{}
 	mockLogger := &MockLogger{}
 
-	// Create processor
+	// Create processor using NewOperationProcessor to initialize handlers
+	// Note: We can't use NewOperationProcessor directly as it requires *database.MongoDB
+	// So we'll create it manually and register handlers
 	processor := &OperationProcessor{
 		db:       mockDB,
 		logger:   mockLogger,
@@ -68,17 +82,22 @@ func TestOperationProcessor_Process(t *testing.T) {
 		return nil
 	}
 
-	// Create test operation
+	// Create test operation with TrxID and OpInTrx
 	testOp := &Operation{
 		Block: &steem.Block{
 			Number:    12345,
 			Timestamp: time.Now(),
+			BlockID:   "test_block_id",
 		},
 		Operation: &steem.Operation{
+			TrxID:   "test_trx_id",
+			Block:   12345,
+			OpInTrx: 0,
 			Op: []interface{}{
 				"test_op",
 				map[string]interface{}{
 					"test_field": "test_value",
+					"account":    "testaccount",
 				},
 			},
 			Timestamp: time.Now(),
@@ -96,11 +115,17 @@ func TestOperationProcessor_Process(t *testing.T) {
 		Block: &steem.Block{
 			Number:    12346,
 			Timestamp: time.Now(),
+			BlockID:   "test_block_id_2",
 		},
 		Operation: &steem.Operation{
+			TrxID:   "test_trx_id_2",
+			Block:   12346,
+			OpInTrx: 0,
 			Op: []interface{}{
 				"unknown_op",
-				map[string]interface{}{},
+				map[string]interface{}{
+					"account": "testaccount",
+				},
 			},
 			Timestamp: time.Now(),
 		},
@@ -190,8 +215,12 @@ func BenchmarkOperationProcessor_Process(b *testing.B) {
 		Block: &steem.Block{
 			Number:    12345,
 			Timestamp: time.Now(),
+			BlockID:   "test_block_id",
 		},
 		Operation: &steem.Operation{
+			TrxID:   "test_trx_id",
+			Block:   12345,
+			OpInTrx: 0,
 			Op: []interface{}{
 				"vote",
 				map[string]interface{}{
@@ -208,5 +237,74 @@ func BenchmarkOperationProcessor_Process(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		processor.Process(testOp)
+	}
+}
+
+// TestExtractAccounts tests the extractAccounts function
+func TestExtractAccounts(t *testing.T) {
+	processor := &OperationProcessor{}
+
+	// Test transfer operation
+	transferData := map[string]interface{}{
+		"from": "alice",
+		"to":   "bob",
+	}
+	accounts := processor.extractAccounts("transfer", transferData)
+	if len(accounts) != 2 || accounts[0] != "alice" || accounts[1] != "bob" {
+		t.Errorf("Expected [alice, bob], got %v", accounts)
+	}
+
+	// Test vote operation
+	voteData := map[string]interface{}{
+		"voter":  "alice",
+		"author": "bob",
+	}
+	accounts = processor.extractAccounts("vote", voteData)
+	if len(accounts) != 2 || accounts[0] != "alice" || accounts[1] != "bob" {
+		t.Errorf("Expected [alice, bob], got %v", accounts)
+	}
+
+	// Test comment operation
+	commentData := map[string]interface{}{
+		"author": "alice",
+	}
+	accounts = processor.extractAccounts("comment", commentData)
+	if len(accounts) != 1 || accounts[0] != "alice" {
+		t.Errorf("Expected [alice], got %v", accounts)
+	}
+
+	// Test unknown operation type
+	unknownData := map[string]interface{}{}
+	accounts = processor.extractAccounts("unknown", unknownData)
+	if len(accounts) != 0 {
+		t.Errorf("Expected empty accounts, got %v", accounts)
+	}
+}
+
+// TestCreateOperationSummary tests the createOperationSummary function
+func TestCreateOperationSummary(t *testing.T) {
+	processor := &OperationProcessor{}
+
+	// Test transfer summary
+	transferData := map[string]interface{}{
+		"from":   "alice",
+		"to":     "bob",
+		"amount": "10.000 STEEM",
+	}
+	summary := processor.createOperationSummary("transfer", transferData)
+	if summary["from"] != "alice" || summary["to"] != "bob" || summary["amount"] != "10.000 STEEM" {
+		t.Errorf("Invalid transfer summary: %v", summary)
+	}
+
+	// Test vote summary
+	voteData := map[string]interface{}{
+		"voter":    "alice",
+		"author":   "bob",
+		"permlink": "test-post",
+		"weight":   10000.0,
+	}
+	summary = processor.createOperationSummary("vote", voteData)
+	if summary["voter"] != "alice" || summary["author"] != "bob" {
+		t.Errorf("Invalid vote summary: %v", summary)
 	}
 }
