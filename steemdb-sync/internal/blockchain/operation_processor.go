@@ -95,7 +95,7 @@ func NewOperationProcessor(db *database.MongoDB, logger utils.Logger) *Operation
 		logger:          logger,
 		handlers:        make(map[string]OperationHandler),
 		accountOpBuffer: make([]interface{}, 0, 100), // Initial capacity for batch writes
-		bufferSize:      100,                          // Flush when buffer reaches this size
+		bufferSize:      100,                         // Flush when buffer reaches this size
 	}
 
 	// Register operation handlers
@@ -234,11 +234,18 @@ func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, o
 		opIndex = 0
 	}
 
+	// Determine trx_in_block (transaction index in block)
+	trxInBlock := op.Operation.TrxInBlock
+	if trxInBlock < 0 {
+		trxInBlock = 0
+	}
+
 	dbOp := &database.Operation{
 		ID:             primitive.NewObjectID(),
 		BlockNum:       op.Block.Number,
 		BlockTime:      op.Operation.Timestamp,
 		TrxID:          op.Operation.TrxID,
+		TrxInBlock:     trxInBlock,
 		OpType:         opType,
 		OpIndex:        opIndex,
 		Data:           opData,

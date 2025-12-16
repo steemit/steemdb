@@ -376,9 +376,10 @@ type Operation struct {
 	ID        primitive.ObjectID `bson:"_id" json:"id"`
 	BlockNum  int64              `bson:"block_num" json:"block_num"`
 	BlockTime time.Time          `bson:"block_time" json:"block_time"`
-	TrxID     string             `bson:"trx_id" json:"trx_id"`     // 交易ID（用于 tx_id 查询）
-	OpType    string             `bson:"op_type" json:"op_type"`   // comment, vote, transfer等
-	OpIndex   int                `bson:"op_index" json:"op_index"` // 操作在交易中的索引
+	TrxID     string             `bson:"trx_id" json:"trx_id"`        // 交易ID（用于 tx_id 查询）
+	TrxInBlock int               `bson:"trx_in_block" json:"trx_in_block"` // 交易在区块中的索引
+	OpType    string             `bson:"op_type" json:"op_type"`      // comment, vote, transfer等
+	OpIndex   int                `bson:"op_index" json:"op_index"`    // 操作在交易中的索引
 
 	// 操作数据（反范式化）
 	Data bson.M `bson:"data" json:"data"` // 操作具体数据

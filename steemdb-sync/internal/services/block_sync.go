@@ -62,7 +62,7 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 	// Initialize operation processor
 	s.operationProcessor = blockchain.NewOperationProcessor(s.db, s.logger)
 
-	// Single main loop (reference Python version design)
+	// Main sync loop
 	ticker := time.NewTicker(s.config.Sync.BlockInterval)
 	defer ticker.Stop()
 
@@ -91,7 +91,7 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 
 			headBlock := props.LastIrreversibleBlockNum
 
-			// Process all blocks until caught up (reference Python version inner loop)
+			// Process all blocks until caught up
 			for s.lastBlock < headBlock {
 				// Calculate batch size
 				blocksToProcess := headBlock - s.lastBlock
@@ -176,7 +176,7 @@ func (s *BlockSyncService) processBlock(ctx context.Context, block *steem.Block)
 		}
 	}
 
-	// Process operations from block transactions (no virtual operations)
+	// Process operations from block transactions
 	for txIndex, tx := range block.Transactions {
 		for opIndex, opData := range tx.Operations {
 			// Convert transaction operation to steem.Operation format
@@ -190,7 +190,7 @@ func (s *BlockSyncService) processBlock(ctx context.Context, block *steem.Block)
 				Block:      block.Number,
 				TrxInBlock: txIndex,
 				OpInTrx:    opIndex,
-				VirtualOp:  0, // Regular operations, not virtual
+				VirtualOp:  0,
 				Timestamp:  block.Timestamp,
 				Op:         opData,
 			}
@@ -287,9 +287,9 @@ func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*steem.
 			OperationCount:   opCount,
 			Transactions:     transactions,
 			DateIndex:        dateIndex,
-			TransferCount:    0, // Will be calculated if needed
-			VoteCount:        0, // Will be calculated if needed
-			CommentCount:     0, // Will be calculated if needed
+			TransferCount:    0,
+			VoteCount:        0,
+			CommentCount:     0,
 		}
 
 		// Create upsert operation
@@ -314,10 +314,7 @@ func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*steem.
 }
 
 // IsSyncCaughtUp returns whether sync has caught up with the latest block
-// This method is kept for compatibility with CronTab service
 func (s *BlockSyncService) IsSyncCaughtUp() bool {
-	// In simplified version, we check by comparing with current head block
-	// This is a simple check, can be enhanced if needed
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

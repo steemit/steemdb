@@ -172,7 +172,7 @@ func (m *MongoDB) CreateIndexes(ctx context.Context) error {
 		},
 		// operations collection
 		"operations": {
-			{Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "op_index", Value: 1}}},
+			{Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_in_block", Value: 1}, {Key: "op_index", Value: 1}}}, // Block operations order
 			{Keys: bson.D{{Key: "trx_id", Value: 1}}}, // tx_id query
 			{Keys: bson.D{{Key: "op_type", Value: 1}, {Key: "block_time", Value: -1}}},
 			{Keys: bson.D{{Key: "primary_account", Value: 1}, {Key: "block_time", Value: -1}}},
