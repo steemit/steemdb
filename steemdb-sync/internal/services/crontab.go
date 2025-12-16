@@ -24,10 +24,10 @@ type CronTabService struct {
 	blockSync      *BlockSyncService
 	accountUpdater *AccountUpdater
 
-	syncReady    bool
-	mutex        sync.RWMutex
-	missesCache  map[string]int
-	missesMutex  sync.RWMutex
+	syncReady   bool
+	mutex       sync.RWMutex
+	missesCache map[string]int
+	missesMutex sync.RWMutex
 }
 
 // NewCronTabService creates a new cron tab service
@@ -41,14 +41,14 @@ func NewCronTabService(
 	accountUpdater := NewAccountUpdater(config, db, steemClient, logger)
 
 	return &CronTabService{
-		config:        config,
-		db:            db,
-		steem:         steemClient,
-		logger:        logger,
-		blockSync:     blockSync,
+		config:         config,
+		db:             db,
+		steem:          steemClient,
+		logger:         logger,
+		blockSync:      blockSync,
 		accountUpdater: accountUpdater,
-		syncReady:     false,
-		missesCache:   make(map[string]int),
+		syncReady:      false,
+		missesCache:    make(map[string]int),
 	}
 }
 
@@ -209,16 +209,16 @@ func (c *CronTabService) updateHourlyStats(ctx context.Context) error {
 
 	// Aggregate operations by type for the last hour
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{
-			{"block_time", bson.D{
-				{"$gte", startTime},
-				{"$lt", now},
+		{bson.E{Key: "$match", Value: bson.D{
+			{Key: "block_time", Value: bson.D{
+				{Key: "$gte", Value: startTime},
+				{Key: "$lt", Value: now},
 			}},
 		}}},
-		{{"$group", bson.D{
-			{"_id", "$op_type"},
-			{"count", bson.D{{"$sum", 1}}},
-			{"unique_accounts", bson.D{{"$addToSet", "$primary_account"}}},
+		{bson.E{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$op_type"},
+			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "unique_accounts", Value: bson.D{{Key: "$addToSet", Value: "$primary_account"}}},
 		}}},
 	}
 
@@ -251,8 +251,8 @@ func (c *CronTabService) updateHourlyStats(ctx context.Context) error {
 			UpdatedAt:      now,
 		}
 
-		filter := bson.D{{"_id", statsID}}
-		update := bson.D{{"$set", stats}}
+		filter := bson.D{{Key: "_id", Value: statsID}}
+		update := bson.D{{Key: "$set", Value: stats}}
 		opts := options.Update().SetUpsert(true)
 
 		if _, err := statsCollection.UpdateOne(ctx, filter, update, opts); err != nil {
@@ -288,7 +288,7 @@ func (c *CronTabService) calculate30DayAggregations(ctx context.Context) error {
 	// Count total posts (comments with empty parent_author)
 	commentsCollection := c.db.Collection("comments")
 	postCount, err := commentsCollection.CountDocuments(ctx, bson.D{
-		{"parent_author", ""},
+		{Key: "parent_author", Value: ""},
 	})
 	if err == nil {
 		globalStats.TotalPosts = postCount
@@ -305,8 +305,8 @@ func (c *CronTabService) calculate30DayAggregations(ctx context.Context) error {
 
 	// Count transfers
 	transferCount, err := operationsCollection.CountDocuments(ctx, bson.D{
-		{"op_type", "transfer"},
-		{"block_time", bson.D{{"$gte", thirtyDaysAgo}}},
+		{Key: "op_type", Value: "transfer"},
+		{Key: "block_time", Value: bson.D{{Key: "$gte", Value: thirtyDaysAgo}}},
 	})
 	if err == nil {
 		globalStats.TotalTransfers = transferCount
@@ -314,8 +314,8 @@ func (c *CronTabService) calculate30DayAggregations(ctx context.Context) error {
 
 	// Count votes
 	voteCount, err := operationsCollection.CountDocuments(ctx, bson.D{
-		{"op_type", "vote"},
-		{"block_time", bson.D{{"$gte", thirtyDaysAgo}}},
+		{Key: "op_type", Value: "vote"},
+		{Key: "block_time", Value: bson.D{{Key: "$gte", Value: thirtyDaysAgo}}},
 	})
 	if err == nil {
 		globalStats.TotalVotes = voteCount
@@ -329,8 +329,8 @@ func (c *CronTabService) calculate30DayAggregations(ctx context.Context) error {
 
 	// Update global_stats
 	statsCollection := c.db.Collection("global_stats")
-	filter := bson.D{{"_id", "current"}}
-	update := bson.D{{"$set", globalStats}}
+	filter := bson.D{{Key: "_id", Value: "current"}}
+	update := bson.D{{Key: "$set", Value: globalStats}}
 	opts := options.Update().SetUpsert(true)
 
 	if _, err := statsCollection.UpdateOne(ctx, filter, update, opts); err != nil {
@@ -469,25 +469,25 @@ func (c *CronTabService) processWitnessData(witness *steem.Witness, scanTime tim
 	}
 
 	return &database.Witness{
-		ID:                     witness.Owner,
-		Owner:                  witness.Owner,
-		CreatedTime:            steem.ToTime(witness.CreatedTime),
-		URL:                    witness.URL,
-		Votes:                  votes,
-		VirtualLastUpdate:      virtualLastUpdate,
-		VirtualPosition:        virtualPosition,
-		VirtualScheduledTime:   virtualScheduledTime,
-		TotalMissed:            witness.TotalMissed,
-		LastAslot:              witness.LastAslot,
-		LastConfirmedBlockNum:  witness.LastConfirmedBlockNum,
-		SigningKey:             witness.SigningKey,
-		Props:                  propsMap,
-		SBDExchangeRate:        exchangeRateMap,
-		LastSBDExchangeUpdate:  steem.ToTime(witness.LastSBDExchangeUpdate),
-		LastWork:               witness.LastWork,
-		RunningVersion:         witness.RunningVersion,
-		HardforkVersionVote:    witness.HardforkVersionVote,
-		HardforkTimeVote:       steem.ToTime(witness.HardforkTimeVote),
+		ID:                    witness.Owner,
+		Owner:                 witness.Owner,
+		CreatedTime:           steem.ToTime(witness.CreatedTime),
+		URL:                   witness.URL,
+		Votes:                 votes,
+		VirtualLastUpdate:     virtualLastUpdate,
+		VirtualPosition:       virtualPosition,
+		VirtualScheduledTime:  virtualScheduledTime,
+		TotalMissed:           witness.TotalMissed,
+		LastAslot:             witness.LastAslot,
+		LastConfirmedBlockNum: witness.LastConfirmedBlockNum,
+		SigningKey:            witness.SigningKey,
+		Props:                 propsMap,
+		SBDExchangeRate:       exchangeRateMap,
+		LastSBDExchangeUpdate: steem.ToTime(witness.LastSBDExchangeUpdate),
+		LastWork:              witness.LastWork,
+		RunningVersion:        witness.RunningVersion,
+		HardforkVersionVote:   witness.HardforkVersionVote,
+		HardforkTimeVote:      steem.ToTime(witness.HardforkTimeVote),
 	}
 }
 
