@@ -5,7 +5,7 @@ server:
 
 steem:
   nodes:
-    - "https://api.steemit.com"
+    - "https://api.steem.fans"
   timeout: 30s
   retry_attempts: 3
 

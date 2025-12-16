@@ -2,6 +2,7 @@ package steem
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/steemit/steemutil/protocol"
@@ -122,19 +123,19 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 
 // Account represents a Steem account
 type Account struct {
-	ID                            int       `json:"id"`
-	Name                          string    `json:"name"`
-	Owner                         Authority `json:"owner"`
-	Active                        Authority `json:"active"`
-	Posting                       Authority `json:"posting"`
-	MemoKey                       string    `json:"memo_key"`
-	JsonMetadata                  string    `json:"json_metadata"`
-	Proxy                         string    `json:"proxy"`
+	ID                            int           `json:"id"`
+	Name                          string        `json:"name"`
+	Owner                         Authority     `json:"owner"`
+	Active                        Authority     `json:"active"`
+	Posting                       Authority     `json:"posting"`
+	MemoKey                       string        `json:"memo_key"`
+	JsonMetadata                  string        `json:"json_metadata"`
+	Proxy                         string        `json:"proxy"`
 	LastOwnerUpdate               protocol.Time `json:"last_owner_update"`
 	LastAccountUpdate             protocol.Time `json:"last_account_update"`
 	Created                       protocol.Time `json:"created"`
 	Mined                         bool          `json:"mined"`
-	RecoveryAccount               string       `json:"recovery_account"`
+	RecoveryAccount               string        `json:"recovery_account"`
 	LastAccountRecovery           protocol.Time `json:"last_account_recovery"`
 	ResetAccount                  string        `json:"reset_account"`
 	CommentCount                  int           `json:"comment_count"`
@@ -143,7 +144,7 @@ type Account struct {
 	PostCount                     int           `json:"post_count"`
 	CanVote                       bool          `json:"can_vote"`
 	VotingManabar                 Manabar       `json:"voting_manabar"`
-	DownvoteManabar               Manabar        `json:"downvote_manabar"`
+	DownvoteManabar               Manabar       `json:"downvote_manabar"`
 	VotingPower                   int           `json:"voting_power"`
 	Balance                       string        `json:"balance"`
 	SavingsBalance                string        `json:"savings_balance"`
@@ -174,21 +175,21 @@ type Account struct {
 	LastPost                      protocol.Time `json:"last_post"`
 	LastRootPost                  protocol.Time `json:"last_root_post"`
 	LastVoteTime                  protocol.Time `json:"last_vote_time"`
-	PostBandwidth                 int       `json:"post_bandwidth"`
-	PendingClaimedAccounts        int       `json:"pending_claimed_accounts"`
-	Reputation                    string    `json:"reputation"`
-	Transfer                      bool      `json:"transfer"`
-	MarketHistory                 bool      `json:"market_history"`
-	PostHistory                   bool      `json:"post_history"`
-	VoteHistory                   bool      `json:"vote_history"`
-	MarketBandwidth               int       `json:"market_bandwidth"`
-	BlogBandwidth                 int       `json:"blog_bandwidth"`
-	ForumBandwidth                int       `json:"forum_bandwidth"`
-	AverageBandwidth              string    `json:"average_bandwidth"`
-	LifetimeBandwidthLimit        string    `json:"lifetime_bandwidth_limit"`
-	AverageMarketBandwidth        string    `json:"average_market_bandwidth"`
-	LifetimeMarketBandwidth       string    `json:"lifetime_market_bandwidth"`
-	WitnessVotes                  []string  `json:"witness_votes"`
+	PostBandwidth                 int           `json:"post_bandwidth"`
+	PendingClaimedAccounts        int           `json:"pending_claimed_accounts"`
+	Reputation                    string        `json:"reputation"`
+	Transfer                      bool          `json:"transfer"`
+	MarketHistory                 bool          `json:"market_history"`
+	PostHistory                   bool          `json:"post_history"`
+	VoteHistory                   bool          `json:"vote_history"`
+	MarketBandwidth               int           `json:"market_bandwidth"`
+	BlogBandwidth                 int           `json:"blog_bandwidth"`
+	ForumBandwidth                int           `json:"forum_bandwidth"`
+	AverageBandwidth              string        `json:"average_bandwidth"`
+	LifetimeBandwidthLimit        string        `json:"lifetime_bandwidth_limit"`
+	AverageMarketBandwidth        string        `json:"average_market_bandwidth"`
+	LifetimeMarketBandwidth       string        `json:"lifetime_market_bandwidth"`
+	WitnessVotes                  []string      `json:"witness_votes"`
 }
 
 // Authority represents account authority
@@ -204,10 +205,45 @@ type Manabar struct {
 	LastUpdateTime int64  `json:"last_update_time"`
 }
 
+// UnmarshalJSON implements custom JSON unmarshaling for Manabar
+// Handles both number and string types for current_mana field
+func (m *Manabar) UnmarshalJSON(data []byte) error {
+	// Define a temporary struct that can handle both number and string
+	type Alias Manabar
+	aux := &struct {
+		CurrentMana interface{} `json:"current_mana"`
+		*Alias
+	}{
+		Alias: (*Alias)(m),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Convert current_mana to string regardless of input type
+	if aux.CurrentMana != nil {
+		switch v := aux.CurrentMana.(type) {
+		case string:
+			m.CurrentMana = v
+		case float64:
+			m.CurrentMana = fmt.Sprintf("%.0f", v)
+		case int64:
+			m.CurrentMana = fmt.Sprintf("%d", v)
+		case int:
+			m.CurrentMana = fmt.Sprintf("%d", v)
+		default:
+			m.CurrentMana = fmt.Sprintf("%v", v)
+		}
+	}
+
+	return nil
+}
+
 // Witness represents a witness
 type Witness struct {
-	ID                         int          `json:"id"`
-	Owner                      string       `json:"owner"`
+	ID                         int           `json:"id"`
+	Owner                      string        `json:"owner"`
 	CreatedTime                protocol.Time `json:"created"`
 	URL                        string        `json:"url"`
 	Votes                      string        `json:"votes"`
@@ -226,7 +262,7 @@ type Witness struct {
 	RunningVersion             string        `json:"running_version"`
 	HardforkVersionVote        string        `json:"hardfork_version_vote"`
 	HardforkTimeVote           protocol.Time `json:"hardfork_time_vote"`
-	AvailableWitnessSignatures int          `json:"available_witness_signatures"`
+	AvailableWitnessSignatures int           `json:"available_witness_signatures"`
 }
 
 // WitnessProps represents witness properties
@@ -244,16 +280,16 @@ type ExchangeRate struct {
 
 // RewardFund represents reward fund information
 type RewardFund struct {
-	ID                     int       `json:"id"`
-	Name                   string    `json:"name"`
-	RewardBalance          string    `json:"reward_balance"`
-	RecentClaims           string    `json:"recent_claims"`
+	ID                     int           `json:"id"`
+	Name                   string        `json:"name"`
+	RewardBalance          string        `json:"reward_balance"`
+	RecentClaims           string        `json:"recent_claims"`
 	LastUpdate             protocol.Time `json:"last_update"`
-	ContentConstant        string    `json:"content_constant"`
-	PercentCurationRewards int       `json:"percent_curation_rewards"`
-	PercentContentRewards  int       `json:"percent_content_rewards"`
-	AuthorRewardCurve      string    `json:"author_reward_curve"`
-	CurationRewardCurve    string    `json:"curation_reward_curve"`
+	ContentConstant        string        `json:"content_constant"`
+	PercentCurationRewards int           `json:"percent_curation_rewards"`
+	PercentContentRewards  int           `json:"percent_content_rewards"`
+	AuthorRewardCurve      string        `json:"author_reward_curve"`
+	CurationRewardCurve    string        `json:"curation_reward_curve"`
 }
 
 // Content represents post/comment content
