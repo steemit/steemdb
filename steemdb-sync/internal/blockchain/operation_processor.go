@@ -26,10 +26,10 @@ type Operation struct {
 
 // Collection interface for collection operations
 type Collection interface {
-	InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error)
-	InsertMany(ctx context.Context, documents []interface{}) (*mongo.InsertManyResult, error)
-	UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
-	FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult
+	InsertOne(ctx context.Context, document any) (*mongo.InsertOneResult, error)
+	InsertMany(ctx context.Context, documents []any) (*mongo.InsertManyResult, error)
+	UpdateOne(ctx context.Context, filter any, update any, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error)
+	FindOne(ctx context.Context, filter any) *mongo.SingleResult
 }
 
 // mongoCollectionAdapter adapts *mongo.Collection to Collection interface
@@ -37,19 +37,19 @@ type mongoCollectionAdapter struct {
 	*mongo.Collection
 }
 
-func (a *mongoCollectionAdapter) InsertOne(ctx context.Context, document interface{}) (*mongo.InsertOneResult, error) {
+func (a *mongoCollectionAdapter) InsertOne(ctx context.Context, document any) (*mongo.InsertOneResult, error) {
 	return a.Collection.InsertOne(ctx, document)
 }
 
-func (a *mongoCollectionAdapter) InsertMany(ctx context.Context, documents []interface{}) (*mongo.InsertManyResult, error) {
+func (a *mongoCollectionAdapter) InsertMany(ctx context.Context, documents []any) (*mongo.InsertManyResult, error) {
 	return a.Collection.InsertMany(ctx, documents)
 }
 
-func (a *mongoCollectionAdapter) UpdateOne(ctx context.Context, filter interface{}, update interface{}, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
+func (a *mongoCollectionAdapter) UpdateOne(ctx context.Context, filter any, update any, opts ...*options.UpdateOptions) (*mongo.UpdateResult, error) {
 	return a.Collection.UpdateOne(ctx, filter, update, opts...)
 }
 
-func (a *mongoCollectionAdapter) FindOne(ctx context.Context, filter interface{}) *mongo.SingleResult {
+func (a *mongoCollectionAdapter) FindOne(ctx context.Context, filter any) *mongo.SingleResult {
 	return a.Collection.FindOne(ctx, filter)
 }
 
@@ -79,7 +79,7 @@ type OperationProcessor struct {
 	handlers map[string]OperationHandler
 
 	// Batch buffers for account_operations
-	accountOpBuffer []interface{}
+	accountOpBuffer []any
 	bufferMutex     sync.Mutex
 	bufferSize      int
 }
@@ -93,8 +93,8 @@ func NewOperationProcessor(db *database.MongoDB, logger utils.Logger) *Operation
 		db:              &mongoDatabaseAdapter{db: db},
 		logger:          logger,
 		handlers:        make(map[string]OperationHandler),
-		accountOpBuffer: make([]interface{}, 0, 100), // Initial capacity for batch writes
-		bufferSize:      100,                         // Flush when buffer reaches this size
+		accountOpBuffer: make([]any, 0, 100), // Initial capacity for batch writes
+		bufferSize:      100,                 // Flush when buffer reaches this size
 	}
 
 	// Register operation handlers
@@ -190,7 +190,7 @@ func (p *OperationProcessor) FlushAccountOperationsBuffer(ctx context.Context) e
 		return nil
 	}
 
-	buffer := make([]interface{}, len(p.accountOpBuffer))
+	buffer := make([]any, len(p.accountOpBuffer))
 	copy(buffer, p.accountOpBuffer)
 	p.accountOpBuffer = p.accountOpBuffer[:0]
 	p.bufferMutex.Unlock()
@@ -213,13 +213,21 @@ func (p *OperationProcessor) FlushAccountOperationsBuffer(ctx context.Context) e
 func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, opType string) (*primitive.ObjectID, error) {
 	opData, err := getOperationData(op)
 	if err != nil {
-		p.logger.Error("Invalid operation data",
-			utils.String("type", opType),
-			utils.Int64("block", op.Block.Number),
-			utils.String("trx_id", op.Operation.TrxID),
-			utils.Int("op_index", op.Operation.OpInTrx),
-			utils.Error(err),
-		)
+		// Log detailed error information for debugging
+		if op != nil && op.Block != nil && op.Operation != nil {
+			p.logger.Error("Invalid operation data",
+				utils.String("type", opType),
+				utils.Int64("block", op.Block.Number),
+				utils.String("trx_id", op.Operation.TrxID),
+				utils.Int("op_index", op.Operation.OpInTrx),
+				utils.Error(err),
+			)
+		} else {
+			p.logger.Error("Invalid operation data",
+				utils.String("type", opType),
+				utils.Error(err),
+			)
+		}
 		return nil, fmt.Errorf("invalid operation data: %w", err)
 	}
 
@@ -305,13 +313,13 @@ func (p *OperationProcessor) addAccountOperationsToBuffer(ctx context.Context, o
 
 		// Flush buffer if it reaches the threshold
 		if len(p.accountOpBuffer) >= p.bufferSize {
-			buffer := make([]interface{}, len(p.accountOpBuffer))
+			buffer := make([]any, len(p.accountOpBuffer))
 			copy(buffer, p.accountOpBuffer)
 			p.accountOpBuffer = p.accountOpBuffer[:0]
 			p.bufferMutex.Unlock()
 
 			// Flush buffer asynchronously
-			go func(buf []interface{}) {
+			go func(buf []any) {
 				flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 				collection := p.db.Collection("account_operations")
@@ -331,7 +339,7 @@ func (p *OperationProcessor) addAccountOperationsToBuffer(ctx context.Context, o
 }
 
 // extractAccounts extracts account names from operation data
-func (p *OperationProcessor) extractAccounts(opType string, opData map[string]interface{}) []string {
+func (p *OperationProcessor) extractAccounts(opType string, opData map[string]any) []string {
 	accounts := make([]string, 0)
 
 	switch opType {
@@ -403,7 +411,7 @@ func (p *OperationProcessor) extractAccounts(opType string, opData map[string]in
 }
 
 // createOperationSummary creates a summary of operation for account_operations
-func (p *OperationProcessor) createOperationSummary(opType string, opData map[string]interface{}) bson.M {
+func (p *OperationProcessor) createOperationSummary(opType string, opData map[string]any) bson.M {
 	summary := bson.M{
 		"op_type": opType,
 	}
@@ -437,9 +445,9 @@ func (p *OperationProcessor) createOperationSummary(opType string, opData map[st
 
 // handleComment processes comment operations
 func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid comment operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid comment operation data: %w", err)
 	}
 
 	author := getString(opData, "author")
@@ -465,7 +473,7 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 
 	// Parse JSON metadata
 	if jsonMeta := getString(opData, "json_metadata"); jsonMeta != "" {
-		var metadata map[string]interface{}
+		var metadata map[string]any
 		if err := json.Unmarshal([]byte(jsonMeta), &metadata); err == nil {
 			comment.JsonMetadata = metadata
 		}
@@ -481,7 +489,7 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 		// This is a reply, find parent depth
 		parentCollection := p.db.Collection("comments")
 		var parent database.Comment
-		err := parentCollection.FindOne(ctx, map[string]interface{}{
+		err := parentCollection.FindOne(ctx, map[string]any{
 			"_id": fmt.Sprintf("%s/%s", comment.ParentAuthor, comment.ParentPermlink),
 		}).Decode(&parent)
 		if err == nil {
@@ -493,11 +501,11 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 
 	// Save comment to comments collection
 	collection := p.db.Collection("comments")
-	filter := map[string]interface{}{"_id": comment.ID}
-	update := map[string]interface{}{"$set": comment}
+	filter := map[string]any{"_id": comment.ID}
+	update := map[string]any{"$set": comment}
 	opts := options.Update().SetUpsert(true)
 
-	_, err := collection.UpdateOne(ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		return fmt.Errorf("failed to save comment: %w", err)
 	}
@@ -517,9 +525,9 @@ func (p *OperationProcessor) handleComment(ctx context.Context, op *Operation) e
 
 // handleVote processes vote operations
 func (p *OperationProcessor) handleVote(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid vote operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid vote operation data: %w", err)
 	}
 
 	vote := &database.Vote{
@@ -533,7 +541,7 @@ func (p *OperationProcessor) handleVote(ctx context.Context, op *Operation) erro
 	}
 
 	collection := p.db.Collection("vote")
-	_, err := collection.InsertOne(ctx, vote)
+	_, err = collection.InsertOne(ctx, vote)
 	if err != nil {
 		return fmt.Errorf("failed to save vote: %w", err)
 	}
@@ -551,9 +559,9 @@ func (p *OperationProcessor) handleVote(ctx context.Context, op *Operation) erro
 
 // handleTransfer processes transfer operations
 func (p *OperationProcessor) handleTransfer(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid transfer operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid transfer operation data: %w", err)
 	}
 
 	amountStr := getString(opData, "amount")
@@ -571,7 +579,7 @@ func (p *OperationProcessor) handleTransfer(ctx context.Context, op *Operation) 
 	}
 
 	collection := p.db.Collection("transfer")
-	_, err := collection.InsertOne(ctx, transfer)
+	_, err = collection.InsertOne(ctx, transfer)
 	if err != nil {
 		return fmt.Errorf("failed to save transfer: %w", err)
 	}
@@ -589,9 +597,9 @@ func (p *OperationProcessor) handleTransfer(ctx context.Context, op *Operation) 
 
 // handleAuthorReward processes author reward operations
 func (p *OperationProcessor) handleAuthorReward(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid author reward operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid author reward operation data: %w", err)
 	}
 
 	reward := &database.AuthorReward{
@@ -606,7 +614,7 @@ func (p *OperationProcessor) handleAuthorReward(ctx context.Context, op *Operati
 	}
 
 	collection := p.db.Collection("author_reward")
-	_, err := collection.InsertOne(ctx, reward)
+	_, err = collection.InsertOne(ctx, reward)
 	if err != nil {
 		return fmt.Errorf("failed to save author reward: %w", err)
 	}
@@ -621,9 +629,9 @@ func (p *OperationProcessor) handleAuthorReward(ctx context.Context, op *Operati
 
 // handleCurationReward processes curation reward operations
 func (p *OperationProcessor) handleCurationReward(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid curation reward operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid curation reward operation data: %w", err)
 	}
 
 	reward := &database.CurationReward{
@@ -637,7 +645,7 @@ func (p *OperationProcessor) handleCurationReward(ctx context.Context, op *Opera
 	}
 
 	collection := p.db.Collection("curation_reward")
-	_, err := collection.InsertOne(ctx, reward)
+	_, err = collection.InsertOne(ctx, reward)
 	if err != nil {
 		return fmt.Errorf("failed to save curation reward: %w", err)
 	}
@@ -662,7 +670,7 @@ func (p *OperationProcessor) handleVestingDeposit(ctx context.Context, op *Opera
 	}
 
 	opDataRaw := op.Operation.Op[1]
-	opData, ok := opDataRaw.(map[string]interface{})
+	opData, ok := opDataRaw.(map[string]any)
 	if !ok {
 		// Try to convert to map via JSON marshaling/unmarshaling
 		// This handles cases where op.Data() returns a struct instead of a map
@@ -718,9 +726,9 @@ func (p *OperationProcessor) handleVestingDeposit(ctx context.Context, op *Opera
 
 // handleVestingWithdraw processes vesting withdraw operations
 func (p *OperationProcessor) handleVestingWithdraw(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid vesting withdraw operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid vesting withdraw operation data: %w", err)
 	}
 
 	withdraw := &database.VestingWithdraw{
@@ -734,7 +742,7 @@ func (p *OperationProcessor) handleVestingWithdraw(ctx context.Context, op *Oper
 	}
 
 	collection := p.db.Collection("vesting_withdraw")
-	_, err := collection.InsertOne(ctx, withdraw)
+	_, err = collection.InsertOne(ctx, withdraw)
 	if err != nil {
 		return fmt.Errorf("failed to save vesting withdraw: %w", err)
 	}
@@ -752,9 +760,9 @@ func (p *OperationProcessor) handleVestingWithdraw(ctx context.Context, op *Oper
 
 // handleConvert processes convert operations
 func (p *OperationProcessor) handleConvert(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid convert operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid convert operation data: %w", err)
 	}
 
 	amountStr := getString(opData, "amount")
@@ -771,7 +779,7 @@ func (p *OperationProcessor) handleConvert(ctx context.Context, op *Operation) e
 	}
 
 	collection := p.db.Collection("convert")
-	_, err := collection.InsertOne(ctx, convert)
+	_, err = collection.InsertOne(ctx, convert)
 	if err != nil {
 		return fmt.Errorf("failed to save convert: %w", err)
 	}
@@ -786,9 +794,9 @@ func (p *OperationProcessor) handleConvert(ctx context.Context, op *Operation) e
 
 // handleFeedPublish processes feed publish operations
 func (p *OperationProcessor) handleFeedPublish(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid feed publish operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid feed publish operation data: %w", err)
 	}
 
 	feed := &database.FeedPublish{
@@ -799,16 +807,16 @@ func (p *OperationProcessor) handleFeedPublish(ctx context.Context, op *Operatio
 	}
 
 	// Parse exchange rate
-	if exchangeRate, ok := opData["exchange_rate"].(map[string]interface{}); ok {
+	if exchangeRate, ok := opData["exchange_rate"].(map[string]any); ok {
 		feed.ExchangeRate = exchangeRate
 	}
 
 	collection := p.db.Collection("feed_publish")
-	filter := map[string]interface{}{"_id": feed.ID}
-	update := map[string]interface{}{"$set": feed}
+	filter := map[string]any{"_id": feed.ID}
+	update := map[string]any{"$set": feed}
 	opts := options.Update().SetUpsert(true)
 
-	_, err := collection.UpdateOne(ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		return fmt.Errorf("failed to save feed publish: %w", err)
 	}
@@ -818,9 +826,9 @@ func (p *OperationProcessor) handleFeedPublish(ctx context.Context, op *Operatio
 
 // handleWitnessVote processes witness vote operations
 func (p *OperationProcessor) handleWitnessVote(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid witness vote operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid witness vote operation data: %w", err)
 	}
 
 	vote := &database.WitnessVote{
@@ -833,7 +841,7 @@ func (p *OperationProcessor) handleWitnessVote(ctx context.Context, op *Operatio
 	}
 
 	collection := p.db.Collection("witness_vote")
-	_, err := collection.InsertOne(ctx, vote)
+	_, err = collection.InsertOne(ctx, vote)
 	if err != nil {
 		return fmt.Errorf("failed to save witness vote: %w", err)
 	}
@@ -848,9 +856,9 @@ func (p *OperationProcessor) handleWitnessVote(ctx context.Context, op *Operatio
 
 // handleCustomJson processes custom JSON operations
 func (p *OperationProcessor) handleCustomJson(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid custom json operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid custom json operation data: %w", err)
 	}
 
 	jsonStr := getString(opData, "json")
@@ -858,7 +866,7 @@ func (p *OperationProcessor) handleCustomJson(ctx context.Context, op *Operation
 		return nil
 	}
 
-	var data []interface{}
+	var data []any
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return nil // Skip invalid JSON
 	}
@@ -883,12 +891,12 @@ func (p *OperationProcessor) handleCustomJson(ctx context.Context, op *Operation
 }
 
 // handleFollow processes follow operations from custom JSON
-func (p *OperationProcessor) handleFollow(ctx context.Context, op *Operation, data []interface{}) error {
+func (p *OperationProcessor) handleFollow(ctx context.Context, op *Operation, data []any) error {
 	if len(data) < 2 {
 		return nil
 	}
 
-	followData, ok := data[1].(map[string]interface{})
+	followData, ok := data[1].(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -903,7 +911,7 @@ func (p *OperationProcessor) handleFollow(ctx context.Context, op *Operation, da
 	}
 
 	// Parse what array
-	if whatInterface, ok := followData["what"].([]interface{}); ok {
+	if whatInterface, ok := followData["what"].([]any); ok {
 		for _, w := range whatInterface {
 			if what, ok := w.(string); ok {
 				follow.What = append(follow.What, what)
@@ -912,8 +920,8 @@ func (p *OperationProcessor) handleFollow(ctx context.Context, op *Operation, da
 	}
 
 	collection := p.db.Collection("follow")
-	filter := map[string]interface{}{"_id": follow.ID}
-	update := map[string]interface{}{"$set": follow}
+	filter := map[string]any{"_id": follow.ID}
+	update := map[string]any{"$set": follow}
 	opts := options.Update().SetUpsert(true)
 
 	_, err := collection.UpdateOne(ctx, filter, update, opts)
@@ -930,12 +938,12 @@ func (p *OperationProcessor) handleFollow(ctx context.Context, op *Operation, da
 }
 
 // handleReblog processes reblog operations from custom JSON
-func (p *OperationProcessor) handleReblog(ctx context.Context, op *Operation, data []interface{}) error {
+func (p *OperationProcessor) handleReblog(ctx context.Context, op *Operation, data []any) error {
 	if len(data) < 2 {
 		return nil
 	}
 
-	reblogData, ok := data[1].(map[string]interface{})
+	reblogData, ok := data[1].(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -965,9 +973,9 @@ func (p *OperationProcessor) handleReblog(ctx context.Context, op *Operation, da
 
 // handlePow processes proof of work operations
 func (p *OperationProcessor) handlePow(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid pow operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid pow operation data: %w", err)
 	}
 
 	pow := &database.Pow{
@@ -979,15 +987,15 @@ func (p *OperationProcessor) handlePow(ctx context.Context, op *Operation) error
 	}
 
 	// Parse input and work as maps
-	if input, ok := opData["input"].(map[string]interface{}); ok {
+	if input, ok := opData["input"].(map[string]any); ok {
 		pow.Input = input
 	}
-	if work, ok := opData["work"].(map[string]interface{}); ok {
+	if work, ok := opData["work"].(map[string]any); ok {
 		pow.Work = work
 	}
 
 	collection := p.db.Collection("pow")
-	_, err := collection.InsertOne(ctx, pow)
+	_, err = collection.InsertOne(ctx, pow)
 	if err != nil {
 		return fmt.Errorf("failed to save pow: %w", err)
 	}
@@ -997,36 +1005,36 @@ func (p *OperationProcessor) handlePow(ctx context.Context, op *Operation) error
 
 // handleCommentOptions processes comment options operations
 func (p *OperationProcessor) handleCommentOptions(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid comment options operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid comment options operation data: %w", err)
 	}
 
 	// Update the comment with options
 	commentID := fmt.Sprintf("%s/%s", getString(opData, "author"), getString(opData, "permlink"))
 
-	update := map[string]interface{}{
-		"$set": map[string]interface{}{
+	update := map[string]any{
+		"$set": map[string]any{
 			"last_update": op.Operation.Timestamp,
 		},
 	}
 
 	// Add specific options if present
 	if maxPayout := getString(opData, "max_accepted_payout"); maxPayout != "" {
-		update["$set"].(map[string]interface{})["max_accepted_payout"] = parseAmountValue(maxPayout)
+		update["$set"].(map[string]any)["max_accepted_payout"] = parseAmountValue(maxPayout)
 	}
 	if percentSBD, ok := opData["percent_steem_dollars"].(float64); ok {
-		update["$set"].(map[string]interface{})["percent_steem_dollars"] = int(percentSBD)
+		update["$set"].(map[string]any)["percent_steem_dollars"] = int(percentSBD)
 	}
 	if allowVotes, ok := opData["allow_votes"].(bool); ok {
-		update["$set"].(map[string]interface{})["allow_votes"] = allowVotes
+		update["$set"].(map[string]any)["allow_votes"] = allowVotes
 	}
 	if allowCurationRewards, ok := opData["allow_curation_rewards"].(bool); ok {
-		update["$set"].(map[string]interface{})["allow_curation_rewards"] = allowCurationRewards
+		update["$set"].(map[string]any)["allow_curation_rewards"] = allowCurationRewards
 	}
 
 	collection := p.db.Collection("comments")
-	_, err := collection.UpdateOne(ctx, map[string]interface{}{"_id": commentID}, update)
+	_, err = collection.UpdateOne(ctx, map[string]any{"_id": commentID}, update)
 	if err != nil {
 		return fmt.Errorf("failed to update comment options: %w", err)
 	}
@@ -1041,9 +1049,9 @@ func (p *OperationProcessor) handleCommentOptions(ctx context.Context, op *Opera
 
 // handleBenefactorReward processes benefactor reward operations
 func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid benefactor reward operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid benefactor reward operation data: %w", err)
 	}
 
 	reward := &database.BenefactorReward{
@@ -1059,7 +1067,7 @@ func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Ope
 	}
 
 	collection := p.db.Collection("benefactor_reward")
-	_, err := collection.InsertOne(ctx, reward)
+	_, err = collection.InsertOne(ctx, reward)
 	if err != nil {
 		return fmt.Errorf("failed to save benefactor reward: %w", err)
 	}
@@ -1075,30 +1083,58 @@ func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Ope
 // Utility functions
 
 // getOperationData extracts operation data from Op array, handling both map and struct types
-func getOperationData(op *Operation) (map[string]interface{}, error) {
+// According to steemutil README:
+// - Known operations: op.Data() returns the operation struct itself (e.g., *VoteOperation, *TransferOperation)
+// - Unknown operations: op.Data() returns *json.RawMessage
+func getOperationData(op *Operation) (map[string]any, error) {
+	if op == nil || op.Operation == nil {
+		return nil, fmt.Errorf("invalid operation: operation is nil")
+	}
+
+	if op.Operation.Op == nil {
+		return nil, fmt.Errorf("invalid operation format: Op array is nil")
+	}
+
 	if len(op.Operation.Op) < 2 {
-		return nil, fmt.Errorf("invalid operation format: Op array too short")
+		return nil, fmt.Errorf("invalid operation format: Op array too short (length: %d, expected: >= 2)", len(op.Operation.Op))
 	}
 
 	opDataRaw := op.Operation.Op[1]
-	opData, ok := opDataRaw.(map[string]interface{})
-	if !ok {
-		// Try to convert to map via JSON marshaling/unmarshaling
-		// This handles cases where op.Data() returns a struct instead of a map
-		jsonBytes, err := json.Marshal(opDataRaw)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal operation data %T: %w", opDataRaw, err)
-		}
+	if opDataRaw == nil {
+		return nil, fmt.Errorf("invalid operation format: Op[1] is nil")
+	}
 
-		if err := json.Unmarshal(jsonBytes, &opData); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal operation data: %w", err)
+	// Try direct type assertion first (for map[string]any)
+	opData, ok := opDataRaw.(map[string]any)
+	if ok {
+		return opData, nil
+	}
+
+	// Check if it's *json.RawMessage (unknown operations from steemutil)
+	// According to steemutil README, unknown operations return *json.RawMessage
+	if rawJSON, ok := opDataRaw.(*json.RawMessage); ok {
+		var data map[string]any
+		if err := json.Unmarshal(*rawJSON, &data); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal json.RawMessage: %w", err)
 		}
+		return data, nil
+	}
+
+	// Try to convert to map via JSON marshaling/unmarshaling
+	// This handles cases where op.Data() returns a struct (known operations) instead of a map
+	jsonBytes, err := json.Marshal(opDataRaw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal operation data %T: %w", opDataRaw, err)
+	}
+
+	if err := json.Unmarshal(jsonBytes, &opData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal operation data: %w", err)
 	}
 
 	return opData, nil
 }
 
-func getString(data map[string]interface{}, key string) string {
+func getString(data map[string]any, key string) string {
 	if val, ok := data[key]; ok {
 		if str, ok := val.(string); ok {
 			return str
@@ -1107,7 +1143,7 @@ func getString(data map[string]interface{}, key string) string {
 	return ""
 }
 
-func getFloat64(data map[string]interface{}, key string) float64 {
+func getFloat64(data map[string]any, key string) float64 {
 	if val, ok := data[key]; ok {
 		switch v := val.(type) {
 		case float64:
@@ -1123,7 +1159,7 @@ func getFloat64(data map[string]interface{}, key string) float64 {
 	return 0
 }
 
-func getBool(data map[string]interface{}, key string) bool {
+func getBool(data map[string]any, key string) bool {
 	if val, ok := data[key]; ok {
 		if b, ok := val.(bool); ok {
 			return b
