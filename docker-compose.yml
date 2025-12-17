@@ -35,8 +35,8 @@ services:
     build:
       context: .
       dockerfile: steemdb-web/Dockerfile
-    # ports:
-    #   - "80:80"  # Nginx port
+    ports:
+      - "80:80"  # Nginx port
     #   - "9090:9090"  # Metrics port (if exposed)
     environment:
       - SERVER_MODE=production

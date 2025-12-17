@@ -3,6 +3,12 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
+import { BlocksPage, BlockDetailPage } from './pages/Blocks';
+import { AccountsPage, AccountDetailPage } from './pages/Accounts';
+import { WitnessesPage, WitnessDetailPage } from './pages/Witnesses';
+import { StatisticsPage } from './pages/Statistics';
+import { LiveFeedPage } from './pages/LiveFeed';
+import { SettingsPage } from './pages/Settings';
 import { useThemeStore, useWebSocketStore } from './store';
 import { wsClient } from './lib/websocket';
 
@@ -72,12 +78,15 @@ function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Dashboard />} />
-            <Route path="blocks" element={<div>Blocks page coming soon...</div>} />
-            <Route path="accounts" element={<div>Accounts page coming soon...</div>} />
-            <Route path="witnesses" element={<div>Witnesses page coming soon...</div>} />
-            <Route path="stats" element={<div>Statistics page coming soon...</div>} />
-            <Route path="live" element={<div>Live feed page coming soon...</div>} />
-            <Route path="settings" element={<div>Settings page coming soon...</div>} />
+            <Route path="blocks" element={<BlocksPage />} />
+            <Route path="blocks/:id" element={<BlockDetailPage />} />
+            <Route path="accounts" element={<AccountsPage />} />
+            <Route path="accounts/:id" element={<AccountDetailPage />} />
+            <Route path="witnesses" element={<WitnessesPage />} />
+            <Route path="witnesses/:id" element={<WitnessDetailPage />} />
+            <Route path="stats" element={<StatisticsPage />} />
+            <Route path="live" element={<LiveFeedPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<div>Page not found</div>} />
           </Route>
         </Routes>
