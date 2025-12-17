@@ -1,4 +1,4 @@
-package steem
+package utils
 
 import (
 	"encoding/json"
@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/steemit/steemutil/protocol"
+	protocolapi "github.com/steemit/steemutil/protocol/api"
 )
 
-// ToTime safely converts protocol.Time to time.Time, returning zero time if nil
+// ToTime safely converts protocol.Time to time.Time
 func ToTime(pt protocol.Time) time.Time {
 	if pt.Time != nil {
 		return *pt.Time
@@ -16,112 +17,109 @@ func ToTime(pt protocol.Time) time.Time {
 	return time.Time{}
 }
 
-// DynamicGlobalProperties represents the dynamic global properties
-type DynamicGlobalProperties struct {
-	HeadBlockNumber              int64     `json:"head_block_number"`
-	HeadBlockID                  string    `json:"head_block_id"`
-	Time                         time.Time `json:"time"`
-	CurrentWitness               string    `json:"current_witness"`
-	TotalPow                     int64     `json:"total_pow"`
-	NumPowWitnesses              int       `json:"num_pow_witnesses"`
-	VirtualSupply                string    `json:"virtual_supply"`
-	CurrentSupply                string    `json:"current_supply"`
-	ConfidentialSupply           string    `json:"confidential_supply"`
-	CurrentSBDSupply             string    `json:"current_sbd_supply"`
-	ConfidentialSBDSupply        string    `json:"confidential_sbd_supply"`
-	TotalVestingFundSteem        string    `json:"total_vesting_fund_steem"`
-	TotalVestingShares           string    `json:"total_vesting_shares"`
-	TotalRewardFundSteem         string    `json:"total_reward_fund_steem"`
-	TotalRewardShares2           string    `json:"total_reward_shares2"`
-	PendingRewardedVestingShares string    `json:"pending_rewarded_vesting_shares"`
-	PendingRewardedVestingSteem  string    `json:"pending_rewarded_vesting_steem"`
-	SBDInterestRate              int       `json:"sbd_interest_rate"`
-	SBDPrintRate                 int       `json:"sbd_print_rate"`
-	MaximumBlockSize             int       `json:"maximum_block_size"`
-	CurrentAslot                 int       `json:"current_aslot"`
-	RecentSlotsFilled            string    `json:"recent_slots_filled"`
-	ParticipationCount           int       `json:"participation_count"`
-	LastIrreversibleBlockNum     int64     `json:"last_irreversible_block_num"`
-	VotePowerReserveRate         int       `json:"vote_power_reserve_rate"`
-}
-
-// Block represents a blockchain block
+// Block represents a blockchain block (simplified from protocolapi.Block)
 type Block struct {
-	Number           int64         `json:"number"`
-	Previous         string        `json:"previous"`
-	Timestamp        time.Time     `json:"timestamp"`
-	Witness          string        `json:"witness"`
-	TransactionRoot  string        `json:"transaction_merkle_root"`
-	Extensions       []interface{} `json:"extensions"`
-	WitnessSignature string        `json:"witness_signature"`
-	Transactions     []Transaction `json:"transactions"`
-	BlockID          string        `json:"block_id"`
-	SigningKey       string        `json:"signing_key"`
-	TransactionIDs   []string      `json:"transaction_ids"`
+	Number           int64
+	Previous         string
+	Timestamp        time.Time
+	Witness          string
+	TransactionRoot  string
+	Extensions       []interface{}
+	WitnessSignature string
+	Transactions     []Transaction
+	BlockID          string
+	SigningKey       string
+	TransactionIDs   []string
 }
 
 // Transaction represents a blockchain transaction
 type Transaction struct {
-	RefBlockNum    int             `json:"ref_block_num"`
-	RefBlockPrefix int64           `json:"ref_block_prefix"`
-	Expiration     time.Time       `json:"expiration"`
-	Operations     [][]interface{} `json:"operations"`
-	Extensions     []interface{}   `json:"extensions"`
-	Signatures     []string        `json:"signatures"`
-	TransactionID  string          `json:"transaction_id"`
-	BlockNum       int64           `json:"block_num"`
-	TransactionNum int             `json:"transaction_num"`
+	RefBlockNum    int
+	RefBlockPrefix int64
+	Expiration     time.Time
+	Operations     [][]interface{} // Format: [op_type, op_data]
+	Extensions     []interface{}
+	Signatures     []string
+	TransactionID  string
+	BlockNum       int64
+	TransactionNum int
 }
 
 // Operation represents a blockchain operation
 type Operation struct {
-	TrxID      string        `json:"trx_id"`
-	Block      int64         `json:"block"`
-	TrxInBlock int           `json:"trx_in_block"`
-	OpInTrx    int           `json:"op_in_trx"`
-	VirtualOp  int           `json:"virtual_op"`
-	Timestamp  time.Time     `json:"timestamp"`
-	Op         []interface{} `json:"op"`
+	TrxID      string
+	Block      int64
+	TrxInBlock int
+	OpInTrx    int
+	VirtualOp  int
+	Timestamp  time.Time
+	Op         []interface{} // Format: [op_type, op_data]
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling for Operation
-// to handle time strings without timezone information
-func (o *Operation) UnmarshalJSON(data []byte) error {
-	// Define a temporary struct with timestamp as string
-	type Alias Operation
-	aux := &struct {
-		Timestamp string `json:"timestamp"`
-		*Alias
-	}{
-		Alias: (*Alias)(o),
+// ConvertBlock converts protocolapi.Block to our Block type
+func ConvertBlock(block *protocolapi.Block, blockNum int64) *Block {
+	if block == nil {
+		return nil
 	}
 
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
+	// Convert transactions
+	transactions := make([]Transaction, len(block.Transactions))
+	for i, tx := range block.Transactions {
+		transactions[i] = ConvertTransaction(&tx, blockNum, i)
 	}
 
-	// Parse timestamp - try multiple formats
-	if aux.Timestamp != "" {
-		// Try RFC3339 format first (with timezone)
-		if t, err := time.Parse(time.RFC3339, aux.Timestamp); err == nil {
-			o.Timestamp = t
-		} else if t, err := time.Parse("2006-01-02T15:04:05", aux.Timestamp); err == nil {
-			// Try format without timezone (assume UTC)
-			o.Timestamp = t.UTC()
-		} else if t, err := time.Parse("2006-01-02T15:04:05.000", aux.Timestamp); err == nil {
-			// Try format with milliseconds (assume UTC)
-			o.Timestamp = t.UTC()
-		} else {
-			// If all parsing fails, log but don't fail unmarshaling
-			// Set to zero time
-			o.Timestamp = time.Time{}
-		}
+	// Convert time
+	var timestamp time.Time
+	if block.Timestamp != nil && block.Timestamp.Time != nil {
+		timestamp = *block.Timestamp.Time
 	}
 
-	return nil
+	return &Block{
+		Number:           blockNum,
+		Previous:         block.Previous,
+		Timestamp:        timestamp,
+		Witness:          block.Witness,
+		TransactionRoot:  block.TransactionMerkleRoot,
+		Extensions:       block.Extensions,
+		WitnessSignature: block.WitnessSignature,
+		Transactions:     transactions,
+		BlockID:          block.BlockId,
+		SigningKey:       block.SigningKey,
+		TransactionIDs:   block.TransactionIds,
+	}
 }
 
-// Account represents a Steem account
+// ConvertTransaction converts protocolapi.Transaction to our Transaction type
+func ConvertTransaction(tx *protocolapi.Transaction, blockNum int64, txNum int) Transaction {
+	var expiration time.Time
+	if tx.Expiration != nil && tx.Expiration.Time != nil {
+		expiration = *tx.Expiration.Time
+	}
+
+	// Convert operations to [][]interface{}
+	ops := make([][]interface{}, len(tx.Operations))
+	for i, op := range tx.Operations {
+		opTypeStr := string(op.Type())
+		ops[i] = []interface{}{opTypeStr, op.Data()}
+	}
+
+	return Transaction{
+		RefBlockNum:    int(tx.RefBlockNum),
+		RefBlockPrefix: int64(tx.RefBlockPrefix),
+		Expiration:     expiration,
+		Operations:     ops,
+		Extensions:     tx.Extensions,
+		Signatures:     tx.Signatures,
+		TransactionID:  tx.TransactionId,
+		BlockNum:       blockNum,
+		TransactionNum: txNum,
+	}
+}
+
+// Account, Witness, RewardFund, Content types for RPC calls
+// These will be unmarshaled from JSON responses
+
+// Account represents a Steem account (unmarshaled from JSON)
 type Account struct {
 	ID                            int           `json:"id"`
 	Name                          string        `json:"name"`
@@ -206,9 +204,7 @@ type Manabar struct {
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for Manabar
-// Handles both number and string types for current_mana field
 func (m *Manabar) UnmarshalJSON(data []byte) error {
-	// Define a temporary struct that can handle both number and string
 	type Alias Manabar
 	aux := &struct {
 		CurrentMana interface{} `json:"current_mana"`
@@ -221,7 +217,6 @@ func (m *Manabar) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Convert current_mana to string regardless of input type
 	if aux.CurrentMana != nil {
 		switch v := aux.CurrentMana.(type) {
 		case string:
@@ -337,7 +332,7 @@ type Content struct {
 	AuthorReputation        string          `json:"author_reputation"`
 	Promoted                string          `json:"promoted"`
 	BodyLength              int             `json:"body_length"`
-	RebloggedBy             []string        `json:"reblogged_by"`
+	RebloggedBy            []string          `json:"reblogged_by"`
 }
 
 // Beneficiary represents a beneficiary
@@ -354,3 +349,4 @@ type Vote struct {
 	Percent int       `json:"percent"`
 	Time    time.Time `json:"time"`
 }
+

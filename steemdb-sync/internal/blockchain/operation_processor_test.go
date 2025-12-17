@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // MockLogger for testing
@@ -84,12 +84,12 @@ func TestOperationProcessor_Process(t *testing.T) {
 
 	// Create test operation with TrxID and OpInTrx
 	testOp := &Operation{
-		Block: &steem.Block{
+		Block: &utils.Block{
 			Number:    12345,
 			Timestamp: time.Now(),
 			BlockID:   "test_block_id",
 		},
-		Operation: &steem.Operation{
+		Operation: &utils.Operation{
 			TrxID:   "test_trx_id",
 			Block:   12345,
 			OpInTrx: 0,
@@ -112,12 +112,12 @@ func TestOperationProcessor_Process(t *testing.T) {
 
 	// Test unknown operation type
 	unknownOp := &Operation{
-		Block: &steem.Block{
+		Block: &utils.Block{
 			Number:    12346,
 			Timestamp: time.Now(),
 			BlockID:   "test_block_id_2",
 		},
-		Operation: &steem.Operation{
+		Operation: &utils.Operation{
 			TrxID:   "test_trx_id_2",
 			Block:   12346,
 			OpInTrx: 0,
@@ -212,12 +212,12 @@ func BenchmarkOperationProcessor_Process(b *testing.B) {
 	}
 
 	testOp := &Operation{
-		Block: &steem.Block{
+		Block: &utils.Block{
 			Number:    12345,
 			Timestamp: time.Now(),
 			BlockID:   "test_block_id",
 		},
-		Operation: &steem.Operation{
+		Operation: &utils.Operation{
 			TrxID:   "test_trx_id",
 			Block:   12345,
 			OpInTrx: 0,
@@ -307,4 +307,468 @@ func TestCreateOperationSummary(t *testing.T) {
 	if summary["voter"] != "alice" || summary["author"] != "bob" {
 		t.Errorf("Invalid vote summary: %v", summary)
 	}
+}
+
+// TestHandleVestingDeposit tests the handleVestingDeposit function
+func TestHandleVestingDeposit(t *testing.T) {
+	mockDB := &MockDatabase{}
+	mockLogger := &MockLogger{}
+
+	processor := &OperationProcessor{
+		db:     mockDB,
+		logger: mockLogger,
+	}
+
+	ctx := context.Background()
+	testTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("successful processing with map data", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    330781,
+				Timestamp: testTime,
+				BlockID:   "test_block_id",
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_id_1",
+				Block:      330781,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer_to_vesting",
+					map[string]interface{}{
+						"from":   "alice",
+						"to":     "bob",
+						"amount": "100.000 STEEM",
+					},
+				},
+			},
+		}
+
+		err := processor.handleVestingDeposit(ctx, op)
+		if err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("successful processing with struct data (JSON conversion)", func(t *testing.T) {
+		// Simulate a struct type that needs JSON conversion
+		type VestingOpData struct {
+			From   string `json:"from"`
+			To     string `json:"to"`
+			Amount string `json:"amount"`
+		}
+
+		structData := VestingOpData{
+			From:   "charlie",
+			To:     "david",
+			Amount: "50.000 STEEM",
+		}
+
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    330782,
+				Timestamp: testTime,
+				BlockID:   "test_block_id_2",
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_id_2",
+				Block:      330782,
+				TrxInBlock: 0,
+				OpInTrx:    1,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer_to_vesting",
+					structData, // Struct instead of map
+				},
+			},
+		}
+
+		err := processor.handleVestingDeposit(ctx, op)
+		if err != nil {
+			t.Errorf("Expected no error with struct data, got: %v", err)
+		}
+	})
+
+	t.Run("error: Op array too short", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    330783,
+				Timestamp: testTime,
+				BlockID:   "test_block_id_3",
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_id_3",
+				Block:      330783,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer_to_vesting",
+					// Missing second element
+				},
+			},
+		}
+
+		err := processor.handleVestingDeposit(ctx, op)
+		if err == nil {
+			t.Error("Expected error for Op array too short, got nil")
+		}
+		if err != nil && !strings.Contains(err.Error(), "Op array too short") {
+			t.Errorf("Expected error about Op array too short, got: %v", err)
+		}
+	})
+
+	t.Run("error: invalid data type (cannot marshal)", func(t *testing.T) {
+		// Create a type that cannot be marshaled to JSON
+		type UnmarshalableType struct {
+			Channel chan int // Channels cannot be marshaled
+		}
+
+		invalidData := UnmarshalableType{
+			Channel: make(chan int),
+		}
+
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    330784,
+				Timestamp: testTime,
+				BlockID:   "test_block_id_4",
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_id_4",
+				Block:      330784,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer_to_vesting",
+					invalidData,
+				},
+			},
+		}
+
+		err := processor.handleVestingDeposit(ctx, op)
+		if err == nil {
+			t.Error("Expected error for invalid data type, got nil")
+		}
+		if err != nil && !strings.Contains(err.Error(), "failed to marshal") {
+			t.Errorf("Expected error about marshal failure, got: %v", err)
+		}
+	})
+
+	t.Run("successful processing with empty amount", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    330785,
+				Timestamp: testTime,
+				BlockID:   "test_block_id_5",
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_id_5",
+				Block:      330785,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer_to_vesting",
+					map[string]interface{}{
+						"from":   "eve",
+						"to":     "frank",
+						"amount": "", // Empty amount should be handled gracefully
+					},
+				},
+			},
+		}
+
+		err := processor.handleVestingDeposit(ctx, op)
+		if err != nil {
+			t.Errorf("Expected no error with empty amount, got: %v", err)
+		}
+	})
+
+	t.Run("successful processing with missing optional fields", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    330786,
+				Timestamp: testTime,
+				BlockID:   "test_block_id_6",
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_id_6",
+				Block:      330786,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer_to_vesting",
+					map[string]interface{}{
+						"from": "grace",
+						"to":   "henry",
+						// Missing amount field
+					},
+				},
+			},
+		}
+
+		err := processor.handleVestingDeposit(ctx, op)
+		if err != nil {
+			t.Errorf("Expected no error with missing amount, got: %v", err)
+		}
+	})
+}
+
+// TestGetOperationData tests the getOperationData function
+func TestGetOperationData(t *testing.T) {
+	testTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("successful extraction with map data", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    1000,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				Op: []interface{}{
+					"test_op",
+					map[string]interface{}{
+						"field1": "value1",
+						"field2": 123,
+					},
+				},
+			},
+		}
+
+		opData, err := getOperationData(op)
+		if err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+		if opData == nil {
+			t.Error("Expected non-nil opData")
+		}
+		if opData["field1"] != "value1" {
+			t.Errorf("Expected field1='value1', got '%v'", opData["field1"])
+		}
+		if opData["field2"] != 123 {
+			t.Errorf("Expected field2=123, got '%v'", opData["field2"])
+		}
+	})
+
+	t.Run("successful extraction with struct data (JSON conversion)", func(t *testing.T) {
+		type TestOpData struct {
+			Field1 string `json:"field1"`
+			Field2 int    `json:"field2"`
+		}
+
+		structData := TestOpData{
+			Field1: "value1",
+			Field2: 123,
+		}
+
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    1001,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				Op: []interface{}{
+					"test_op",
+					structData, // Struct instead of map
+				},
+			},
+		}
+
+		opData, err := getOperationData(op)
+		if err != nil {
+			t.Errorf("Expected no error with struct data, got: %v", err)
+		}
+		if opData == nil {
+			t.Error("Expected non-nil opData")
+		}
+		if opData["field1"] != "value1" {
+			t.Errorf("Expected field1='value1', got '%v'", opData["field1"])
+		}
+		// JSON unmarshal converts numbers to float64
+		if opData["field2"] != float64(123) {
+			t.Errorf("Expected field2=123, got '%v'", opData["field2"])
+		}
+	})
+
+	t.Run("error: Op array too short", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    1002,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				Op: []interface{}{
+					"test_op",
+					// Missing second element
+				},
+			},
+		}
+
+		opData, err := getOperationData(op)
+		if err == nil {
+			t.Error("Expected error for Op array too short, got nil")
+		}
+		if opData != nil {
+			t.Error("Expected nil opData on error")
+		}
+		if !strings.Contains(err.Error(), "Op array too short") {
+			t.Errorf("Expected error about Op array too short, got: %v", err)
+		}
+	})
+
+	t.Run("error: cannot marshal data", func(t *testing.T) {
+		type UnmarshalableType struct {
+			Channel chan int // Channels cannot be marshaled
+		}
+
+		invalidData := UnmarshalableType{
+			Channel: make(chan int),
+		}
+
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    1003,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				Op: []interface{}{
+					"test_op",
+					invalidData,
+				},
+			},
+		}
+
+		opData, err := getOperationData(op)
+		if err == nil {
+			t.Error("Expected error for unmarshalable data, got nil")
+		}
+		if opData != nil {
+			t.Error("Expected nil opData on error")
+		}
+		if !strings.Contains(err.Error(), "failed to marshal") {
+			t.Errorf("Expected error about marshal failure, got: %v", err)
+		}
+	})
+}
+
+// TestSaveOperation tests the saveOperation function
+func TestSaveOperation(t *testing.T) {
+	mockDB := &MockDatabase{}
+	mockLogger := &MockLogger{}
+
+	processor := &OperationProcessor{
+		db:     mockDB,
+		logger: mockLogger,
+	}
+
+	ctx := context.Background()
+	testTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("successful save with map data", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    2000,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_1",
+				Block:      2000,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer",
+					map[string]interface{}{
+						"from":   "alice",
+						"to":     "bob",
+						"amount": "10.000 STEEM",
+					},
+				},
+			},
+		}
+
+		opID, err := processor.saveOperation(ctx, op, "transfer")
+		if err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+		if opID == nil {
+			t.Error("Expected non-nil opID")
+		}
+	})
+
+	t.Run("successful save with struct data", func(t *testing.T) {
+		type TransferOpData struct {
+			From   string `json:"from"`
+			To     string `json:"to"`
+			Amount string `json:"amount"`
+		}
+
+		structData := TransferOpData{
+			From:   "charlie",
+			To:     "david",
+			Amount: "20.000 STEEM",
+		}
+
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    2001,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_2",
+				Block:      2001,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer",
+					structData, // Struct instead of map
+				},
+			},
+		}
+
+		opID, err := processor.saveOperation(ctx, op, "transfer")
+		if err != nil {
+			t.Errorf("Expected no error with struct data, got: %v", err)
+		}
+		if opID == nil {
+			t.Error("Expected non-nil opID")
+		}
+	})
+
+	t.Run("error: invalid operation data", func(t *testing.T) {
+		op := &Operation{
+			Block: &utils.Block{
+				Number:    2002,
+				Timestamp: testTime,
+			},
+			Operation: &utils.Operation{
+				TrxID:      "test_trx_3",
+				Block:      2002,
+				TrxInBlock: 0,
+				OpInTrx:    0,
+				Timestamp:  testTime,
+				Op: []interface{}{
+					"transfer",
+					// Missing second element
+				},
+			},
+		}
+
+		opID, err := processor.saveOperation(ctx, op, "transfer")
+		if err == nil {
+			t.Error("Expected error for invalid operation data, got nil")
+		}
+		if opID != nil {
+			t.Error("Expected nil opID on error")
+		}
+		if !strings.Contains(err.Error(), "invalid operation data") {
+			t.Errorf("Expected error about invalid operation data, got: %v", err)
+		}
+	})
 }

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // TestAccountUpdater_ConvertSteemAccountToDBAccount tests the conversion function
@@ -20,7 +19,7 @@ func TestAccountUpdater_ConvertSteemAccountToDBAccount(t *testing.T) {
 	updater := NewAccountUpdater(config, nil, nil, logger)
 
 	// Create a test steem account
-	steemAcc := &steem.Account{
+	steemAcc := &utils.Account{
 		Name:          "testuser",
 		Balance:       "100.000 STEEM",
 		SBDBalance:    "50.000 SBD",

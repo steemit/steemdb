@@ -16,13 +16,12 @@ import (
 
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // Operation represents a blockchain operation with context
 type Operation struct {
-	Block     *steem.Block
-	Operation *steem.Operation
+	Block     *utils.Block
+	Operation *utils.Operation
 }
 
 // Collection interface for collection operations
@@ -212,9 +211,16 @@ func (p *OperationProcessor) FlushAccountOperationsBuffer(ctx context.Context) e
 
 // saveOperation saves operation to operations collection
 func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, opType string) (*primitive.ObjectID, error) {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		p.logger.Error("Invalid operation data",
+			utils.String("type", opType),
+			utils.Int64("block", op.Block.Number),
+			utils.String("trx_id", op.Operation.TrxID),
+			utils.Int("op_index", op.Operation.OpInTrx),
+			utils.Error(err),
+		)
+		return nil, fmt.Errorf("invalid operation data: %w", err)
 	}
 
 	// Extract accounts from operation
@@ -256,7 +262,7 @@ func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, o
 	}
 
 	collection := p.db.Collection("operations")
-	_, err := collection.InsertOne(ctx, dbOp)
+	_, err = collection.InsertOne(ctx, dbOp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save operation: %w", err)
 	}
@@ -266,9 +272,9 @@ func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, o
 
 // addAccountOperationsToBuffer adds account operations to buffer for batch writing
 func (p *OperationProcessor) addAccountOperationsToBuffer(ctx context.Context, op *Operation, opType string, opID primitive.ObjectID) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid operation data")
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid operation data: %w", err)
 	}
 
 	// Extract accounts
@@ -646,9 +652,42 @@ func (p *OperationProcessor) handleCurationReward(ctx context.Context, op *Opera
 
 // handleVestingDeposit processes transfer to vesting operations
 func (p *OperationProcessor) handleVestingDeposit(ctx context.Context, op *Operation) error {
-	opData, ok := op.Operation.Op[1].(map[string]interface{})
+	if len(op.Operation.Op) < 2 {
+		p.logger.Error("Invalid operation format: Op array too short",
+			utils.Int("length", len(op.Operation.Op)),
+			utils.Int64("block", op.Block.Number),
+			utils.String("trx_id", op.Operation.TrxID),
+		)
+		return fmt.Errorf("invalid vesting deposit operation data: Op array too short")
+	}
+
+	opDataRaw := op.Operation.Op[1]
+	opData, ok := opDataRaw.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("invalid vesting deposit operation data")
+		// Try to convert to map via JSON marshaling/unmarshaling
+		// This handles cases where op.Data() returns a struct instead of a map
+		jsonBytes, err := json.Marshal(opDataRaw)
+		if err != nil {
+			p.logger.Error("Invalid vesting deposit operation data: failed to marshal",
+				utils.String("type", fmt.Sprintf("%T", opDataRaw)),
+				utils.Int64("block", op.Block.Number),
+				utils.String("trx_id", op.Operation.TrxID),
+				utils.Int("op_index", op.Operation.OpInTrx),
+				utils.Error(err),
+			)
+			return fmt.Errorf("invalid vesting deposit operation data: failed to marshal %T: %w", opDataRaw, err)
+		}
+
+		if err := json.Unmarshal(jsonBytes, &opData); err != nil {
+			p.logger.Error("Invalid vesting deposit operation data: failed to unmarshal",
+				utils.String("type", fmt.Sprintf("%T", opDataRaw)),
+				utils.Int64("block", op.Block.Number),
+				utils.String("trx_id", op.Operation.TrxID),
+				utils.Int("op_index", op.Operation.OpInTrx),
+				utils.Error(err),
+			)
+			return fmt.Errorf("invalid vesting deposit operation data: failed to unmarshal: %w", err)
+		}
 	}
 
 	deposit := &database.VestingDeposit{
@@ -1034,6 +1073,31 @@ func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Ope
 }
 
 // Utility functions
+
+// getOperationData extracts operation data from Op array, handling both map and struct types
+func getOperationData(op *Operation) (map[string]interface{}, error) {
+	if len(op.Operation.Op) < 2 {
+		return nil, fmt.Errorf("invalid operation format: Op array too short")
+	}
+
+	opDataRaw := op.Operation.Op[1]
+	opData, ok := opDataRaw.(map[string]interface{})
+	if !ok {
+		// Try to convert to map via JSON marshaling/unmarshaling
+		// This handles cases where op.Data() returns a struct instead of a map
+		jsonBytes, err := json.Marshal(opDataRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal operation data %T: %w", opDataRaw, err)
+		}
+
+		if err := json.Unmarshal(jsonBytes, &opData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal operation data: %w", err)
+		}
+	}
+
+	return opData, nil
+}
+
 func getString(data map[string]interface{}, key string) string {
 	if val, ok := data[key]; ok {
 		if str, ok := val.(string); ok {

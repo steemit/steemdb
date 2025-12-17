@@ -8,14 +8,13 @@ import (
 
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // AccountUpdater handles account updates from condenser_api.get_accounts
 type AccountUpdater struct {
 	config    *utils.Config
 	db        *database.MongoDB
-	steem     *steem.Client
+	steem     *utils.SteemClient
 	logger    utils.Logger
 	batchSize int
 }
@@ -24,7 +23,7 @@ type AccountUpdater struct {
 func NewAccountUpdater(
 	config *utils.Config,
 	db *database.MongoDB,
-	steemClient *steem.Client,
+	steemClient *utils.SteemClient,
 	logger utils.Logger,
 ) *AccountUpdater {
 	batchSize := 100 // Default batch size for get_accounts
@@ -96,7 +95,7 @@ func (a *AccountUpdater) UpdateAccounts(ctx context.Context) error {
 }
 
 // convertSteemAccountToDBAccount converts steem.Account to database.Account
-func (a *AccountUpdater) convertSteemAccountToDBAccount(steemAcc *steem.Account) *database.Account {
+func (a *AccountUpdater) convertSteemAccountToDBAccount(steemAcc *utils.Account) *database.Account {
 	// Convert Authority to bson.M
 	owner := map[string]interface{}{
 		"weight_threshold": steemAcc.Owner.WeightThreshold,
@@ -115,18 +114,18 @@ func (a *AccountUpdater) convertSteemAccountToDBAccount(steemAcc *steem.Account)
 	}
 
 	// Convert protocol.Time to time.Time
-	created := steem.ToTime(steemAcc.Created)
-	lastOwnerUpdate := steem.ToTime(steemAcc.LastOwnerUpdate)
-	lastAccountUpdate := steem.ToTime(steemAcc.LastAccountUpdate)
-	lastAccountRecovery := steem.ToTime(steemAcc.LastAccountRecovery)
-	lastPost := steem.ToTime(steemAcc.LastPost)
-	lastRootPost := steem.ToTime(steemAcc.LastRootPost)
-	lastVoteTime := steem.ToTime(steemAcc.LastVoteTime)
-	nextVestingWithdrawal := steem.ToTime(steemAcc.NextVestingWithdrawal)
-	sbdSecondsLastUpdate := steem.ToTime(steemAcc.SBDSecondsLastUpdate)
-	sbdLastInterestPayment := steem.ToTime(steemAcc.SBDLastInterestPayment)
-	savingsSBDSecondsLastUpdate := steem.ToTime(steemAcc.SavingsSBDSecondsLastUpdate)
-	savingsSBDLastInterestPayment := steem.ToTime(steemAcc.SavingsSBDLastInterestPayment)
+	created := utils.ToTime(steemAcc.Created)
+	lastOwnerUpdate := utils.ToTime(steemAcc.LastOwnerUpdate)
+	lastAccountUpdate := utils.ToTime(steemAcc.LastAccountUpdate)
+	lastAccountRecovery := utils.ToTime(steemAcc.LastAccountRecovery)
+	lastPost := utils.ToTime(steemAcc.LastPost)
+	lastRootPost := utils.ToTime(steemAcc.LastRootPost)
+	lastVoteTime := utils.ToTime(steemAcc.LastVoteTime)
+	nextVestingWithdrawal := utils.ToTime(steemAcc.NextVestingWithdrawal)
+	sbdSecondsLastUpdate := utils.ToTime(steemAcc.SBDSecondsLastUpdate)
+	sbdLastInterestPayment := utils.ToTime(steemAcc.SBDLastInterestPayment)
+	savingsSBDSecondsLastUpdate := utils.ToTime(steemAcc.SavingsSBDSecondsLastUpdate)
+	savingsSBDLastInterestPayment := utils.ToTime(steemAcc.SavingsSBDLastInterestPayment)
 
 	// Convert ProxiedVSFVotes from []string to []string (already correct)
 	proxiedVSFVotes := steemAcc.ProxiedVSFVotes

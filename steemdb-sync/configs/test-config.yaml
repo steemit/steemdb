@@ -5,7 +5,7 @@ server:
 
 steem:
   nodes:
-    - "https://api.steem.fans"
+    - "http://192.168.30.23:8091"
   timeout: 30s
   retry_attempts: 3
 
@@ -22,9 +22,7 @@ redis:
   pool_size: 10
 
 sync:
-  batch_size: 5
-  workers: 2
-  queue_size: 100
+  block_batch_size: 10
   block_interval: 10s
   start_block: 1
 

@@ -10,14 +10,13 @@ import (
 
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // Manager manages all sync services
 type Manager struct {
 	config *utils.Config
 	db     *database.MongoDB
-	steem  *steem.Client
+	steem  *utils.SteemClient
 	logger utils.Logger
 
 	// Services
@@ -29,7 +28,7 @@ type Manager struct {
 func NewManager(
 	config *utils.Config,
 	db *database.MongoDB,
-	steemClient *steem.Client,
+	steemClient *utils.SteemClient,
 	logger utils.Logger,
 ) *Manager {
 	manager := &Manager{

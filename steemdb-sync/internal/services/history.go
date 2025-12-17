@@ -12,14 +12,13 @@ import (
 
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // HistoryService handles account history data collection
 type HistoryService struct {
 	config *utils.Config
 	db     *database.MongoDB
-	steem  *steem.Client
+	steem  *utils.SteemClient
 	logger utils.Logger
 
 	scheduler *cron.Cron
@@ -29,7 +28,7 @@ type HistoryService struct {
 func NewHistoryService(
 	config *utils.Config,
 	db *database.MongoDB,
-	steemClient *steem.Client,
+	steemClient *utils.SteemClient,
 	logger utils.Logger,
 ) *HistoryService {
 	return &HistoryService{
@@ -250,7 +249,7 @@ func (h *HistoryService) processBatch(ctx context.Context, accountNames []string
 
 // processAccountData processes raw account data from blockchain
 // Note: This function is deprecated. Use AccountUpdater instead which uses condenser_api.get_accounts
-func (h *HistoryService) processAccountData(account *steem.Account) *database.Account {
+func (h *HistoryService) processAccountData(account *utils.Account) *database.Account {
 	// Convert Authority to bson.M
 	owner := map[string]interface{}{
 		"weight_threshold": account.Owner.WeightThreshold,
@@ -291,18 +290,18 @@ func (h *HistoryService) processAccountData(account *steem.Account) *database.Ac
 		DelegatedVestingShares:        account.DelegatedVestingShares,
 		ReceivedVestingShares:         account.ReceivedVestingShares,
 		VestingWithdrawRate:           account.VestingWithdrawRate, // Already string format
-		NextVestingWithdrawal:         steem.ToTime(account.NextVestingWithdrawal),
+		NextVestingWithdrawal:         utils.ToTime(account.NextVestingWithdrawal),
 		Withdrawn:                     account.Withdrawn,
 		ToWithdraw:                    account.ToWithdraw,
 		SBDSeconds:                    account.SBDSeconds,
-		SBDSecondsLastUpdate:          steem.ToTime(account.SBDSecondsLastUpdate),
-		SBDLastInterestPayment:        steem.ToTime(account.SBDLastInterestPayment),
-		SavingsSBDSeconds:             "", // Not available in steem.Account
-		SavingsSBDSecondsLastUpdate:   steem.ToTime(account.SavingsSBDSecondsLastUpdate),
-		SavingsSBDLastInterestPayment: steem.ToTime(account.SavingsSBDLastInterestPayment),
+		SBDSecondsLastUpdate:          utils.ToTime(account.SBDSecondsLastUpdate),
+		SBDLastInterestPayment:        utils.ToTime(account.SBDLastInterestPayment),
+		SavingsSBDSeconds:             "", // Not available in utils.Account
+		SavingsSBDSecondsLastUpdate:   utils.ToTime(account.SavingsSBDSecondsLastUpdate),
+		SavingsSBDLastInterestPayment: utils.ToTime(account.SavingsSBDLastInterestPayment),
 		SavingsWithdrawRequests:       account.SavingsWithdrawRequests,
 		VotingPower:                   account.VotingPower,
-		LastVoteTime:                  steem.ToTime(account.LastVoteTime),
+		LastVoteTime:                  utils.ToTime(account.LastVoteTime),
 		CanVote:                       account.CanVote,
 		CurationRewards:               account.CurationRewards,
 		PostingRewards:                account.PostingRewards,
@@ -313,12 +312,12 @@ func (h *HistoryService) processAccountData(account *steem.Account) *database.Ac
 		PostCount:                     account.PostCount,
 		CommentCount:                  account.CommentCount,
 		LifetimeVoteCount:             account.LifetimeVoteCount,
-		Created:                       steem.ToTime(account.Created),
-		LastOwnerUpdate:               steem.ToTime(account.LastOwnerUpdate),
-		LastAccountUpdate:             steem.ToTime(account.LastAccountUpdate),
-		LastAccountRecovery:           steem.ToTime(account.LastAccountRecovery),
-		LastPost:                      steem.ToTime(account.LastPost),
-		LastRootPost:                  steem.ToTime(account.LastRootPost),
+		Created:                       utils.ToTime(account.Created),
+		LastOwnerUpdate:               utils.ToTime(account.LastOwnerUpdate),
+		LastAccountUpdate:             utils.ToTime(account.LastAccountUpdate),
+		LastAccountRecovery:           utils.ToTime(account.LastAccountRecovery),
+		LastPost:                      utils.ToTime(account.LastPost),
+		LastRootPost:                  utils.ToTime(account.LastRootPost),
 		Mined:                         account.Mined,
 		Reputation:                    account.Reputation, // Already string format
 		VestingBalance:                "",                 // Not in steem.Account
@@ -372,7 +371,7 @@ func (h *HistoryService) updateFundHistory(ctx context.Context) error {
 		ContentConstant:     utils.ParseFloat64Value(fund.ContentConstant),
 		PercentCuration:     fund.PercentCurationRewards,
 		PercentContent:      fund.PercentContentRewards,
-		LastUpdate:          steem.ToTime(fund.LastUpdate),
+		LastUpdate:          utils.ToTime(fund.LastUpdate),
 		AuthorRewardCurve:   fund.AuthorRewardCurve,
 		CurationRewardCurve: fund.CurationRewardCurve,
 	}

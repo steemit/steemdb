@@ -11,14 +11,13 @@ import (
 
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // WitnessService handles witness monitoring and data collection
 type WitnessService struct {
 	config *utils.Config
 	db     *database.MongoDB
-	steem  *steem.Client
+	steem  *utils.SteemClient
 	logger utils.Logger
 
 	scheduler   *cron.Cron
@@ -30,7 +29,7 @@ type WitnessService struct {
 func NewWitnessService(
 	config *utils.Config,
 	db *database.MongoDB,
-	steemClient *steem.Client,
+	steemClient *utils.SteemClient,
 	logger utils.Logger,
 ) *WitnessService {
 	return &WitnessService{
@@ -154,7 +153,7 @@ func (w *WitnessService) updateWitnesses(ctx context.Context) error {
 }
 
 // processWitnessData processes raw witness data from blockchain
-func (w *WitnessService) processWitnessData(witness *steem.Witness, scanTime time.Time) *database.Witness {
+func (w *WitnessService) processWitnessData(witness *utils.Witness, scanTime time.Time) *database.Witness {
 	// Parse numeric values
 	votes := utils.ParseFloat64Value(witness.Votes)
 	virtualLastUpdate := utils.ParseFloat64Value(witness.VirtualLastUpdate)
@@ -177,7 +176,7 @@ func (w *WitnessService) processWitnessData(witness *steem.Witness, scanTime tim
 	return &database.Witness{
 		ID:                     witness.Owner,
 		Owner:                  witness.Owner,
-		CreatedTime:            steem.ToTime(witness.CreatedTime),
+		CreatedTime:            utils.ToTime(witness.CreatedTime),
 		URL:                    witness.URL,
 		Votes:                  votes,
 		VirtualLastUpdate:      virtualLastUpdate,
@@ -189,11 +188,11 @@ func (w *WitnessService) processWitnessData(witness *steem.Witness, scanTime tim
 		SigningKey:             witness.SigningKey,
 		Props:                  propsMap,
 		SBDExchangeRate:        exchangeRateMap,
-		LastSBDExchangeUpdate:  steem.ToTime(witness.LastSBDExchangeUpdate),
+		LastSBDExchangeUpdate:  utils.ToTime(witness.LastSBDExchangeUpdate),
 		LastWork:               witness.LastWork,
 		RunningVersion:         witness.RunningVersion,
 		HardforkVersionVote:    witness.HardforkVersionVote,
-		HardforkTimeVote:       steem.ToTime(witness.HardforkTimeVote),
+		HardforkTimeVote:       utils.ToTime(witness.HardforkTimeVote),
 	}
 }
 

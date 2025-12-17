@@ -12,7 +12,6 @@ import (
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/services"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 func main() {
@@ -56,7 +55,7 @@ func main() {
 	}
 
 	// Initialize Steem client
-	steemClient := steem.NewClient(cfg.Steem.Nodes, logger)
+	steemClient := utils.NewSteemClient(cfg.Steem.Nodes, logger)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,7 +76,6 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Info("Starting block sync service")
 		if err := serviceManager.BlockSync.Start(ctx); err != nil {
 			logger.Error("Block sync service error", utils.Error(err))
 		}
@@ -87,7 +85,6 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Info("Starting cron tab service")
 		if err := serviceManager.CronTab.Start(ctx); err != nil {
 			logger.Error("Cron tab service error", utils.Error(err))
 		}

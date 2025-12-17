@@ -11,14 +11,13 @@ import (
 	"github.com/steemdb/sync/internal/blockchain"
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // BlockSyncService handles blockchain synchronization (single goroutine)
 type BlockSyncService struct {
 	config *utils.Config
 	db     *database.MongoDB
-	steem  *steem.Client
+	steem  *utils.SteemClient
 	logger utils.Logger
 
 	// State (single goroutine, no locks needed)
@@ -28,14 +27,14 @@ type BlockSyncService struct {
 	operationProcessor *blockchain.OperationProcessor
 
 	// Block buffer for batch writing
-	blockBuffer []*steem.Block
+	blockBuffer []*utils.Block
 }
 
 // NewBlockSyncService creates a new block sync service
 func NewBlockSyncService(
 	config *utils.Config,
 	db *database.MongoDB,
-	steemClient *steem.Client,
+	steemClient *utils.SteemClient,
 	logger utils.Logger,
 ) *BlockSyncService {
 	return &BlockSyncService{
@@ -43,7 +42,7 @@ func NewBlockSyncService(
 		db:          db,
 		steem:       steemClient,
 		logger:      logger,
-		blockBuffer: make([]*steem.Block, 0, config.Sync.BlockBatchSize),
+		blockBuffer: make([]*utils.Block, 0, config.Sync.BlockBatchSize),
 	}
 }
 
@@ -74,9 +73,12 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			// Flush remaining buffers on shutdown
-			s.flushBlockBuffer(ctx)
+			// Use background context to ensure flush completes even if main context is canceled
+			flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			s.flushBlockBuffer(flushCtx)
 			if s.operationProcessor != nil {
-				if err := s.operationProcessor.FlushAccountOperationsBuffer(ctx); err != nil {
+				if err := s.operationProcessor.FlushAccountOperationsBuffer(flushCtx); err != nil {
 					s.logger.Error("Error flushing account operations buffer on shutdown", utils.Error(err))
 				}
 			}
@@ -89,13 +91,18 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 				continue
 			}
 
-			headBlock := props.LastIrreversibleBlockNum
+			headBlock := int64(props.LastIrreversibleBlockNum)
 
 			// Process all blocks until caught up
 			for s.lastBlock < headBlock {
 				// Calculate batch size
+				// GetBlocksRange has a maximum limit of 100 blocks
+				const maxBlockRange = 100
 				blocksToProcess := headBlock - s.lastBlock
 				batchSize := int64(s.config.Sync.BlockBatchSize)
+				if batchSize > maxBlockRange {
+					batchSize = maxBlockRange
+				}
 				if blocksToProcess > batchSize {
 					blocksToProcess = batchSize
 				}
@@ -104,7 +111,7 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 				startBlock := s.lastBlock + 1
 				endBlock := s.lastBlock + blocksToProcess
 
-				blocks, err := s.steem.GetBlocksRange(ctx, startBlock, endBlock)
+				protocolBlocks, blockNums, err := s.steem.GetBlocksRange(ctx, startBlock, endBlock)
 				if err != nil {
 					s.logger.Error("Error fetching blocks range",
 						utils.Int64("start", startBlock),
@@ -113,8 +120,15 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 					break // Break inner loop, continue outer loop
 				}
 
-				// Process blocks sequentially
-				for _, block := range blocks {
+				// Convert protocol blocks to our Block type and process
+				for i, protocolBlock := range protocolBlocks {
+					block := utils.ConvertBlock(protocolBlock, blockNums[i])
+					if block == nil {
+						s.logger.Error("Failed to convert block",
+							utils.Int64("block", blockNums[i]),
+							utils.Error(err))
+						continue
+					}
 					if err := s.processBlock(ctx, block); err != nil {
 						s.logger.Error("Error processing block",
 							utils.Int64("block", block.Number),
@@ -164,7 +178,7 @@ func (s *BlockSyncService) Start(ctx context.Context) error {
 }
 
 // processBlock processes a single block
-func (s *BlockSyncService) processBlock(ctx context.Context, block *steem.Block) error {
+func (s *BlockSyncService) processBlock(ctx context.Context, block *utils.Block) error {
 	// Add block to buffer for batch saving
 	s.blockBuffer = append(s.blockBuffer, block)
 
@@ -185,7 +199,7 @@ func (s *BlockSyncService) processBlock(ctx context.Context, block *steem.Block)
 				continue
 			}
 
-			op := &steem.Operation{
+			op := &utils.Operation{
 				TrxID:      tx.TransactionID,
 				Block:      block.Number,
 				TrxInBlock: txIndex,
@@ -239,7 +253,7 @@ func (s *BlockSyncService) flushBlockBuffer(ctx context.Context) error {
 }
 
 // saveBlocksBatch saves multiple blocks to the database using bulk write
-func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*steem.Block) error {
+func (s *BlockSyncService) saveBlocksBatch(ctx context.Context, blocks []*utils.Block) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -323,6 +337,6 @@ func (s *BlockSyncService) IsSyncCaughtUp() bool {
 		return false
 	}
 
-	headBlock := props.LastIrreversibleBlockNum
+	headBlock := int64(props.LastIrreversibleBlockNum)
 	return s.lastBlock >= headBlock
 }

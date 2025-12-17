@@ -10,9 +10,8 @@ import (
 func TestBlockSyncService_IsSyncCaughtUp(t *testing.T) {
 	config := &utils.Config{
 		Sync: utils.SyncConfig{
-			BlockBatchSize:     50,
-			OperationBatchSize: 100,
-			BlockInterval:      time.Second,
+			BlockBatchSize: 50,
+			BlockInterval:  time.Second,
 		},
 	}
 
@@ -47,9 +46,8 @@ func TestBlockSyncService_IsSyncCaughtUp(t *testing.T) {
 func TestBlockSyncService_BlockBuffer(t *testing.T) {
 	config := &utils.Config{
 		Sync: utils.SyncConfig{
-			BlockBatchSize:     50,
-			OperationBatchSize: 100,
-			BlockInterval:      time.Second,
+			BlockBatchSize: 50,
+			BlockInterval:  time.Second,
 		},
 	}
 

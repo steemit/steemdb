@@ -12,14 +12,13 @@ import (
 
 	"github.com/steemdb/sync/internal/database"
 	"github.com/steemdb/sync/internal/utils"
-	"github.com/steemdb/sync/pkg/steem"
 )
 
 // CronTabService handles scheduled tasks (single goroutine)
 type CronTabService struct {
 	config         *utils.Config
 	db             *database.MongoDB
-	steem          *steem.Client
+	steem          *utils.SteemClient
 	logger         utils.Logger
 	blockSync      *BlockSyncService
 	accountUpdater *AccountUpdater
@@ -34,7 +33,7 @@ type CronTabService struct {
 func NewCronTabService(
 	config *utils.Config,
 	db *database.MongoDB,
-	steemClient *steem.Client,
+	steemClient *utils.SteemClient,
 	logger utils.Logger,
 	blockSync *BlockSyncService,
 ) *CronTabService {
@@ -105,7 +104,7 @@ func (c *CronTabService) isSyncCaughtUp(ctx context.Context) bool {
 		return false
 	}
 
-	headBlock := props.LastIrreversibleBlockNum
+		headBlock := int64(props.LastIrreversibleBlockNum)
 	lastBlock, err := c.db.GetLastProcessedBlock(ctx)
 	if err != nil {
 		c.logger.Debug("Failed to get last processed block", utils.Error(err))
@@ -365,7 +364,7 @@ func (c *CronTabService) updateFundHistory(ctx context.Context) error {
 		ContentConstant:     utils.ParseFloat64Value(fund.ContentConstant),
 		PercentCuration:     fund.PercentCurationRewards,
 		PercentContent:      fund.PercentContentRewards,
-		LastUpdate:          steem.ToTime(fund.LastUpdate),
+		LastUpdate:          utils.ToTime(fund.LastUpdate),
 		AuthorRewardCurve:   fund.AuthorRewardCurve,
 		CurationRewardCurve: fund.CurationRewardCurve,
 	}
@@ -448,7 +447,7 @@ func (c *CronTabService) updateWitnesses(ctx context.Context) error {
 }
 
 // processWitnessData processes raw witness data from blockchain
-func (c *CronTabService) processWitnessData(witness *steem.Witness, scanTime time.Time) *database.Witness {
+func (c *CronTabService) processWitnessData(witness *utils.Witness, scanTime time.Time) *database.Witness {
 	// Parse numeric values
 	votes := utils.ParseFloat64Value(witness.Votes)
 	virtualLastUpdate := utils.ParseFloat64Value(witness.VirtualLastUpdate)
@@ -471,7 +470,7 @@ func (c *CronTabService) processWitnessData(witness *steem.Witness, scanTime tim
 	return &database.Witness{
 		ID:                    witness.Owner,
 		Owner:                 witness.Owner,
-		CreatedTime:           steem.ToTime(witness.CreatedTime),
+		CreatedTime:           utils.ToTime(witness.CreatedTime),
 		URL:                   witness.URL,
 		Votes:                 votes,
 		VirtualLastUpdate:     virtualLastUpdate,
@@ -483,11 +482,11 @@ func (c *CronTabService) processWitnessData(witness *steem.Witness, scanTime tim
 		SigningKey:            witness.SigningKey,
 		Props:                 propsMap,
 		SBDExchangeRate:       exchangeRateMap,
-		LastSBDExchangeUpdate: steem.ToTime(witness.LastSBDExchangeUpdate),
+		LastSBDExchangeUpdate: utils.ToTime(witness.LastSBDExchangeUpdate),
 		LastWork:              witness.LastWork,
 		RunningVersion:        witness.RunningVersion,
 		HardforkVersionVote:   witness.HardforkVersionVote,
-		HardforkTimeVote:      steem.ToTime(witness.HardforkTimeVote),
+		HardforkTimeVote:      utils.ToTime(witness.HardforkTimeVote),
 	}
 }
 

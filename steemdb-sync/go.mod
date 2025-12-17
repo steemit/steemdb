@@ -6,7 +6,7 @@ require (
 	github.com/prometheus/client_golang v1.17.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.17.0
-	github.com/steemit/steemgosdk v0.0.8
+	github.com/steemit/steemgosdk v0.0.9
 	github.com/steemit/steemutil v0.0.12
 	go.mongodb.org/mongo-driver v1.12.1
 	go.uber.org/zap v1.26.0
