@@ -10,7 +10,7 @@ steem:
   retry_attempts: 3
 
 mongodb:
-  uri: "mongodb://mongo:27017/steemdb?replicaSet=rs0"
+  uri: "mongodb://mongo:27017/steemdb"
   database: "steemdb"
   pool_size: 100
   timeout: 30s

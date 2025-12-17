@@ -7,7 +7,7 @@ services:
     # ports:
     #   - "9091:9091"  # Metrics port
     environment:
-      - DATABASE_MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0
+      - DATABASE_MONGODB_URI=mongodb://mongo:27017/
       - DATABASE_REDIS_URI=redis://redis:6379
       - STEEM_NODES=https://api.steemit.com,https://api.steemitdev.com
       - LOG_LEVEL=info
@@ -40,7 +40,7 @@ services:
     #   - "9090:9090"  # Metrics port (if exposed)
     environment:
       - SERVER_MODE=production
-      - DATABASE_MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0
+      - DATABASE_MONGODB_URI=mongodb://mongo:27017/
       - DATABASE_REDIS_URI=redis://redis:6379
     volumes:
       # Mount configuration directory from host to container
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
     networks:
       - steemdb-network
-    command: mongod --bind_ip_all --replSet rs0
+    command: mongod --bind_ip_all
     healthcheck:
       test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
       interval: 30s
