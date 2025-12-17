@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -347,4 +347,3 @@ func (pt *PerformanceTest) PrintResults(results []TestResult) {
 		utils.Int("warnings", warnings),
 	)
 }
-

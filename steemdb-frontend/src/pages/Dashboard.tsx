@@ -5,6 +5,7 @@ import { Badge } from '../components/ui/Badge';
 import { useBlockchainStore, useWebSocketStore } from '../store';
 import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
 import { wsClient } from '../lib/websocket';
+import { getDashboard } from '../lib/api';
 
 interface StatCardProps {
   title: string;
@@ -79,13 +80,30 @@ function RecentBlock({ block }: RecentBlockProps) {
 }
 
 export function Dashboard() {
-  const { props, stats, latestBlocks } = useBlockchainStore();
+  const { props, stats, latestBlocks, setProps, setStats, setLatestBlocks } = useBlockchainStore();
   const { state: wsState } = useWebSocketStore();
 
+  // Fetch dashboard data from REST API as fallback
+  const fetchDashboardData = async () => {
+    try {
+      const response = await getDashboard();
+      if (response.success && response.data) {
+        setProps(response.data.props);
+        setStats(response.data.stats);
+        setLatestBlocks(response.data.latest_blocks);
+      }
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+    }
+  };
+
   useEffect(() => {
-    // Subscribe to real-time data
+    // Initial fetch from REST API
+    fetchDashboardData();
+
+    // Subscribe to real-time data via WebSocket
     const unsubscribeProps = wsClient.on('props', (message) => {
-      useBlockchainStore.getState().setProps(message.data);
+      setProps(message.data);
     });
 
     const unsubscribeBlocks = wsClient.on('blocks', (message) => {
@@ -93,13 +111,20 @@ export function Dashboard() {
     });
 
     const unsubscribeState = wsClient.on('state', (message) => {
-      useBlockchainStore.getState().setStats(message.data);
+      setStats(message.data);
     });
 
     // Subscribe to channels
     wsClient.subscribe('props');
     wsClient.subscribe('blocks');
     wsClient.subscribe('state');
+
+    // Fallback: If WebSocket is disconnected and no data, fetch from REST API every 10 seconds
+    const fallbackInterval = setInterval(() => {
+      if (wsState === 'disconnected' && (!props || !stats || latestBlocks.length === 0)) {
+        fetchDashboardData();
+      }
+    }, 10000);
 
     return () => {
       unsubscribeProps();
@@ -108,8 +133,9 @@ export function Dashboard() {
       wsClient.unsubscribe('props');
       wsClient.unsubscribe('blocks');
       wsClient.unsubscribe('state');
+      clearInterval(fallbackInterval);
     };
-  }, []);
+  }, [wsState]);
 
   const getConnectionStatus = () => {
     switch (wsState) {

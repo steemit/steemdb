@@ -9,8 +9,8 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // WitnessService handles witness monitoring and data collection
@@ -78,7 +78,7 @@ func (w *WitnessService) Start(ctx context.Context) error {
 
 	// Wait for context cancellation
 	<-ctx.Done()
-	
+
 	// Stop scheduler
 	w.scheduler.Stop()
 	return nil
@@ -174,25 +174,25 @@ func (w *WitnessService) processWitnessData(witness *utils.Witness, scanTime tim
 	}
 
 	return &database.Witness{
-		ID:                     witness.Owner,
-		Owner:                  witness.Owner,
-		CreatedTime:            utils.ToTime(witness.CreatedTime),
-		URL:                    witness.URL,
-		Votes:                  votes,
-		VirtualLastUpdate:      virtualLastUpdate,
-		VirtualPosition:        virtualPosition,
-		VirtualScheduledTime:   virtualScheduledTime,
-		TotalMissed:            witness.TotalMissed,
-		LastAslot:              witness.LastAslot,
-		LastConfirmedBlockNum:  witness.LastConfirmedBlockNum,
-		SigningKey:             witness.SigningKey,
-		Props:                  propsMap,
-		SBDExchangeRate:        exchangeRateMap,
-		LastSBDExchangeUpdate:  utils.ToTime(witness.LastSBDExchangeUpdate),
-		LastWork:               witness.LastWork,
-		RunningVersion:         witness.RunningVersion,
-		HardforkVersionVote:    witness.HardforkVersionVote,
-		HardforkTimeVote:       utils.ToTime(witness.HardforkTimeVote),
+		ID:                    witness.Owner,
+		Owner:                 witness.Owner,
+		CreatedTime:           utils.ToTime(witness.CreatedTime),
+		URL:                   witness.URL,
+		Votes:                 votes,
+		VirtualLastUpdate:     virtualLastUpdate,
+		VirtualPosition:       virtualPosition,
+		VirtualScheduledTime:  virtualScheduledTime,
+		TotalMissed:           witness.TotalMissed,
+		LastAslot:             witness.LastAslot,
+		LastConfirmedBlockNum: witness.LastConfirmedBlockNum,
+		SigningKey:            witness.SigningKey,
+		Props:                 propsMap,
+		SBDExchangeRate:       exchangeRateMap,
+		LastSBDExchangeUpdate: utils.ToTime(witness.LastSBDExchangeUpdate),
+		LastWork:              witness.LastWork,
+		RunningVersion:        witness.RunningVersion,
+		HardforkVersionVote:   witness.HardforkVersionVote,
+		HardforkTimeVote:      utils.ToTime(witness.HardforkTimeVote),
 	}
 }
 
@@ -232,7 +232,7 @@ func (w *WitnessService) checkWitnessMisses(ctx context.Context) error {
 			// Has the miss count increased?
 			if currentMissed > cachedMissed {
 				increase := currentMissed - cachedMissed
-				
+
 				// Record the miss event
 				missEvent := &database.WitnessMiss{
 					ID:       fmt.Sprintf("%s|%d", owner, time.Now().Unix()),
@@ -265,4 +265,3 @@ func (w *WitnessService) checkWitnessMisses(ctx context.Context) error {
 
 	return nil
 }
-

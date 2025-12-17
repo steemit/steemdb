@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/database"
 )
 
 // ComparisonResult represents the result of comparing two data structures
@@ -18,15 +18,15 @@ type ComparisonResult struct {
 
 // BlockComparison compares block data between new and legacy implementations
 type BlockComparison struct {
-	BlockNum           int64
-	TimestampMatch     bool
-	WitnessMatch       bool
-	PreviousMatch      bool
-	TransactionCount   int
-	LegacyTxCount      int
-	OperationCount     int
-	LegacyOpCount      int
-	Discrepancies      []ComparisonResult
+	BlockNum         int64
+	TimestampMatch   bool
+	WitnessMatch     bool
+	PreviousMatch    bool
+	TransactionCount int
+	LegacyTxCount    int
+	OperationCount   int
+	LegacyOpCount    int
+	Discrepancies    []ComparisonResult
 }
 
 // CompareBlocks compares block data from new and legacy databases
@@ -166,4 +166,3 @@ func FormatComparisonResult(result *ComparisonResult) string {
 	return fmt.Sprintf("Field: %s, New: %v, Legacy: %v, Match: %v",
 		result.Field, result.NewValue, result.LegacyValue, result.Match)
 }
-

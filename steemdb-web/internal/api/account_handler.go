@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/steemdb/web/internal/models"
-	"github.com/steemdb/web/internal/services"
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/internal/models"
+	"github.com/steemit/steemdb/web/internal/services"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // AccountHandler handles account-related HTTP requests

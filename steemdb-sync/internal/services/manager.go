@@ -8,8 +8,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // Manager manages all sync services

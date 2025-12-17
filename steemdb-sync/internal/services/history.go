@@ -10,8 +10,8 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // HistoryService handles account history data collection

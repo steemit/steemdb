@@ -1,4 +1,4 @@
-module github.com/steemdb/sync
+module github.com/steemit/steemdb/sync
 
 go 1.23.0
 

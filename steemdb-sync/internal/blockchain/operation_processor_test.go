@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // MockLogger for testing

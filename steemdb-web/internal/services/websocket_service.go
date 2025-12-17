@@ -9,36 +9,38 @@ import (
 	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
+
 	"github.com/gorilla/websocket"
-	"github.com/steemdb/web/internal/database"
-	"github.com/steemdb/web/internal/models"
-	"github.com/steemdb/web/pkg/steem"
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/internal/database"
+	"github.com/steemit/steemdb/web/internal/models"
+	"github.com/steemit/steemdb/web/pkg/steem"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // WebSocketService manages WebSocket connections and real-time data broadcasting
 type WebSocketService struct {
 	clients    map[*websocket.Conn]*Client
 	clientsMux sync.RWMutex
-	
-	channels   map[string]map[*websocket.Conn]bool // channel -> connections
+
+	channels    map[string]map[*websocket.Conn]bool // channel -> connections
 	channelsMux sync.RWMutex
-	
+
 	steemClient *steem.Client
 	db          *database.MongoDB
 	logger      utils.Logger
-	
+
 	upgrader websocket.Upgrader
-	
+
 	// Broadcasting channels
-	broadcast chan models.WebSocketMessage
-	register  chan *Client
+	broadcast  chan models.WebSocketMessage
+	register   chan *Client
 	unregister chan *Client
-	
+
 	// Data fetching
 	ctx    context.Context
 	cancel context.CancelFunc
-	
+
 	// State tracking
 	lastBlockNumber int64
 	lastPropsUpdate time.Time
@@ -46,9 +48,9 @@ type WebSocketService struct {
 
 // Client represents a WebSocket client connection
 type Client struct {
-	conn        *websocket.Conn
-	send        chan models.WebSocketMessage
-	service     *WebSocketService
+	conn          *websocket.Conn
+	send          chan models.WebSocketMessage
+	service       *WebSocketService
 	subscriptions map[string]bool // subscribed channels
 	userAccount   string          // for @username subscriptions
 }
@@ -56,13 +58,13 @@ type Client struct {
 // NewWebSocketService creates a new WebSocket service
 func NewWebSocketService(steemClient *steem.Client, db *database.MongoDB, logger utils.Logger) *WebSocketService {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &WebSocketService{
-		clients:    make(map[*websocket.Conn]*Client),
-		channels:   make(map[string]map[*websocket.Conn]bool),
+		clients:     make(map[*websocket.Conn]*Client),
+		channels:    make(map[string]map[*websocket.Conn]bool),
 		steemClient: steemClient,
-		db:         db,
-		logger:     logger,
+		db:          db,
+		logger:      logger,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// Allow all origins for now - should be configured in production
@@ -127,7 +129,7 @@ func (ws *WebSocketService) run() {
 			if _, ok := ws.clients[client.conn]; ok {
 				delete(ws.clients, client.conn)
 				close(client.send)
-				
+
 				// Remove from all channels
 				ws.channelsMux.Lock()
 				for channel := range client.subscriptions {
@@ -179,31 +181,31 @@ func (ws *WebSocketService) fetchAndBroadcastProps() {
 	}
 
 	propsData := models.PropsData{
-		HeadBlockNumber:          props.HeadBlockNumber,
-		HeadBlockID:              props.HeadBlockID,
-		Time:                     props.Time,
-		CurrentWitness:           props.CurrentWitness,
-		TotalPow:                 props.TotalPow,
-		NumPowWitnesses:          props.NumPowWitnesses,
-		VirtualSupply:            props.VirtualSupply,
-		CurrentSupply:            props.CurrentSupply,
-		ConfidentialSupply:       props.ConfidentialSupply,
-		CurrentSBDSupply:         props.CurrentSBDSupply,
-		ConfidentialSBDSupply:    props.ConfidentialSBDSupply,
-		TotalVestingFundSteem:    props.TotalVestingFundSteem,
-		TotalVestingShares:       props.TotalVestingShares,
-		TotalRewardFundSteem:     props.TotalRewardFundSteem,
-		TotalRewardShares2:       props.TotalRewardShares2,
+		HeadBlockNumber:              props.HeadBlockNumber,
+		HeadBlockID:                  props.HeadBlockID,
+		Time:                         props.Time,
+		CurrentWitness:               props.CurrentWitness,
+		TotalPow:                     props.TotalPow,
+		NumPowWitnesses:              props.NumPowWitnesses,
+		VirtualSupply:                props.VirtualSupply,
+		CurrentSupply:                props.CurrentSupply,
+		ConfidentialSupply:           props.ConfidentialSupply,
+		CurrentSBDSupply:             props.CurrentSBDSupply,
+		ConfidentialSBDSupply:        props.ConfidentialSBDSupply,
+		TotalVestingFundSteem:        props.TotalVestingFundSteem,
+		TotalVestingShares:           props.TotalVestingShares,
+		TotalRewardFundSteem:         props.TotalRewardFundSteem,
+		TotalRewardShares2:           props.TotalRewardShares2,
 		PendingRewardedVestingShares: props.PendingRewardedVestingShares,
 		PendingRewardedVestingSteem:  props.PendingRewardedVestingSteem,
-		SBDInterestRate:          props.SBDInterestRate,
-		SBDPrintRate:             props.SBDPrintRate,
-		MaximumBlockSize:         props.MaximumBlockSize,
-		CurrentAslot:             props.CurrentAslot,
-		RecentSlotsFilled:        props.RecentSlotsFilled,
-		ParticipationCount:       props.ParticipationCount,
-		LastIrreversibleBlockNum: props.LastIrreversibleBlockNum,
-		VotePowerReserveRate:     props.VotePowerReserveRate,
+		SBDInterestRate:              props.SBDInterestRate,
+		SBDPrintRate:                 props.SBDPrintRate,
+		MaximumBlockSize:             props.MaximumBlockSize,
+		CurrentAslot:                 props.CurrentAslot,
+		RecentSlotsFilled:            props.RecentSlotsFilled,
+		ParticipationCount:           props.ParticipationCount,
+		LastIrreversibleBlockNum:     props.LastIrreversibleBlockNum,
+		VotePowerReserveRate:         props.VotePowerReserveRate,
 	}
 
 	message := models.WebSocketMessage{
@@ -262,15 +264,41 @@ func (ws *WebSocketService) fetchAndBroadcastBlocks() {
 
 // fetchAndBroadcastState fetches and broadcasts global state
 func (ws *WebSocketService) fetchAndBroadcastState() {
-	// This would typically fetch from database aggregations
-	// For now, we'll create a simple state update
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get account count from database
+	accountCount := int64(0)
+	accountCollection := ws.db.Collection("account")
+	if count, err := accountCollection.CountDocuments(ctx, bson.M{}); err == nil {
+		accountCount = count
+	}
+
+	// Get comment count from database
+	commentCount := int64(0)
+	commentCollection := ws.db.Collection("comment")
+	if count, err := commentCollection.CountDocuments(ctx, bson.M{}); err == nil {
+		commentCount = count
+	}
+
+	// Get witness count - try database first, then upstream
+	witnessCount := int64(0)
+	witnessCollection := ws.db.Collection("witness")
+	if count, err := witnessCollection.CountDocuments(ctx, bson.M{}); err == nil && count > 0 {
+		witnessCount = count
+	} else {
+		// Fallback to upstream if database doesn't have witness data
+		if activeWitnesses, err := ws.steemClient.GetActiveWitnesses(); err == nil {
+			witnessCount = int64(len(activeWitnesses))
+		}
+	}
+
 	stateData := models.StateData{
 		LastBlock:  ws.lastBlockNumber,
 		LastUpdate: time.Now(),
-		// TODO: Add actual counts from database
-		Accounts:  0,
-		Comments:  0,
-		Witnesses: 0,
+		Accounts:   accountCount,
+		Comments:   commentCount,
+		Witnesses:  witnessCount,
 	}
 
 	message := models.WebSocketMessage{
@@ -316,7 +344,7 @@ func (ws *WebSocketService) processBlockOperations(block *steem.Block, blockNum 
 // extractAccountsFromOperation extracts account names from operations
 func (ws *WebSocketService) extractAccountsFromOperation(op steem.Operation) []string {
 	accounts := make([]string, 0)
-	
+
 	// Convert operation value to map for easier access
 	if opMap, ok := op.Value.(map[string]interface{}); ok {
 		// Common account fields
@@ -346,7 +374,7 @@ func (ws *WebSocketService) extractAccountsFromOperation(op steem.Operation) []s
 			}
 		}
 	}
-	
+
 	return accounts
 }
 

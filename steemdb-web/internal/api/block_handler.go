@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/steemdb/web/internal/models"
-	"github.com/steemdb/web/internal/services"
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/internal/models"
+	"github.com/steemit/steemdb/web/internal/services"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // BlockHandler handles block-related HTTP requests
@@ -125,7 +125,7 @@ func (h *BlockHandler) GetBlockStats(c *gin.Context) {
 // GetOperationStats handles GET /api/v1/operations/stats
 func (h *BlockHandler) GetOperationStats(c *gin.Context) {
 	timeRange := c.DefaultQuery("range", "24h")
-	
+
 	stats, err := h.blockService.GetOperationStats(c.Request.Context(), timeRange)
 	if err != nil {
 		h.logger.Error("Failed to get operation stats", utils.String("range", timeRange), utils.Error(err))

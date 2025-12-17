@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 func TestBlockSyncService_IsSyncCaughtUp(t *testing.T) {

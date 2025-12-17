@@ -3,7 +3,7 @@ package services
 import (
 	"go.uber.org/zap"
 
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // TestLogger implements utils.Logger for testing

@@ -12,11 +12,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/steemdb/web/internal/api"
-	"github.com/steemdb/web/internal/database"
-	"github.com/steemdb/web/internal/services"
-	"github.com/steemdb/web/pkg/steem"
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/internal/api"
+	"github.com/steemit/steemdb/web/internal/database"
+	"github.com/steemit/steemdb/web/internal/services"
+	"github.com/steemit/steemdb/web/pkg/steem"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 func main() {
@@ -145,7 +145,7 @@ func main() {
 	}
 
 	// Setup API routes
-	api.SetupRoutes(router, mongodb, redis, logger)
+	api.SetupRoutes(router, mongodb, redis, steemClient, logger)
 
 	// Create HTTP server
 	server := &http.Server{

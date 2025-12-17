@@ -1,4 +1,4 @@
-module github.com/steemdb/web
+module github.com/steemit/steemdb/web
 
 go 1.23.0
 

@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/services"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/services"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 func main() {

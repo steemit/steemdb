@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -30,14 +30,14 @@ type ValidationResult struct {
 
 // ValidationReport represents a summary of validation results
 type ValidationReport struct {
-	TotalBlocks      int
-	ValidatedBlocks  int
-	ValidBlocks      int
-	InvalidBlocks    int
-	Discrepancies    []ValidationResult
-	StartTime        time.Time
-	EndTime          time.Time
-	Duration         time.Duration
+	TotalBlocks     int
+	ValidatedBlocks int
+	ValidBlocks     int
+	InvalidBlocks   int
+	Discrepancies   []ValidationResult
+	StartTime       time.Time
+	EndTime         time.Time
+	Duration        time.Duration
 }
 
 // NewValidator creates a new validator instance
@@ -267,4 +267,3 @@ Duration: %v
 
 	return reportStr
 }
-

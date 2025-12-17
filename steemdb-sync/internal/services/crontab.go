@@ -10,8 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // CronTabService handles scheduled tasks (single goroutine)
@@ -104,7 +104,7 @@ func (c *CronTabService) isSyncCaughtUp(ctx context.Context) bool {
 		return false
 	}
 
-		headBlock := int64(props.LastIrreversibleBlockNum)
+	headBlock := int64(props.LastIrreversibleBlockNum)
 	lastBlock, err := c.db.GetLastProcessedBlock(ctx)
 	if err != nil {
 		c.logger.Debug("Failed to get last processed block", utils.Error(err))

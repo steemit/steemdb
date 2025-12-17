@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // TestAccountUpdater_ConvertSteemAccountToDBAccount tests the conversion function

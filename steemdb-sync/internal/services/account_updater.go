@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steemdb/sync/internal/database"
-	"github.com/steemdb/sync/internal/utils"
+	"github.com/steemit/steemdb/sync/internal/database"
+	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
 // AccountUpdater handles account updates from condenser_api.get_accounts

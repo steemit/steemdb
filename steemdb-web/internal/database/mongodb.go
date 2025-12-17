@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // MongoDB represents MongoDB connection and operations
@@ -166,7 +166,7 @@ func (m *MongoDB) CreateIndexes(ctx context.Context) error {
 
 	for collectionName, indexModels := range indexes {
 		collection := m.Collection(collectionName)
-		
+
 		if len(indexModels) > 0 {
 			_, err := collection.Indexes().CreateMany(ctx, indexModels)
 			if err != nil {

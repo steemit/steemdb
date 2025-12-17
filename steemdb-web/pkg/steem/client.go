@@ -10,7 +10,7 @@ import (
 	sdkapi "github.com/steemit/steemgosdk/api"
 	protocolapi "github.com/steemit/steemutil/protocol/api"
 
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 type Client struct {
@@ -212,6 +212,80 @@ func (c *Client) GetWitnessesByVote(from string, limit int) ([]Witness, error) {
 	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
+// GetWitnessSchedule gets the witness schedule
+func (c *Client) GetWitnessSchedule() (map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		api := c.getCurrentAPI()
+		var schedule map[string]interface{}
+		err := api.CallWithResult("condenser_api", "get_witness_schedule", []interface{}{}, &schedule)
+		if err == nil {
+			return schedule, nil
+		}
+
+		lastErr = err
+		c.logger.Warn("RPC call failed, retrying",
+			utils.String("method", "get_witness_schedule"),
+			utils.Int("attempt", attempt+1),
+			utils.Error(err),
+		)
+
+		c.switchNode()
+
+		if attempt < maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// GetActiveWitnesses gets the active witnesses
+func (c *Client) GetActiveWitnesses() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		api := c.getCurrentAPI()
+		var witnesses []string
+		err := api.CallWithResult("condenser_api", "get_active_witnesses", []interface{}{}, &witnesses)
+		if err == nil {
+			return witnesses, nil
+		}
+
+		lastErr = err
+		c.logger.Warn("RPC call failed, retrying",
+			utils.String("method", "get_active_witnesses"),
+			utils.Int("attempt", attempt+1),
+			utils.Error(err),
+		)
+
+		c.switchNode()
+
+		if attempt < maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
 // Helper functions to convert steemgosdk types to our types
 
 func convertDynamicGlobalProperties(dgp *protocolapi.DynamicGlobalProperties) *DynamicGlobalProperties {
@@ -220,31 +294,31 @@ func convertDynamicGlobalProperties(dgp *protocolapi.DynamicGlobalProperties) *D
 	}
 
 	return &DynamicGlobalProperties{
-		HeadBlockNumber:            int64(dgp.HeadBlockNumber),
-		HeadBlockID:                dgp.HeadBlockId,
-		Time:                       dgp.Time, // Keep as string in web version
-		CurrentWitness:             dgp.CurrentWitness,
-		TotalPow:                   int64(dgp.TotalPow),
-		NumPowWitnesses:            int(dgp.NumPowWitnesses),
-		VirtualSupply:              dgp.VirtualSupply,
-		CurrentSupply:              dgp.CurrentSupply,
-		ConfidentialSupply:         dgp.ConfidentialSupply,
-		CurrentSBDSupply:           dgp.CurrentSbdSupply,
-		ConfidentialSBDSupply:      dgp.ConfidentialSbdSupply,
-		TotalVestingFundSteem:      dgp.TotalVestingFundSteem,
-		TotalVestingShares:         dgp.TotalVestingShares,
-		TotalRewardFundSteem:       dgp.TotalRewardFundSteem,
-		TotalRewardShares2:         dgp.TotalRewardShares2,
+		HeadBlockNumber:              int64(dgp.HeadBlockNumber),
+		HeadBlockID:                  dgp.HeadBlockId,
+		Time:                         dgp.Time, // Keep as string in web version
+		CurrentWitness:               dgp.CurrentWitness,
+		TotalPow:                     int64(dgp.TotalPow),
+		NumPowWitnesses:              int(dgp.NumPowWitnesses),
+		VirtualSupply:                dgp.VirtualSupply,
+		CurrentSupply:                dgp.CurrentSupply,
+		ConfidentialSupply:           dgp.ConfidentialSupply,
+		CurrentSBDSupply:             dgp.CurrentSbdSupply,
+		ConfidentialSBDSupply:        dgp.ConfidentialSbdSupply,
+		TotalVestingFundSteem:        dgp.TotalVestingFundSteem,
+		TotalVestingShares:           dgp.TotalVestingShares,
+		TotalRewardFundSteem:         dgp.TotalRewardFundSteem,
+		TotalRewardShares2:           dgp.TotalRewardShares2,
 		PendingRewardedVestingShares: dgp.PendingRewardedVestingShares,
 		PendingRewardedVestingSteem:  dgp.PendingRewardedVestingSteem,
-		SBDInterestRate:            int(dgp.SbdInterestRate),
-		SBDPrintRate:               int(dgp.SbdPrintRate),
-		MaximumBlockSize:           int(dgp.MaximumBlockSize),
-		CurrentAslot:               int64(dgp.CurrentAslot), // int64 in web version
-		RecentSlotsFilled:          dgp.RecentSlotsFilled,
-		ParticipationCount:         int(dgp.ParticipationCount),
-		LastIrreversibleBlockNum:   int64(dgp.LastIrreversibleBlockNum),
-		VotePowerReserveRate:       int(dgp.VotePowerReserveRate),
+		SBDInterestRate:              int(dgp.SbdInterestRate),
+		SBDPrintRate:                 int(dgp.SbdPrintRate),
+		MaximumBlockSize:             int(dgp.MaximumBlockSize),
+		CurrentAslot:                 int64(dgp.CurrentAslot), // int64 in web version
+		RecentSlotsFilled:            dgp.RecentSlotsFilled,
+		ParticipationCount:           int(dgp.ParticipationCount),
+		LastIrreversibleBlockNum:     int64(dgp.LastIrreversibleBlockNum),
+		VotePowerReserveRate:         int(dgp.VotePowerReserveRate),
 	}
 }
 
@@ -266,17 +340,17 @@ func convertBlock(block *protocolapi.Block, blockNum int64) *Block {
 	}
 
 	return &Block{
-		Number:          blockNum,
-		Previous:        block.Previous,
-		Timestamp:       timestamp,
-		Witness:         block.Witness,
-		TransactionRoot: block.TransactionMerkleRoot,
-		Extensions:      block.Extensions,
+		Number:           blockNum,
+		Previous:         block.Previous,
+		Timestamp:        timestamp,
+		Witness:          block.Witness,
+		TransactionRoot:  block.TransactionMerkleRoot,
+		Extensions:       block.Extensions,
 		WitnessSignature: block.WitnessSignature,
-		Transactions:    transactions,
-		BlockID:         block.BlockId,
-		SigningKey:      block.SigningKey,
-		TransactionIDs:  block.TransactionIds,
+		Transactions:     transactions,
+		BlockID:          block.BlockId,
+		SigningKey:       block.SigningKey,
+		TransactionIDs:   block.TransactionIds,
 	}
 }
 

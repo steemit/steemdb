@@ -118,6 +118,16 @@ class ApiClient {
     return this.request<BlockchainProps>('/stats/props');
   }
 
+  // Dashboard endpoint
+  async getDashboard(): Promise<ApiResponse<{
+    props: BlockchainProps;
+    latest_blocks: Block[];
+    stats: GlobalStats;
+    is_from_upstream: boolean;
+  }>> {
+    return this.request(`/v1/dashboard`);
+  }
+
   // Search endpoint
   async search(query: string, type?: 'account' | 'block' | 'transaction'): Promise<ApiResponse<any[]>> {
     const searchParams = new URLSearchParams({
@@ -167,6 +177,7 @@ export const {
   getTopWitnesses,
   getGlobalStats,
   getBlockchainProps,
+  getDashboard,
   search,
   getAccountGrowthData,
   getBlockProductionData,

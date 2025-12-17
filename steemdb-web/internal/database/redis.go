@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // Redis represents Redis connection and operations

@@ -9,9 +9,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/steemdb/web/internal/database"
-	"github.com/steemdb/web/internal/models"
-	"github.com/steemdb/web/pkg/utils"
+	"github.com/steemit/steemdb/web/internal/database"
+	"github.com/steemit/steemdb/web/internal/models"
+	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // AccountService handles account-related operations
