@@ -89,24 +89,29 @@ SteemDB is a comprehensive blockchain data platform that provides:
 
 ### steemdb-sync
 
-High-performance blockchain synchronization service that replaces the original Python services.
+High-performance blockchain synchronization service that replaces the original Python services (sync, history, witnesses).
 
 **Features:**
 - Real-time block synchronization (200-500 blocks/second)
 - Account history collection (6-hour intervals)
 - Witness monitoring (1-minute intervals)
-- 15+ operation type handlers
+- 16+ operation type handlers (including account_create, comment, vote, transfer, etc.)
+- Comprehensive error handling and automatic recovery
 - Prometheus metrics endpoint
+- Environment variable support for log level configuration
 
 **Documentation**: [steemdb-sync/README.md](steemdb-sync/README.md)
 
 ### steemdb-web
 
-Modern web service providing RESTful API and WebSocket support.
+Modern web service providing RESTful API and WebSocket support, with full legacy API compatibility.
 
 **Features:**
-- RESTful API for accounts, blocks, witnesses, and statistics
-- WebSocket real-time data streaming
+- RESTful API for accounts, blocks, witnesses, posts, and statistics
+- Posts API: List, detail, replies, votes, and reblogs
+- Labs API: PowerUp, PowerDown, Rshares, Curation/Author leaderboards, Flags, Clients, Benefactors, Pending posts
+- Legacy API compatibility: 302 redirects for backward compatibility
+- WebSocket real-time data streaming (aligned with legacy live.py functionality)
 - Nginx integration for static file serving
 - JWT authentication support
 - Health checks and metrics
@@ -115,7 +120,7 @@ Modern web service providing RESTful API and WebSocket support.
 
 ### steemdb-frontend
 
-Modern React-based frontend application.
+Modern React-based frontend application with full feature parity to legacy system.
 
 **Features:**
 - React 19 with TypeScript
@@ -124,6 +129,11 @@ Modern React-based frontend application.
 - TanStack Query for data fetching
 - React Router DOM for navigation
 - D3.js and Recharts for data visualization
+- **Posts Pages**: List, detail, replies, votes, and reblogs
+- **Labs Pages**: PowerUp, PowerDown, Rshares, Curation, Author, Flags, Clients, Benefactors, Pending
+- **Dashboard**: Network performance, reward pool, and global properties
+- **Accounts**: Account details, history, and statistics
+- **Witnesses**: Witness information and voting
 
 **Documentation**: [steemdb-frontend/README.md](steemdb-frontend/README.md)
 
@@ -502,13 +512,24 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🗺 Roadmap
 
-- [ ] Complete API implementation
+### Completed ✅
+- [x] Complete API implementation (Accounts, Blocks, Witnesses, Posts, Labs)
+- [x] Legacy API compatibility (302 redirects)
+- [x] WebSocket real-time streaming (aligned with legacy live.py)
+- [x] Frontend pages (Posts, Labs, Dashboard, Accounts, Witnesses)
+- [x] Comprehensive monitoring (Prometheus + Grafana)
+- [x] Docker and Docker Compose deployment
+- [x] Environment variable configuration support
+
+### In Progress 🚧
 - [ ] Advanced caching strategies
+- [ ] Performance optimizations
+
+### Planned 📋
 - [ ] Horizontal scaling support
 - [ ] GraphQL API
 - [ ] Mobile API optimizations
 - [ ] Enhanced monitoring and alerting
-- [ ] Performance optimizations
 
 ## 📚 Additional Resources
 
@@ -550,4 +571,8 @@ steemdb/
 ---
 
 **Built with ❤️ for the Steem community**
+
+---
+
+**Note**: This project refactoring was driven by [@ety001](https://github.com/ety001).
 
