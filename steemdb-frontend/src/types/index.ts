@@ -126,6 +126,188 @@ export interface RewardPool {
   [key: string]: any; // Dynamic fields
 }
 
+// Post/Comment types
+export interface Post {
+  id: string; // author/permlink
+  author: string;
+  permlink: string;
+  title: string;
+  body: string;
+  json_metadata?: Record<string, any>;
+  parent_author: string;
+  parent_permlink: string;
+  category: string;
+  depth: number;
+  children: number;
+  created: string;
+  last_update: string;
+  cashout_time: string;
+  pending_payout_value: number;
+  total_payout_value: number;
+  net_votes: number;
+  block_num: number;
+  scanned: string;
+  author_lower?: string;
+  category_lower?: string;
+  date_idx?: string;
+  url?: string;
+  author_reputation?: number;
+  total_pending_payout_value?: number;
+  active_votes?: Vote[];
+  combined_payout?: number; // Calculated field
+}
+
+export interface Vote {
+  voter: string;
+  weight: number;
+  rshares: number;
+  percent: number;
+  time: string;
+}
+
+export interface Reblog {
+  id: string;
+  account: string;
+  author: string;
+  permlink: string;
+  timestamp: string;
+  block_num: number;
+}
+
+// Labs types
+export interface PowerUp {
+  user: string;
+  count: number;
+  total: number;
+  instances?: string[];
+  account?: Account;
+}
+
+export interface PowerDown {
+  upcoming_total: number;
+  upcoming: PowerDownDay[];
+  previous_total: number;
+  previous: PowerDownDay[];
+  powerdowns: PowerDownUser[];
+  props: PowerDownProps;
+}
+
+export interface PowerDownDay {
+  doy: number;
+  year: number;
+  month: number;
+  day: number;
+  dow: number;
+  count: number;
+  withdrawn: number;
+  deposited?: number;
+}
+
+export interface PowerDownUser {
+  user: string;
+  count: number;
+  withdrawn: number;
+  deposited: number;
+  deposited_to?: string[];
+  account?: Account;
+}
+
+export interface PowerDownProps {
+  current: number;
+  vesting: number;
+  liquid: number;
+}
+
+export interface RsharesAllocation {
+  voter: string;
+  votes: number;
+  rshares: number;
+  account?: Account;
+}
+
+export interface CurationLeaderboard {
+  curator: string;
+  count: number;
+  total: number;
+  authors?: string[];
+  permlinks?: string[];
+  account?: Account;
+}
+
+export interface AuthorLeaderboard {
+  author: string;
+  count: number;
+  posts: number;
+  replies: number;
+  post_vest: number;
+  post_sbd: number;
+  post_steem: number;
+  reply_vest: number;
+  reply_sbd: number;
+  reply_steem: number;
+  sbd: number;
+  steem: number;
+  vest: number;
+  permlinks?: string[];
+  account?: Account;
+}
+
+export interface Flags {
+  author: string;
+  count: number;
+  flaggers?: string[];
+  posts?: string[];
+  voters?: Record<string, number>;
+}
+
+export interface Clients {
+  dates: ClientDate[];
+  posts: Record<string, number>;
+  rewards: Record<string, number>;
+}
+
+export interface ClientDate {
+  date: string;
+  clients: ClientEntry[];
+}
+
+export interface ClientEntry {
+  client: string;
+  count: number;
+  reward: number;
+}
+
+export interface Benefactors {
+  dates: BenefactorDate[];
+}
+
+export interface BenefactorDate {
+  doy: number;
+  year: number;
+  month: number;
+  day: number;
+  dow: number;
+  benefactors: BenefactorEntry[];
+  reward: number;
+  total: number;
+}
+
+export interface BenefactorEntry {
+  benefactor: string;
+  count: number;
+  reward: number;
+}
+
+export interface PendingPost {
+  id: string;
+  author: string;
+  permlink: string;
+  title: string;
+  created: string;
+  pending_payout_value: number;
+  total_pending_payout_value: number;
+}
+
 export interface BlockchainProps {
   head_block_number: number;
   head_block_id: string;

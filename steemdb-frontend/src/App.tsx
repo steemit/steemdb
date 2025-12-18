@@ -5,6 +5,18 @@ import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { BlocksPage, BlockDetailPage } from './pages/Blocks';
 import { AccountsPage, AccountDetailPage } from './pages/Accounts';
+import { PostsPage } from './pages/Posts';
+import { PostDetailPage } from './pages/PostDetail';
+import { LabsPage } from './pages/Labs';
+import { PowerUpPage } from './pages/labs/PowerUp';
+import { PowerDownPage } from './pages/labs/PowerDown';
+import { RsharesPage } from './pages/labs/Rshares';
+import { CurationPage } from './pages/labs/Curation';
+import { AuthorPage } from './pages/labs/Author';
+import { FlagsPage } from './pages/labs/Flags';
+import { ClientsPage } from './pages/labs/Clients';
+import { BenefactorsPage } from './pages/labs/Benefactors';
+import { PendingPage } from './pages/labs/Pending';
 import { WitnessesPage, WitnessDetailPage } from './pages/Witnesses';
 import { StatisticsPage } from './pages/Statistics';
 import { LiveFeedPage } from './pages/LiveFeed';
@@ -82,6 +94,18 @@ function App() {
             <Route path="blocks/:id" element={<BlockDetailPage />} />
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="accounts/:id" element={<AccountDetailPage />} />
+            <Route path="posts" element={<PostsPage />} />
+            <Route path="posts/:author/:permlink" element={<PostDetailPage />} />
+            <Route path="labs" element={<LabsPage />} />
+            <Route path="labs/powerup" element={<PowerUpPage />} />
+            <Route path="labs/powerdown" element={<PowerDownPage />} />
+            <Route path="labs/rshares" element={<RsharesPage />} />
+            <Route path="labs/curation" element={<CurationPage />} />
+            <Route path="labs/author" element={<AuthorPage />} />
+            <Route path="labs/flags" element={<FlagsPage />} />
+            <Route path="labs/clients" element={<ClientsPage />} />
+            <Route path="labs/benefactors" element={<BenefactorsPage />} />
+            <Route path="labs/pending" element={<PendingPage />} />
             <Route path="witnesses" element={<WitnessesPage />} />
             <Route path="witnesses/:id" element={<WitnessDetailPage />} />
             <Route path="stats" element={<StatisticsPage />} />

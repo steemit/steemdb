@@ -48,28 +48,28 @@ export function Header() {
         {/* Navigation */}
         <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
           <Link
-            to="/"
-            className="transition-colors hover:text-foreground/80 text-foreground/60"
-          >
-            Dashboard
-          </Link>
-          <Link
-            to="/blocks"
-            className="transition-colors hover:text-foreground/80 text-foreground/60"
-          >
-            Blocks
-          </Link>
-          <Link
             to="/accounts"
             className="transition-colors hover:text-foreground/80 text-foreground/60"
           >
-            Accounts
+            accounts
+          </Link>
+          <Link
+            to="/posts"
+            className="transition-colors hover:text-foreground/80 text-foreground/60"
+          >
+            posts
           </Link>
           <Link
             to="/witnesses"
             className="transition-colors hover:text-foreground/80 text-foreground/60"
           >
-            Witnesses
+            witnesses
+          </Link>
+          <Link
+            to="/labs"
+            className="transition-colors hover:text-foreground/80 text-foreground/60"
+          >
+            labs
           </Link>
         </nav>
 

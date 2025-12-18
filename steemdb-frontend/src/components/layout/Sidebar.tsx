@@ -8,7 +8,9 @@ import {
   Activity,
   Star,
   Settings,
-  X
+  X,
+  FileText,
+  FlaskConical
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -17,9 +19,11 @@ import { cn } from '../../lib/utils';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Home },
-  { name: 'Blocks', href: '/blocks', icon: Blocks },
   { name: 'Accounts', href: '/accounts', icon: Users },
+  { name: 'Posts', href: '/posts', icon: FileText },
   { name: 'Witnesses', href: '/witnesses', icon: Shield },
+  { name: 'Labs', href: '/labs', icon: FlaskConical },
+  { name: 'Blocks', href: '/blocks', icon: Blocks },
   { name: 'Statistics', href: '/stats', icon: BarChart3 },
   { name: 'Live Feed', href: '/live', icon: Activity },
 ];
