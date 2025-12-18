@@ -3,6 +3,7 @@ steemdb-sync
 steemdb-sync.exe
 sync
 validate
+main
 
 # Test binary, built with `go test -c`
 *.test

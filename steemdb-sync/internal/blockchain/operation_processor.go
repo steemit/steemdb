@@ -119,6 +119,7 @@ func (p *OperationProcessor) registerHandlers() {
 	p.handlers["custom_json"] = p.handleCustomJson
 	p.handlers["comment_options"] = p.handleCommentOptions
 	p.handlers["comment_benefactor_reward"] = p.handleBenefactorReward
+	p.handlers["account_create"] = p.handleAccountCreate
 }
 
 // Process processes a blockchain operation
@@ -152,7 +153,7 @@ func (p *OperationProcessor) Process(op *Operation) error {
 		p.logger.Debug("Unknown operation type", utils.String("type", opType))
 		// Still add to account_operations buffer even if no handler
 		if opID != nil {
-			if err := p.addAccountOperationsToBuffer(ctx, op, opType, *opID); err != nil {
+			if err := p.addAccountOperationsToBuffer(op, opType, *opID); err != nil {
 				p.logger.Error("Failed to add account operations to buffer",
 					utils.String("type", opType),
 					utils.Int64("block", op.Block.Number),
@@ -169,7 +170,7 @@ func (p *OperationProcessor) Process(op *Operation) error {
 
 	// Add to account_operations buffer (will be flushed in batch)
 	if opID != nil {
-		if err := p.addAccountOperationsToBuffer(ctx, op, opType, *opID); err != nil {
+		if err := p.addAccountOperationsToBuffer(op, opType, *opID); err != nil {
 			p.logger.Error("Failed to add account operations to buffer",
 				utils.String("type", opType),
 				utils.Int64("block", op.Block.Number),
@@ -279,7 +280,7 @@ func (p *OperationProcessor) saveOperation(ctx context.Context, op *Operation, o
 }
 
 // addAccountOperationsToBuffer adds account operations to buffer for batch writing
-func (p *OperationProcessor) addAccountOperationsToBuffer(ctx context.Context, op *Operation, opType string, opID primitive.ObjectID) error {
+func (p *OperationProcessor) addAccountOperationsToBuffer(op *Operation, opType string, opID primitive.ObjectID) error {
 	opData, err := getOperationData(op)
 	if err != nil {
 		return fmt.Errorf("invalid operation data: %w", err)
@@ -395,6 +396,14 @@ func (p *OperationProcessor) extractAccounts(opType string, opData map[string]an
 		if owner := getString(opData, "owner"); owner != "" {
 			accounts = append(accounts, owner)
 		}
+	case "account_create":
+		// account_create operation contains new_account_name and creator
+		if newAccount := getString(opData, "new_account_name"); newAccount != "" {
+			accounts = append(accounts, newAccount)
+		}
+		if creator := getString(opData, "creator"); creator != "" {
+			accounts = append(accounts, creator)
+		}
 	}
 
 	// Remove duplicates
@@ -438,6 +447,9 @@ func (p *OperationProcessor) createOperationSummary(opType string, opData map[st
 	case "curation_reward":
 		summary["curator"] = getString(opData, "curator")
 		summary["reward"] = getString(opData, "reward")
+	case "account_create":
+		summary["new_account_name"] = getString(opData, "new_account_name")
+		summary["creator"] = getString(opData, "creator")
 	}
 
 	return summary
@@ -1075,6 +1087,36 @@ func (p *OperationProcessor) handleBenefactorReward(ctx context.Context, op *Ope
 	// Mark benefactor account needs update
 	if benefactor := getString(opData, "benefactor"); benefactor != "" {
 		p.db.MarkAccountNeedsUpdate(ctx, benefactor)
+	}
+
+	return nil
+}
+
+// handleAccountCreate processes account_create operations
+func (p *OperationProcessor) handleAccountCreate(ctx context.Context, op *Operation) error {
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid account_create operation data: %w", err)
+	}
+
+	// Mark new account needs update (it will be created/fetched by account updater)
+	if newAccount := getString(opData, "new_account_name"); newAccount != "" {
+		if err := p.db.MarkAccountNeedsUpdate(ctx, newAccount); err != nil {
+			p.logger.Debug("Failed to mark new account needs update",
+				utils.String("account", newAccount),
+				utils.Error(err),
+			)
+		}
+	}
+
+	// Mark creator account needs update (creator paid for account creation)
+	if creator := getString(opData, "creator"); creator != "" {
+		if err := p.db.MarkAccountNeedsUpdate(ctx, creator); err != nil {
+			p.logger.Debug("Failed to mark creator account needs update",
+				utils.String("account", creator),
+				utils.Error(err),
+			)
+		}
 	}
 
 	return nil

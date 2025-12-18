@@ -313,13 +313,25 @@ func (m *MongoDB) UpsertAccount(ctx context.Context, account *Account) error {
 }
 
 // MarkAccountNeedsUpdate marks an account as needing update
+// Reference: legacy/docker/sync/sync.py queue_update_account()
+// Legacy only sets _dirty: True, but we need to set name field to avoid unique index violation
+// Note: Steem account names are always lowercase, so name_lower == name, but we keep name_lower for search index
 func (m *MongoDB) MarkAccountNeedsUpdate(ctx context.Context, accountName string) error {
 	collection := m.Collection("accounts")
+
+	// Steem account names are always lowercase per blockchain rules
+	// But we still normalize to ensure consistency and set name_lower for search index
+	nameLower := strings.ToLower(accountName)
 
 	filter := map[string]interface{}{"_id": accountName}
 	update := map[string]interface{}{
 		"$set": map[string]interface{}{
 			"needs_update": true,
+			"name":         accountName, // Set name field to avoid unique index violation (name_1 unique index)
+			"name_lower":   nameLower,   // For search index consistency (name_lower index)
+		},
+		"$setOnInsert": map[string]interface{}{
+			"_id": accountName, // Ensure _id is set on insert
 		},
 	}
 	opts := options.Update().SetUpsert(true)

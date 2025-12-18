@@ -202,9 +202,75 @@ log:
   level: "info"
   format: "json"
   file: "/var/log/steemdb-sync.log"
+  max_size: 100
+  max_backups: 5
+  max_age: 30
+```
+
+**Using Environment Variable to Override Log Level:**
+You can override the log level from the configuration file using the `LOG_LEVEL` environment variable:
+
+```bash
+# Set log level to debug via environment variable
+export LOG_LEVEL=debug
+go run cmd/sync/main.go configs/test-config.yaml
+
+# Or inline
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml
+```
+
+**Capturing Debug Logs to File:**
+To capture all debug-level logs to a file while running the service:
+
+```bash
+# Method 1: Using grep to filter debug logs
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | grep -i "debug" > debug.log
+
+# Method 2: Capture all output and filter later
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | tee all.log | grep -i "debug" > debug.log
+
+# Method 3: For JSON format, use jq to filter
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | jq 'select(.level == "debug")' > debug.json
+
+# Method 4: Capture both stdout and stderr separately
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml > stdout.log 2> stderr.log
+grep -i "debug" stdout.log stderr.log > debug.log
   max_size: 500
   max_backups: 10
   max_age: 30
+```
+
+**Using Environment Variable to Override Log Level:**
+You can override the log level from the configuration file using the `LOG_LEVEL` environment variable:
+
+```bash
+# Set log level to debug via environment variable
+export LOG_LEVEL=debug
+go run cmd/sync/main.go configs/test-config.yaml
+
+# Or inline
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml
+```
+
+**Capturing Debug Logs to File:**
+To capture all debug-level logs to a file while running the service:
+
+```bash
+# Method 1: Using grep to filter debug logs (text format)
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | grep -i "debug" > debug.log
+
+# Method 2: Capture all output and filter later
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | tee all.log | grep -i "debug" > debug.log
+
+# Method 3: For JSON format, use jq to filter
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | jq 'select(.level == "debug")' > debug.json
+
+# Method 4: Capture both stdout and stderr separately
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml > stdout.log 2> stderr.log
+grep -i "debug" stdout.log stderr.log > debug.log
+
+# Method 5: Real-time filtering and saving
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | tee >(grep -i "debug" > debug.log)
 ```
 
 **Docker/Container Configuration:**
@@ -366,12 +432,21 @@ docker run -d \
 ```
 
 ### Environment Variables
-- `MONGODB_URI` - MongoDB connection string
-- `REDIS_URI` - Redis connection URI (format: `redis://[password@]host:port[/db]` or `host:port`)
+- `MONGODB_URI` or `DATABASE_MONGODB_URI` - MongoDB connection string
+- `REDIS_URI` or `DATABASE_REDIS_URI` - Redis connection URI (format: `redis://[password@]host:port[/db]` or `host:port`)
 - `STEEM_NODES` - Comma-separated Steem node URLs
-- `LOG_LEVEL` - Logging level (debug, info, warn, error)
+- `LOG_LEVEL` - Logging level (debug, info, warn, error). Overrides the `log.level` setting in config file.
 
 **Note**: Log file path and other log settings (format, rotation, etc.) are configured in `config.yaml` under the `log` section, not via environment variables. See the [Logging Configuration](#logging-configuration) section for details.
+
+**Example:**
+```bash
+# Override log level via environment variable
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml
+
+# Capture debug logs to file
+LOG_LEVEL=debug go run cmd/sync/main.go configs/test-config.yaml 2>&1 | grep -i "debug" > debug.log
+```
 
 ## Migration from Python Services
 

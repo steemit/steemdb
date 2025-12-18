@@ -48,13 +48,13 @@ type RedisConfig struct {
 }
 
 type SyncConfig struct {
-	BatchSize      int           `mapstructure:"batch_size"`
-	BlockBatchSize int           `mapstructure:"block_batch_size"`
-	AccountBatchSize int         `mapstructure:"account_batch_size"`
-	Workers        int           `mapstructure:"workers"`
-	QueueSize      int           `mapstructure:"queue_size"`
-	BlockInterval  time.Duration `mapstructure:"block_interval"`
-	StartBlock     int64         `mapstructure:"start_block"`
+	BatchSize        int           `mapstructure:"batch_size"`
+	BlockBatchSize   int           `mapstructure:"block_batch_size"`
+	AccountBatchSize int           `mapstructure:"account_batch_size"`
+	Workers          int           `mapstructure:"workers"`
+	QueueSize        int           `mapstructure:"queue_size"`
+	BlockInterval    time.Duration `mapstructure:"block_interval"`
+	StartBlock       int64         `mapstructure:"start_block"`
 }
 
 type HistoryConfig struct {
@@ -105,6 +105,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Bind specific environment variables for nested configs
 	viper.BindEnv("mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
 	viper.BindEnv("redis.uri", "DATABASE_REDIS_URI", "REDIS_URI")
+	viper.BindEnv("log.level", "LOG_LEVEL")
 
 	// Read config file
 	if err := viper.ReadInConfig(); err != nil {
@@ -142,6 +143,11 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.Redis.URI = envURI
 	} else if envURI := os.Getenv("REDIS_URI"); envURI != "" {
 		config.Redis.URI = envURI
+	}
+
+	// Override log level from environment variable if set
+	if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
+		config.Log.Level = logLevel
 	}
 
 	return &config, nil
