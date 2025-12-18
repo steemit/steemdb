@@ -42,9 +42,6 @@ export function Header() {
 
         {/* Logo */}
         <Link to="/" className="mr-6 flex items-center space-x-2">
-          <div className="h-8 w-8 rounded-md bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">S</span>
-          </div>
           <span className="hidden font-bold sm:inline-block">SteemDB</span>
         </Link>
 
