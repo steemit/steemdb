@@ -35,3 +35,5 @@ Thumbs.db
 tmp/
 temp/
 
+# Bin file
+main
