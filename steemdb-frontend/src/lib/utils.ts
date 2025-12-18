@@ -19,7 +19,25 @@ export function formatCompactNumber(num: number): string {
 // Format currency amounts
 export function formatCurrency(amount: string | number, currency: string = 'STEEM'): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
+  if (isNaN(num)) return `${amount} ${currency}`
+  
+  // STEEM and SBD: 3 decimal places
+  if (currency === 'STEEM' || currency === 'SBD') {
+    return `${num.toFixed(3)} ${currency}`
+  }
+  // VESTS: 6 decimal places
+  if (currency === 'VESTS') {
+    return `${num.toFixed(6)} ${currency}`
+  }
+  // Default: use formatNumber
   return `${formatNumber(num)} ${currency}`
+}
+
+// Format VESTS amounts (6 decimal places)
+export function formatVests(amount: string | number): string {
+  const num = typeof amount === 'string' ? parseAmount(amount) : amount
+  if (isNaN(num)) return String(amount)
+  return `${num.toFixed(6)} VESTS`
 }
 
 // Format time ago
@@ -144,4 +162,44 @@ export async function copyToClipboard(text: string): Promise<boolean> {
       return false;
     }
   }
+}
+
+// Format scientific notation to readable format
+export function formatScientificNotation(value: number | string): string {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  if (isNaN(num)) return String(value);
+  
+  // If it's a very large number in scientific notation
+  if (Math.abs(num) >= 1e15) {
+    const str = num.toExponential(3);
+    const [base, exp] = str.split('e');
+    const exponent = parseInt(exp);
+    return `${base}E${exponent}`;
+  }
+  
+  // For smaller numbers, use regular formatting
+  return formatNumber(num);
+}
+
+// Format Unix timestamp (milliseconds)
+export function formatTimestamp(timestamp: number | string): string {
+  const ts = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp;
+  if (isNaN(ts)) return String(timestamp);
+  
+  // Handle both seconds and milliseconds
+  const date = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
+  return formatDate(date);
+}
+
+// Format key name (snake_case to Title Case)
+export function formatKeyName(key: string): string {
+  return key
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+// Format rate with 3 decimal places
+export function formatRate(value: number): string {
+  return value.toFixed(3);
 }

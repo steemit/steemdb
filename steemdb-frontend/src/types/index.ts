@@ -111,6 +111,21 @@ export interface GlobalStats {
   last_update: string;
 }
 
+export interface NetworkPerformance {
+  transactions_24h: number;
+  transactions_1h: number;
+  transactions_per_sec_24h: number;
+  transactions_per_sec_1h: number;
+  operations_24h: number;
+  operations_1h: number;
+  operations_per_sec_24h: number;
+  operations_per_sec_1h: number;
+}
+
+export interface RewardPool {
+  [key: string]: any; // Dynamic fields
+}
+
 export interface BlockchainProps {
   head_block_number: number;
   head_block_id: string;

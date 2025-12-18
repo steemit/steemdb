@@ -32,10 +32,12 @@ func NewDashboardService(db *database.MongoDB, steemClient *steem.Client, logger
 
 // DashboardData represents all dashboard data
 type DashboardData struct {
-	Props          *steem.DynamicGlobalProperties `json:"props"`
-	LatestBlocks   []models.BlockSummary          `json:"latest_blocks"`
-	Stats          *DashboardStats                `json:"stats"`
-	IsFromUpstream bool                           `json:"is_from_upstream"` // Indicates if data came from upstream API
+	Props              *steem.DynamicGlobalProperties `json:"props"`
+	LatestBlocks       []models.BlockSummary          `json:"latest_blocks"`
+	Stats              *DashboardStats                `json:"stats"`
+	NetworkPerformance *models.NetworkPerformance     `json:"network_performance,omitempty"`
+	RewardPool         map[string]interface{}         `json:"reward_pool,omitempty"`
+	IsFromUpstream     bool                           `json:"is_from_upstream"` // Indicates if data came from upstream API
 }
 
 // DashboardStats represents dashboard statistics
@@ -75,12 +77,34 @@ func (s *DashboardService) GetDashboardData(ctx context.Context) (*DashboardData
 		}
 	}
 
+	var dashboardData *DashboardData
 	if useUpstream {
-		return s.getDashboardDataFromUpstream(ctx, upstreamProps)
+		dashboardData, err = s.getDashboardDataFromUpstream(ctx, upstreamProps)
+	} else {
+		dashboardData, err = s.getDashboardDataFromLocal(ctx, upstreamProps)
 	}
 
-	// Use local data
-	return s.getDashboardDataFromLocal(ctx, upstreamProps)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get Network Performance data (always from local database)
+	networkPerf, err := s.GetNetworkPerformance(ctx)
+	if err != nil {
+		s.logger.Warn("Failed to get network performance", utils.Error(err))
+	} else {
+		dashboardData.NetworkPerformance = networkPerf
+	}
+
+	// Get Reward Pool data (always from local database)
+	rewardPool, err := s.GetRewardPool(ctx)
+	if err != nil {
+		s.logger.Warn("Failed to get reward pool", utils.Error(err))
+	} else {
+		dashboardData.RewardPool = rewardPool
+	}
+
+	return dashboardData, nil
 }
 
 // getDashboardDataFromUpstream fetches dashboard data from upstream API
@@ -229,4 +253,71 @@ func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props 
 		},
 		IsFromUpstream: false,
 	}, nil
+}
+
+// GetNetworkPerformance gets network performance metrics from status collection
+func (s *DashboardService) GetNetworkPerformance(ctx context.Context) (*models.NetworkPerformance, error) {
+	statusCollection := s.db.Collection("status")
+
+	// Helper function to get status value
+	getStatusValue := func(id string) int64 {
+		var status struct {
+			ID   string `bson:"_id"`
+			Data int64  `bson:"data"`
+		}
+		err := statusCollection.FindOne(ctx, bson.M{"_id": id}).Decode(&status)
+		if err != nil {
+			return 0
+		}
+		return status.Data
+	}
+
+	tx24h := getStatusValue("transactions-24h")
+	tx1h := getStatusValue("transactions-1h")
+	op24h := getStatusValue("operations-24h")
+	op1h := getStatusValue("operations-1h")
+
+	// Calculate per second rates
+	txPerSec24h := float64(tx24h) / 86400.0 // 24 hours = 86400 seconds
+	txPerSec1h := float64(tx1h) / 3600.0    // 1 hour = 3600 seconds
+	opPerSec24h := float64(op24h) / 86400.0
+	opPerSec1h := float64(op1h) / 3600.0
+
+	return &models.NetworkPerformance{
+		Transactions24h:       tx24h,
+		Transactions1h:        tx1h,
+		TransactionsPerSec24h: txPerSec24h,
+		TransactionsPerSec1h:  txPerSec1h,
+		Operations24h:         op24h,
+		Operations1h:          op1h,
+		OperationsPerSec24h:   opPerSec24h,
+		OperationsPerSec1h:    opPerSec1h,
+	}, nil
+}
+
+// GetRewardPool gets reward pool data from funds_history collection
+func (s *DashboardService) GetRewardPool(ctx context.Context) (map[string]interface{}, error) {
+	fundsCollection := s.db.Collection("funds_history")
+
+	var fundsHistory bson.M
+
+	err := fundsCollection.FindOne(
+		ctx,
+		bson.M{"name": "post"},
+		options.FindOne().SetSort(bson.M{"last_update": -1}),
+	).Decode(&fundsHistory)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get reward pool: %w", err)
+	}
+
+	// Remove internal fields and convert to map[string]interface{}
+	result := make(map[string]interface{})
+	for k, v := range fundsHistory {
+		if k != "_id" && k != "id" && k != "name" {
+			result[k] = v
+		}
+	}
+
+	return result, nil
 }

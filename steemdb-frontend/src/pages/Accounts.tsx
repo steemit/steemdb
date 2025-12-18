@@ -7,7 +7,7 @@ import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { getAccounts, getAccount } from '../lib/api';
-import { formatNumber, formatTimeAgo, formatDate, formatCurrency, formatReputation, getAvatarUrl } from '../lib/utils';
+import { formatNumber, formatTimeAgo, formatDate, formatCurrency, formatReputation, getAvatarUrl, formatVests } from '../lib/utils';
 import { useFavoritesStore } from '../store';
 
 export function AccountsPage() {
@@ -315,7 +315,7 @@ export function AccountDetailPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Vesting Shares</span>
-              <span className="font-medium text-xs">{account.vesting_shares}</span>
+              <span className="font-medium text-xs">{formatVests(account.vesting_shares)}</span>
             </div>
           </CardContent>
         </Card>

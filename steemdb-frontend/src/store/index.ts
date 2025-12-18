@@ -6,7 +6,9 @@ import type {
   BlockchainProps, 
   GlobalStats, 
   Block,
-  WebSocketMessage 
+  WebSocketMessage,
+  NetworkPerformance,
+  RewardPool
 } from '../types';
 
 // Theme store
@@ -65,11 +67,15 @@ interface BlockchainStore {
   stats: GlobalStats | null;
   latestBlocks: Block[];
   currentBlock: number;
+  networkPerformance: NetworkPerformance | null;
+  rewardPool: RewardPool | null;
   setProps: (props: BlockchainProps) => void;
   setStats: (stats: GlobalStats) => void;
   setLatestBlocks: (blocks: Block[]) => void;
   addBlock: (block: Block) => void;
   setCurrentBlock: (blockNumber: number) => void;
+  setNetworkPerformance: (perf: NetworkPerformance | null) => void;
+  setRewardPool: (pool: RewardPool | null) => void;
 }
 
 export const useBlockchainStore = create<BlockchainStore>()(
@@ -79,6 +85,8 @@ export const useBlockchainStore = create<BlockchainStore>()(
       stats: null,
       latestBlocks: [],
       currentBlock: 0,
+      networkPerformance: null,
+      rewardPool: null,
       setProps: (props) => set({ props, currentBlock: props.head_block_number }),
       setStats: (stats) => set({ stats }),
       setLatestBlocks: (blocks) => set({ latestBlocks: blocks }),
@@ -88,6 +96,8 @@ export const useBlockchainStore = create<BlockchainStore>()(
           currentBlock: Math.max(state.currentBlock, block.number),
         })),
       setCurrentBlock: (blockNumber) => set({ currentBlock: blockNumber }),
+      setNetworkPerformance: (perf) => set({ networkPerformance: perf }),
+      setRewardPool: (pool) => set({ rewardPool: pool }),
     }),
     { name: 'blockchain-store' }
   )

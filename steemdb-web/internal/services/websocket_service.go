@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -32,6 +33,9 @@ type WebSocketService struct {
 
 	upgrader websocket.Upgrader
 
+	// Mentions regex for extracting @username from comments (aligned with old live.py)
+	mentionsRegex *regexp.Regexp
+
 	// Broadcasting channels
 	broadcast  chan models.WebSocketMessage
 	register   chan *Client
@@ -42,8 +46,9 @@ type WebSocketService struct {
 	cancel context.CancelFunc
 
 	// State tracking
-	lastBlockNumber int64
-	lastPropsUpdate time.Time
+	lastBlockNumber    int64 // Last head block number (for props updates)
+	lastBlockProcessed int64 // Last irreversible block processed (for block processing)
+	lastPropsUpdate    time.Time
 }
 
 // Client represents a WebSocket client connection
@@ -73,16 +78,24 @@ func NewWebSocketService(steemClient *steem.Client, db *database.MongoDB, logger
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		broadcast:  make(chan models.WebSocketMessage, 256),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		ctx:        ctx,
-		cancel:     cancel,
+		broadcast:     make(chan models.WebSocketMessage, 256),
+		register:      make(chan *Client),
+		unregister:    make(chan *Client),
+		ctx:           ctx,
+		cancel:        cancel,
+		mentionsRegex: regexp.MustCompile(`([@])(\w+)\b`), // Aligned with old live.py
 	}
 }
 
 // Start starts the WebSocket service
 func (ws *WebSocketService) Start() {
+	// Initialize lastBlockProcessed from current irreversible block
+	props, err := ws.steemClient.GetDynamicGlobalProperties()
+	if err == nil && props != nil {
+		ws.lastBlockProcessed = props.LastIrreversibleBlockNum
+		ws.lastBlockNumber = props.HeadBlockNumber
+	}
+
 	go ws.run()
 	go ws.fetchData()
 }
@@ -124,6 +137,10 @@ func (ws *WebSocketService) run() {
 			ws.clientsMux.Unlock()
 			ws.logger.Info("Client connected", utils.String("remote_addr", client.conn.RemoteAddr().String()))
 
+			// Subscribe to default channels and send recent blocks (aligned with old live.py)
+			ws.subscribeClientToDefaults(client)
+			ws.sendRecentBlocksToClient(client)
+
 		case client := <-ws.unregister:
 			ws.clientsMux.Lock()
 			if _, ok := ws.clients[client.conn]; ok {
@@ -156,7 +173,7 @@ func (ws *WebSocketService) run() {
 
 // fetchData continuously fetches data from the blockchain
 func (ws *WebSocketService) fetchData() {
-	ticker := time.NewTicker(3 * time.Second) // Fetch every 3 seconds
+	ticker := time.NewTicker(1 * time.Second) // Fetch every 1 second (aligned with old live.py)
 	defer ticker.Stop()
 
 	for {
@@ -179,6 +196,51 @@ func (ws *WebSocketService) fetchAndBroadcastProps() {
 		ws.logger.Error("Failed to fetch dynamic global properties", utils.Error(err))
 		return
 	}
+
+	// Calculate steem_per_mvests (aligned with old live.py)
+	steemPerMVests := float64(0)
+	if props.TotalVestingFundSteem != "" && props.TotalVestingShares != "" {
+		// Parse amounts (format: "123.456 STEEM" or "123.456")
+		// Extract numeric part before space
+		var totalVestingFundStr, totalVestingSharesStr string
+		if idx := len(props.TotalVestingFundSteem); idx > 0 {
+			// Find space or use whole string
+			for i, r := range props.TotalVestingFundSteem {
+				if r == ' ' {
+					totalVestingFundStr = props.TotalVestingFundSteem[:i]
+					break
+				}
+			}
+			if totalVestingFundStr == "" {
+				totalVestingFundStr = props.TotalVestingFundSteem
+			}
+		}
+		if idx := len(props.TotalVestingShares); idx > 0 {
+			for i, r := range props.TotalVestingShares {
+				if r == ' ' {
+					totalVestingSharesStr = props.TotalVestingShares[:i]
+					break
+				}
+			}
+			if totalVestingSharesStr == "" {
+				totalVestingSharesStr = props.TotalVestingShares
+			}
+		}
+
+		var totalVestingFund, totalVestingShares float64
+		if _, err := fmt.Sscanf(totalVestingFundStr, "%f", &totalVestingFund); err == nil {
+			if _, err := fmt.Sscanf(totalVestingSharesStr, "%f", &totalVestingShares); err == nil {
+				if totalVestingShares > 0 {
+					steemPerMVests = (totalVestingFund / totalVestingShares) * 1000000
+					// Round to 3 decimal places (aligned with old live.py: math.floor(... * 1000) / 1000)
+					steemPerMVests = float64(int64(steemPerMVests*1000)) / 1000
+				}
+			}
+		}
+	}
+
+	// Calculate reversible_blocks
+	reversibleBlocks := props.HeadBlockNumber - props.LastIrreversibleBlockNum
 
 	propsData := models.PropsData{
 		HeadBlockNumber:              props.HeadBlockNumber,
@@ -206,36 +268,72 @@ func (ws *WebSocketService) fetchAndBroadcastProps() {
 		ParticipationCount:           props.ParticipationCount,
 		LastIrreversibleBlockNum:     props.LastIrreversibleBlockNum,
 		VotePowerReserveRate:         props.VotePowerReserveRate,
+		SteemPerMVests:               steemPerMVests,
+		ReversibleBlocks:             reversibleBlocks,
 	}
 
-	message := models.WebSocketMessage{
-		Type:      "props",
-		Channel:   "props",
-		Data:      propsData,
-		Timestamp: time.Now(),
+	// Update lastBlockNumber for props change detection
+	if props.HeadBlockNumber != ws.lastBlockNumber {
+		ws.lastBlockNumber = props.HeadBlockNumber
+		message := models.WebSocketMessage{
+			Type:      "props",
+			Channel:   "props",
+			Data:      propsData,
+			Timestamp: time.Now(),
+		}
+		ws.broadcast <- message
 	}
-
-	ws.broadcast <- message
 }
 
 // fetchAndBroadcastBlocks fetches and broadcasts new blocks
+// Aligned with old live.py: processes only irreversible blocks
 func (ws *WebSocketService) fetchAndBroadcastBlocks() {
 	props, err := ws.steemClient.GetDynamicGlobalProperties()
 	if err != nil {
 		return
 	}
 
-	currentBlock := props.HeadBlockNumber
-	if currentBlock <= ws.lastBlockNumber {
-		return
-	}
+	irreversible := props.LastIrreversibleBlockNum
 
-	// Broadcast new blocks
-	for blockNum := ws.lastBlockNumber + 1; blockNum <= currentBlock; blockNum++ {
+	// Process all irreversible blocks that haven't been processed yet
+	for irreversible > ws.lastBlockProcessed {
+		ws.lastBlockProcessed++
+		blockNum := ws.lastBlockProcessed
+
 		block, err := ws.steemClient.GetBlock(blockNum)
 		if err != nil {
 			ws.logger.Error("Failed to fetch block", utils.Int64("block_number", blockNum), utils.Error(err))
 			continue
+		}
+
+		// Extract accounts and count operations (aligned with old live.py)
+		accountsSet := make(map[string]bool)
+		opTypes := make([]string, 0)
+		opCount := 0
+
+		for _, tx := range block.Transactions {
+			for _, op := range tx.Operations {
+				opCount++
+				opTypes = append(opTypes, op.Type)
+
+				// Extract accounts from operation
+				relatedAccounts := ws.extractAccountsFromOperation(op)
+				for _, account := range relatedAccounts {
+					accountsSet[account] = true
+				}
+			}
+		}
+
+		// Count operation types (aligned with old live.py)
+		opCounts := make(map[string]int)
+		for _, opType := range opTypes {
+			opCounts[opType]++
+		}
+
+		// Convert accounts set to slice
+		accounts := make([]string, 0, len(accountsSet))
+		for account := range accountsSet {
+			accounts = append(accounts, account)
 		}
 
 		blockData := models.BlockData{
@@ -243,7 +341,9 @@ func (ws *WebSocketService) fetchAndBroadcastBlocks() {
 			Timestamp:    block.Timestamp,
 			Witness:      block.Witness,
 			Transactions: len(block.Transactions),
-			Operations:   ws.countOperations(block),
+			Operations:   opCount,
+			Accounts:     accounts,
+			OpCounts:     opCounts,
 		}
 
 		message := models.WebSocketMessage{
@@ -258,8 +358,6 @@ func (ws *WebSocketService) fetchAndBroadcastBlocks() {
 		// Process operations for account notifications
 		ws.processBlockOperations(block, blockNum)
 	}
-
-	ws.lastBlockNumber = currentBlock
 }
 
 // fetchAndBroadcastState fetches and broadcasts global state
@@ -342,37 +440,66 @@ func (ws *WebSocketService) processBlockOperations(block *steem.Block, blockNum 
 }
 
 // extractAccountsFromOperation extracts account names from operations
+// Aligned with old live.py getRelatedAccounts method
 func (ws *WebSocketService) extractAccountsFromOperation(op steem.Operation) []string {
-	accounts := make([]string, 0)
+	accountsSet := make(map[string]bool)
 
 	// Convert operation value to map for easier access
-	if opMap, ok := op.Value.(map[string]interface{}); ok {
-		// Common account fields
-		if author, exists := opMap["author"]; exists {
-			if authorStr, ok := author.(string); ok {
-				accounts = append(accounts, authorStr)
+	opMap, ok := op.Value.(map[string]interface{})
+	if !ok {
+		return []string{}
+	}
+
+	// Operation type to field mapping (aligned with old live.py fieldMap)
+	fieldMap := map[string][]string{
+		"account_create":        {},
+		"account_update":        {},
+		"account_witness_vote":  {"account", "witness"},
+		"author_reward":         {"author"},
+		"comment":               {"author", "parent_author"},
+		"convert":               {},
+		"curation_reward":       {"curator"},
+		"custom_json":           {},
+		"feed_publish":          {},
+		"fill_order":            {},
+		"fill_vesting_withdraw": {},
+		"limit_order_cancel":    {},
+		"limit_order_create":    {},
+		"pow2":                  {},
+		"transfer":              {"from", "to"},
+		"transfer_to_vesting":   {"from", "to"},
+		"vote":                  {"author", "voter"},
+	}
+
+	// Extract accounts based on operation type
+	if fields, exists := fieldMap[op.Type]; exists {
+		for _, field := range fields {
+			if value, exists := opMap[field]; exists {
+				if valueStr, ok := value.(string); ok && valueStr != "" {
+					accountsSet[valueStr] = true
+				}
 			}
 		}
-		if from, exists := opMap["from"]; exists {
-			if fromStr, ok := from.(string); ok {
-				accounts = append(accounts, fromStr)
+	}
+
+	// Extract mentions from comment body (aligned with old live.py)
+	if op.Type == "comment" {
+		if body, exists := opMap["body"]; exists {
+			if bodyStr, ok := body.(string); ok {
+				matches := ws.mentionsRegex.FindAllStringSubmatch(bodyStr, -1)
+				for _, match := range matches {
+					if len(match) >= 3 {
+						accountsSet[match[2]] = true // match[2] is the username without @
+					}
+				}
 			}
 		}
-		if to, exists := opMap["to"]; exists {
-			if toStr, ok := to.(string); ok {
-				accounts = append(accounts, toStr)
-			}
-		}
-		if voter, exists := opMap["voter"]; exists {
-			if voterStr, ok := voter.(string); ok {
-				accounts = append(accounts, voterStr)
-			}
-		}
-		if account, exists := opMap["account"]; exists {
-			if accountStr, ok := account.(string); ok {
-				accounts = append(accounts, accountStr)
-			}
-		}
+	}
+
+	// Convert set to slice
+	accounts := make([]string, 0, len(accountsSet))
+	for account := range accountsSet {
+		accounts = append(accounts, account)
 	}
 
 	return accounts
@@ -417,6 +544,92 @@ func (ws *WebSocketService) broadcastToChannel(channel string, message models.We
 		}
 	}
 	ws.clientsMux.RUnlock()
+}
+
+// subscribeClientToDefaults subscribes a new client to default channels (aligned with old live.py)
+func (ws *WebSocketService) subscribeClientToDefaults(client *Client) {
+	ws.channelsMux.Lock()
+	defer ws.channelsMux.Unlock()
+
+	defaultChannels := []string{"blocks", "props", "state"}
+	for _, channel := range defaultChannels {
+		if ws.channels[channel] == nil {
+			ws.channels[channel] = make(map[*websocket.Conn]bool)
+		}
+		ws.channels[channel][client.conn] = true
+		client.subscriptions[channel] = true
+	}
+}
+
+// sendRecentBlocksToClient sends the last 10 processed blocks to a newly connected client (aligned with old live.py)
+func (ws *WebSocketService) sendRecentBlocksToClient(client *Client) {
+	// Send last 10 blocks (aligned with old live.py: for x in range(1, 11))
+	startBlock := ws.lastBlockProcessed - 9
+	if startBlock < 1 {
+		startBlock = 1
+	}
+
+	for blockNum := startBlock; blockNum <= ws.lastBlockProcessed; blockNum++ {
+		block, err := ws.steemClient.GetBlock(blockNum)
+		if err != nil {
+			ws.logger.Warn("Failed to fetch block for client history", utils.Int64("block_number", blockNum), utils.Error(err))
+			continue
+		}
+
+		// Extract accounts and count operations (same logic as fetchAndBroadcastBlocks)
+		accountsSet := make(map[string]bool)
+		opTypes := make([]string, 0)
+		opCount := 0
+
+		for _, tx := range block.Transactions {
+			for _, op := range tx.Operations {
+				opCount++
+				opTypes = append(opTypes, op.Type)
+
+				relatedAccounts := ws.extractAccountsFromOperation(op)
+				for _, account := range relatedAccounts {
+					accountsSet[account] = true
+				}
+			}
+		}
+
+		// Count operation types
+		opCounts := make(map[string]int)
+		for _, opType := range opTypes {
+			opCounts[opType]++
+		}
+
+		// Convert accounts set to slice
+		accounts := make([]string, 0, len(accountsSet))
+		for account := range accountsSet {
+			accounts = append(accounts, account)
+		}
+
+		blockData := models.BlockData{
+			Number:       blockNum,
+			Timestamp:    block.Timestamp,
+			Witness:      block.Witness,
+			Transactions: len(block.Transactions),
+			Operations:   opCount,
+			Accounts:     accounts,
+			OpCounts:     opCounts,
+		}
+
+		message := models.WebSocketMessage{
+			Type:      "block",
+			Channel:   "blocks",
+			Data:      blockData,
+			Timestamp: time.Now(),
+		}
+
+		// Send to client (non-blocking)
+		select {
+		case client.send <- message:
+		default:
+			// Client's send channel is full, skip this block
+			ws.logger.Warn("Client send channel full, skipping historical block", utils.Int64("block_number", blockNum))
+		}
+	}
 }
 
 // Client methods

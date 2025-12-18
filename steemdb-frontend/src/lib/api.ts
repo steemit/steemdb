@@ -5,6 +5,8 @@ import type {
   Witness, 
   GlobalStats, 
   BlockchainProps,
+  NetworkPerformance,
+  RewardPool,
   PaginatedResponse,
   PaginationParams 
 } from '../types';
@@ -123,6 +125,8 @@ class ApiClient {
     props: BlockchainProps;
     latest_blocks: Block[];
     stats: GlobalStats;
+    network_performance?: NetworkPerformance;
+    reward_pool?: RewardPool;
     is_from_upstream: boolean;
   }>> {
     return this.request(`/v1/dashboard`);

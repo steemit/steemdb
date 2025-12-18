@@ -2,6 +2,9 @@ import React, { useEffect } from 'react';
 import { Activity, Blocks, Users, Shield, TrendingUp, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
+import { NetworkPerformance } from '../components/dashboard/NetworkPerformance';
+import { RewardPool } from '../components/dashboard/RewardPool';
+import { GlobalProperties } from '../components/dashboard/GlobalProperties';
 import { useBlockchainStore, useWebSocketStore } from '../store';
 import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
 import { wsClient } from '../lib/websocket';
@@ -80,7 +83,18 @@ function RecentBlock({ block }: RecentBlockProps) {
 }
 
 export function Dashboard() {
-  const { props, stats, latestBlocks, setProps, setStats, setLatestBlocks } = useBlockchainStore();
+  const { 
+    props, 
+    stats, 
+    latestBlocks, 
+    networkPerformance,
+    rewardPool,
+    setProps, 
+    setStats, 
+    setLatestBlocks,
+    setNetworkPerformance,
+    setRewardPool
+  } = useBlockchainStore();
   const { state: wsState } = useWebSocketStore();
 
   // Fetch dashboard data from REST API as fallback
@@ -91,6 +105,12 @@ export function Dashboard() {
         setProps(response.data.props);
         setStats(response.data.stats);
         setLatestBlocks(response.data.latest_blocks);
+        if (response.data.network_performance) {
+          setNetworkPerformance(response.data.network_performance);
+        }
+        if (response.data.reward_pool) {
+          setRewardPool(response.data.reward_pool);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
@@ -240,6 +260,13 @@ export function Dashboard() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Network Performance, Reward Pool, and Global Properties */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <NetworkPerformance data={networkPerformance || undefined} />
+        <RewardPool data={rewardPool || undefined} />
+        <GlobalProperties data={props || undefined} />
       </div>
 
       {/* Recent Blocks */}
