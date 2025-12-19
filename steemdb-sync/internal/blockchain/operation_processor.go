@@ -120,6 +120,9 @@ func (p *OperationProcessor) registerHandlers() {
 	p.handlers["comment_options"] = p.handleCommentOptions
 	p.handlers["comment_benefactor_reward"] = p.handleBenefactorReward
 	p.handlers["account_create"] = p.handleAccountCreate
+	p.handlers["account_update"] = p.handleAccountUpdate
+	p.handlers["withdraw_vesting"] = p.handleWithdrawVesting
+	p.handlers["witness_update"] = p.handleWitnessUpdate
 }
 
 // Process processes a blockchain operation
@@ -150,8 +153,22 @@ func (p *OperationProcessor) Process(op *Operation) error {
 	// Process with handler
 	handler, exists := p.handlers[opType]
 	if !exists {
-		p.logger.Debug("Unknown operation type", utils.String("type", opType))
-		// Still add to account_operations buffer even if no handler
+		// Some operations are intentionally skipped (e.g., account_witness_proxy per legacy behavior)
+		// Log at debug level only for operations that are expected to be skipped
+		skippedOps := map[string]bool{
+			"account_witness_proxy":      true, // Legacy skips this - no handler, no account update needed
+			"custom":                     true, // Similar to custom_json but not processed in legacy
+			"limit_order_create":         true, // Legacy fieldMap is empty [] - skipped
+			"limit_order_cancel":         true, // Legacy fieldMap is empty [] - skipped
+			"delete_comment":             true, // Legacy doesn't process - only display name
+			"set_withdraw_vesting_route": true, // Legacy doesn't process
+			"request_account_recovery":   true, // Legacy doesn't process
+			"recover_account":            true, // Legacy doesn't process
+		}
+		if !skippedOps[opType] {
+			p.logger.Debug("Unknown operation type", utils.String("type", opType))
+		}
+		// Still add to account_operations buffer even if no handler (for indexing)
 		if opID != nil {
 			if err := p.addAccountOperationsToBuffer(op, opType, *opID); err != nil {
 				p.logger.Error("Failed to add account operations to buffer",
@@ -404,6 +421,94 @@ func (p *OperationProcessor) extractAccounts(opType string, opData map[string]an
 		if creator := getString(opData, "creator"); creator != "" {
 			accounts = append(accounts, creator)
 		}
+	case "account_update":
+		// account_update operation contains account
+		if account := getString(opData, "account"); account != "" {
+			accounts = append(accounts, account)
+		}
+	case "withdraw_vesting":
+		// withdraw_vesting operation contains account
+		if account := getString(opData, "account"); account != "" {
+			accounts = append(accounts, account)
+		}
+	case "witness_update":
+		// witness_update operation contains owner
+		if owner := getString(opData, "owner"); owner != "" {
+			accounts = append(accounts, owner)
+		}
+	case "account_witness_proxy":
+		// account_witness_proxy operation contains account and proxy
+		// Reference: legacy/docker/live/live.py - not in fieldMap, skipped in sync.py
+		// We extract accounts for account_operations indexing, but don't mark for update (legacy behavior)
+		if account := getString(opData, "account"); account != "" {
+			accounts = append(accounts, account)
+		}
+		if proxy := getString(opData, "proxy"); proxy != "" {
+			accounts = append(accounts, proxy)
+		}
+	case "custom":
+		// custom operation - similar to custom_json but not processed in legacy
+		// Extract required_posting_auths or required_auths if present
+		if auths, ok := opData["required_posting_auths"].([]interface{}); ok {
+			for _, auth := range auths {
+				if authStr, ok := auth.(string); ok && authStr != "" {
+					accounts = append(accounts, authStr)
+				}
+			}
+		}
+		if auths, ok := opData["required_auths"].([]interface{}); ok {
+			for _, auth := range auths {
+				if authStr, ok := auth.(string); ok && authStr != "" {
+					accounts = append(accounts, authStr)
+				}
+			}
+		}
+	case "limit_order_create":
+		// limit_order_create operation - legacy fieldMap is empty []
+		// Extract owner for account_operations indexing
+		if owner := getString(opData, "owner"); owner != "" {
+			accounts = append(accounts, owner)
+		}
+	case "limit_order_cancel":
+		// limit_order_cancel operation - legacy fieldMap is empty []
+		// Extract owner for account_operations indexing
+		if owner := getString(opData, "owner"); owner != "" {
+			accounts = append(accounts, owner)
+		}
+	case "delete_comment":
+		// delete_comment operation - legacy doesn't process, only display name
+		// Extract author for account_operations indexing
+		if author := getString(opData, "author"); author != "" {
+			accounts = append(accounts, author)
+		}
+	case "set_withdraw_vesting_route":
+		// set_withdraw_vesting_route operation - legacy doesn't process
+		// Extract from_account and to_account for account_operations indexing
+		if fromAccount := getString(opData, "from_account"); fromAccount != "" {
+			accounts = append(accounts, fromAccount)
+		}
+		if toAccount := getString(opData, "to_account"); toAccount != "" {
+			accounts = append(accounts, toAccount)
+		}
+	case "request_account_recovery":
+		// request_account_recovery operation - legacy doesn't process
+		// Extract account_to_recover and recovery_account for account_operations indexing
+		if accountToRecover := getString(opData, "account_to_recover"); accountToRecover != "" {
+			accounts = append(accounts, accountToRecover)
+		}
+		if recoveryAccount := getString(opData, "recovery_account"); recoveryAccount != "" {
+			accounts = append(accounts, recoveryAccount)
+		}
+	case "recover_account":
+		// recover_account operation - legacy doesn't process
+		// Extract account_to_recover for account_operations indexing
+		if accountToRecover := getString(opData, "account_to_recover"); accountToRecover != "" {
+			accounts = append(accounts, accountToRecover)
+		}
+		// Extract recovery_account if present
+		if recoveryAccount := getString(opData, "recovery_account"); recoveryAccount != "" {
+			accounts = append(accounts, recoveryAccount)
+		}
 	}
 
 	// Remove duplicates
@@ -450,6 +555,47 @@ func (p *OperationProcessor) createOperationSummary(opType string, opData map[st
 	case "account_create":
 		summary["new_account_name"] = getString(opData, "new_account_name")
 		summary["creator"] = getString(opData, "creator")
+	case "account_update":
+		summary["account"] = getString(opData, "account")
+	case "withdraw_vesting":
+		summary["account"] = getString(opData, "account")
+		summary["vesting_shares"] = getString(opData, "vesting_shares")
+	case "witness_update":
+		summary["owner"] = getString(opData, "owner")
+	case "account_witness_proxy":
+		// account_witness_proxy: account delegates witness voting to proxy
+		// Reference: legacy - skipped, no handler needed
+		summary["account"] = getString(opData, "account")
+		summary["proxy"] = getString(opData, "proxy")
+	case "custom":
+		// custom operation - similar to custom_json but not processed in legacy
+		summary["id"] = getString(opData, "id")
+	case "limit_order_create":
+		// limit_order_create: create limit order - legacy fieldMap is empty []
+		summary["owner"] = getString(opData, "owner")
+		summary["orderid"] = getInt64(opData, "orderid")
+	case "limit_order_cancel":
+		// limit_order_cancel: cancel limit order - legacy fieldMap is empty []
+		summary["owner"] = getString(opData, "owner")
+		summary["orderid"] = getInt64(opData, "orderid")
+	case "delete_comment":
+		// delete_comment: delete a comment/post - legacy doesn't process
+		summary["author"] = getString(opData, "author")
+		summary["permlink"] = getString(opData, "permlink")
+	case "set_withdraw_vesting_route":
+		// set_withdraw_vesting_route: set route for vesting withdrawal - legacy doesn't process
+		summary["from_account"] = getString(opData, "from_account")
+		summary["to_account"] = getString(opData, "to_account")
+		summary["percent"] = getInt64(opData, "percent")
+	case "request_account_recovery":
+		// request_account_recovery: request account recovery - legacy doesn't process
+		summary["account_to_recover"] = getString(opData, "account_to_recover")
+		summary["recovery_account"] = getString(opData, "recovery_account")
+	case "recover_account":
+		// recover_account: recover account - legacy doesn't process
+		summary["account_to_recover"] = getString(opData, "account_to_recover")
+		summary["recovery_account"] = getString(opData, "recovery_account")
+		// new_owner_authority is a complex object, not a string, so we skip it in summary
 	}
 
 	return summary
@@ -1122,6 +1268,69 @@ func (p *OperationProcessor) handleAccountCreate(ctx context.Context, op *Operat
 	return nil
 }
 
+// handleAccountUpdate processes account_update operations
+// Reference: legacy/docker/live/live.py - account_update has empty fieldMap, but account needs update
+func (p *OperationProcessor) handleAccountUpdate(ctx context.Context, op *Operation) error {
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid account_update operation data: %w", err)
+	}
+
+	// Mark account needs update (account information changed)
+	if account := getString(opData, "account"); account != "" {
+		if err := p.db.MarkAccountNeedsUpdate(ctx, account); err != nil {
+			p.logger.Debug("Failed to mark account needs update",
+				utils.String("account", account),
+				utils.Error(err),
+			)
+		}
+	}
+
+	return nil
+}
+
+// handleWithdrawVesting processes withdraw_vesting operations (Power Down initiation)
+// Reference: legacy/docker/live/live.py - withdraw_vesting not in fieldMap, but account needs update
+func (p *OperationProcessor) handleWithdrawVesting(ctx context.Context, op *Operation) error {
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid withdraw_vesting operation data: %w", err)
+	}
+
+	// Mark account needs update (vesting withdrawal started)
+	if account := getString(opData, "account"); account != "" {
+		if err := p.db.MarkAccountNeedsUpdate(ctx, account); err != nil {
+			p.logger.Debug("Failed to mark account needs update",
+				utils.String("account", account),
+				utils.Error(err),
+			)
+		}
+	}
+
+	return nil
+}
+
+// handleWitnessUpdate processes witness_update operations
+// Reference: legacy/docker/live/live.py - witness_update not in fieldMap, but witness account needs update
+func (p *OperationProcessor) handleWitnessUpdate(ctx context.Context, op *Operation) error {
+	opData, err := getOperationData(op)
+	if err != nil {
+		return fmt.Errorf("invalid witness_update operation data: %w", err)
+	}
+
+	// Mark witness account needs update (witness information changed)
+	if owner := getString(opData, "owner"); owner != "" {
+		if err := p.db.MarkAccountNeedsUpdate(ctx, owner); err != nil {
+			p.logger.Debug("Failed to mark witness account needs update",
+				utils.String("account", owner),
+				utils.Error(err),
+			)
+		}
+	}
+
+	return nil
+}
+
 // Utility functions
 
 // getOperationData extracts operation data from Op array, handling both map and struct types
@@ -1195,6 +1404,24 @@ func getFloat64(data map[string]any, key string) float64 {
 		case string:
 			if f, err := strconv.ParseFloat(v, 64); err == nil {
 				return f
+			}
+		}
+	}
+	return 0
+}
+
+func getInt64(data map[string]any, key string) int64 {
+	if val, ok := data[key]; ok {
+		switch v := val.(type) {
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case float64:
+			return int64(v)
+		case string:
+			if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return i
 			}
 		}
 	}
