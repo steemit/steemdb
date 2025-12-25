@@ -378,31 +378,31 @@ func GetCollectionName(blockNum int64) string {
 - **索引创建**：自动创建（在第一次插入数据到新集合前，确保索引存在）
 - **实现方式**：
   ```go
-      func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
-          collection := m.db.Collection(collectionName)
-          
-          // 检查索引是否已存在（通过尝试创建，如果已存在则忽略错误）
-          // 或者先检查集合是否存在，如果不存在则创建索引
-          indexes := []mongo.IndexModel{
-              // 唯一索引
-              {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_id", Value: 1}, 
-                           {Key: "op_in_trx", Value: 1}, {Key: "is_virtual", Value: 1}, 
-                           {Key: "virtual_op_num", Value: 1}}, 
-               Options: options.Index().SetUnique(true)},
-              // 查询索引
-              {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
-              {Keys: bson.D{{Key: "timestamp", Value: 1}}},
-              {Keys: bson.D{{Key: "trx_id", Value: 1}}},
-              {Keys: bson.D{{Key: "op_type", Value: 1}}},
-          }
-          
-          _, err := collection.Indexes().CreateMany(ctx, indexes)
-          // 如果索引已存在，MongoDB 会返回错误，可以忽略
-          if err != nil && !strings.Contains(err.Error(), "already exists") {
-              return err
-          }
-          return nil
-      }
+        func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
+            collection := m.db.Collection(collectionName)
+            
+            // 检查索引是否已存在（通过尝试创建，如果已存在则忽略错误）
+            // 或者先检查集合是否存在，如果不存在则创建索引
+            indexes := []mongo.IndexModel{
+                // 唯一索引
+                {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_id", Value: 1}, 
+                             {Key: "op_in_trx", Value: 1}, {Key: "is_virtual", Value: 1}, 
+                             {Key: "virtual_op_num", Value: 1}}, 
+                 Options: options.Index().SetUnique(true)},
+                // 查询索引
+                {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
+                {Keys: bson.D{{Key: "timestamp", Value: 1}}},
+                {Keys: bson.D{{Key: "trx_id", Value: 1}}},
+                {Keys: bson.D{{Key: "op_type", Value: 1}}},
+            }
+            
+            _, err := collection.Indexes().CreateMany(ctx, indexes)
+            // 如果索引已存在，MongoDB 会返回错误，可以忽略
+            if err != nil && !strings.Contains(err.Error(), "already exists") {
+                return err
+            }
+            return nil
+        }
   ```
 
 
@@ -519,4 +519,3 @@ backfill:
 ## 实施步骤
 
 1. **Phase 1**：实现 Layer 1，开始同步所有 operations
-2. **Phase 2**：实现 Layer 2，开始业务处理，支持恢复机制
