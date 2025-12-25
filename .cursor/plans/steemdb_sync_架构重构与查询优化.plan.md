@@ -15,39 +15,39 @@
 
 1. **区块查询**：
 
-   - 按区块号查询（最频繁）
-   - 最新区块列表（时间倒序）
-   - 按见证人查询区块
+- 按区块号查询（最频繁）
+- 最新区块列表（时间倒序）
+- 按见证人查询区块
 
 2. **账户查询**：
 
-   - 账户详情（按账户名）
-   - 账户操作历史（按账户名 + 时间范围）
-   - 账户创建的评论/帖子
+- 账户详情（按账户名）
+- 账户操作历史（按账户名 + 时间范围）
+- 账户创建的评论/帖子
 
 3. **操作查询**：
 
-   - 按操作类型查询（转账、投票等）
-   - 按账户查询操作（账户 + 操作类型）
-   - 按时间范围查询
+- 按操作类型查询（转账、投票等）
+- 按账户查询操作（账户 + 操作类型）
+- 按时间范围查询
 
 4. **评论查询**：
 
-   - 按作者查询
-   - 按分类查询
-   - 最新/热门评论
+- 按作者查询
+- 按分类查询
+- 最新/热门评论
 
 5. **搜索功能**：
 
-   - 账户名搜索（前缀匹配）
-   - 区块号搜索
-   - 交易ID搜索
+- 账户名搜索（前缀匹配）
+- 区块号搜索
+- 交易ID搜索
 
 ## 2. 新架构设计
 
 ### 2.1 整体架构
 
-```
+```javascript
 Steem RPC Nodes
     │
     ├─► condenser_api.get_accounts (账户信息)
@@ -81,41 +81,43 @@ CronTab Service (单 goroutine)
     └─► Materialized View Builder (构建物化视图)
 ```
 
+
+
 ### 2.2 核心设计原则
 
 1. **单 goroutine Block Sync**：
 
-   - 只使用一个 goroutine 进行区块同步
-   - 按区块顺序串行处理所有操作
-   - 保证操作时序正确性（避免下一个 transaction 的 operation 依赖上一个 transaction 的 operation 时出现时序问题）
-   - 批量获取区块，批量写入
+- 只使用一个 goroutine 进行区块同步
+- 按区块顺序串行处理所有操作
+- 保证操作时序正确性（避免下一个 transaction 的 operation 依赖上一个 transaction 的 operation 时出现时序问题）
+- 批量获取区块，批量写入
 
 2. **单 goroutine CronTab**：
 
-   - 只使用一个 goroutine 运行计划任务
-   - **关键**：只有在 Block Sync 追上最新区块后才开始工作
-   - 负责账户更新、30天聚合数据计算、物化视图更新等
+- 只使用一个 goroutine 运行计划任务
+- **关键**：只有在 Block Sync 追上最新区块后才开始工作
+- 负责账户更新、30天聚合数据计算、物化视图更新等
 
 3. **账户信息以 API 为准**：
 
-   - 账户信息以 `condenser_api.get_accounts` 的返回数据为准
-   - 操作处理时只标记账户需要更新（`needs_update = true`），不自己计算余额
-   - 定期批量调用 API 更新账户信息
+- 账户信息以 `condenser_api.get_accounts` 的返回数据为准
+- 操作处理时只标记账户需要更新（`needs_update = true`），不自己计算余额
+- 定期批量调用 API 更新账户信息
 
 4. **状态与历史分离**：
 
-   - 状态集合：当前状态（account, comment）
-   - 历史集合：操作历史（operations, account_operations）
+- 状态集合：当前状态（account, comment）
+- 历史集合：操作历史（operations, account_operations）
 
 5. **物化视图**：
 
-   - 预计算常用查询结果
-   - 定期更新，减少实时计算
+- 预计算常用查询结果
+- 定期更新，减少实时计算
 
 6. **反范式化**：
 
-   - 避免 JOIN 操作
-   - 冗余关键字段，提升查询速度
+- 避免 JOIN 操作
+- 冗余关键字段，提升查询速度
 
 ## 3. 数据模型设计
 
@@ -395,6 +397,8 @@ type GlobalStats struct {
 }
 ```
 
+
+
 ## 4. 服务架构设计
 
 ### 4.1 Block Sync Service
@@ -423,9 +427,11 @@ type BlockSyncService struct {
 }
 ```
 
+
+
 ### 4.2 处理流程
 
-```
+```javascript
 1. Block Fetcher (单 goroutine)
    └─► 批量获取区块 (get_blocks_range)
        └─► 串行处理每个区块
@@ -460,6 +466,8 @@ type BlockSyncService struct {
        ├─► 更新 operation_stats
        └─► 更新 global_stats
 ```
+
+
 
 ## 5. 索引策略
 
@@ -499,6 +507,8 @@ db.comments.createIndex({created: -1})
 db.comments.createIndex({net_votes: -1, created: -1})
 ```
 
+
+
 ## 6. 查询优化策略
 
 ### 6.1 账户操作历史查询
@@ -520,6 +530,8 @@ ops := db.account_operations.find({
 }).sort({block_time: -1})
 ```
 
+
+
 ### 6.2 最新区块查询
 
 **优化**：使用时间倒序索引
@@ -527,6 +539,8 @@ ops := db.account_operations.find({
 ```go
 blocks := db.blocks.find({}).sort({timestamp: -1}).limit(20)
 ```
+
+
 
 ### 6.3 账户搜索
 
@@ -537,6 +551,8 @@ accounts := db.accounts.find({
     name_lower: {$regex: "^" + query.toLowerCase()}
 }).sort({reputation: -1}).limit(10)
 ```
+
+
 
 ## 7. 实施计划
 
@@ -572,34 +588,34 @@ accounts := db.accounts.find({
 
 1. **数据模型**：
 
-   - `internal/database/models.go` - 重新设计所有模型
-   - `internal/database/indexes.go` - 索引定义
+- `internal/database/models.go` - 重新设计所有模型
+- `internal/database/indexes.go` - 索引定义
 
 2. **服务层**：
 
-   - `internal/services/block_sync.go` - 核心同步服务（单 goroutine）
-   - `internal/services/crontab.go` - 计划任务服务（单 goroutine）
-   - `internal/services/account_updater.go` - 账户更新服务（调用 condenser_api.get_accounts）
-   - `internal/services/stats_updater.go` - 统计更新服务
+- `internal/services/block_sync.go` - 核心同步服务（单 goroutine）
+- `internal/services/crontab.go` - 计划任务服务（单 goroutine）
+- `internal/services/account_updater.go` - 账户更新服务（调用 condenser_api.get_accounts）
+- `internal/services/stats_updater.go` - 统计更新服务
 
 3. **操作处理**：
 
-   - `internal/blockchain/operation_processor.go` - 操作处理器
-   - `internal/blockchain/operation_handlers.go` - 各操作类型的处理器
+- `internal/blockchain/operation_processor.go` - 操作处理器
+- `internal/blockchain/operation_handlers.go` - 各操作类型的处理器
 
 4. **配置**：
 
-   - `configs/config.yaml` - 简化配置
+- `configs/config.yaml` - 简化配置
 
 ## 9. 性能目标
 
 - **区块处理速度**：500+ blocks/sec
 - **操作处理速度**：5000+ ops/sec
 - **查询响应时间**：
-  - 区块查询：< 10ms
-  - 账户查询：< 50ms
-  - 账户操作历史：< 100ms（分页）
-  - 搜索：< 200ms
+- 区块查询：< 10ms
+- 账户查询：< 50ms
+- 账户操作历史：< 100ms（分页）
+- 搜索：< 200ms
 
 ## 10. 账户信息更新策略
 
@@ -609,19 +625,19 @@ accounts := db.accounts.find({
 
 1. **操作处理时标记**：
 
-   - 当处理涉及账户的操作（transfer, vote, comment等）时，标记账户 `needs_update = true`
-   - 不自己计算余额，只标记需要更新
+- 当处理涉及账户的操作（transfer, vote, comment等）时，标记账户 `needs_update = true`
+- 不自己计算余额，只标记需要更新
 
 2. **批量更新**：
 
-   - Account Updater 定期查询 `needs_update = true` 的账户
-   - 批量调用 `condenser_api.get_accounts` 获取最新账户信息
-   - 更新 accounts 集合，清除 `needs_update` 标记
+- Account Updater 定期查询 `needs_update = true` 的账户
+- 批量调用 `condenser_api.get_accounts` 获取最新账户信息
+- 更新 accounts 集合，清除 `needs_update` 标记
 
 3. **更新频率**：
 
-   - 在 CronTab 中定期执行（如每小时或每6小时）
-   - 批量处理，避免频繁调用 API
+- 在 CronTab 中定期执行（如每小时或每6小时）
+- 批量处理，避免频繁调用 API
 
 ### 10.2 实现示例
 
@@ -668,6 +684,8 @@ func (a *AccountUpdater) UpdateAccounts(ctx context.Context) error {
 }
 ```
 
+
+
 ## 11. 注意事项
 
 1. **数据一致性**：按区块顺序串行处理，保证操作时序正确性
@@ -675,4 +693,3 @@ func (a *AccountUpdater) UpdateAccounts(ctx context.Context) error {
 3. **批量写入**：使用 BulkWrite，设置 ordered=false 提升性能
 4. **账户更新**：操作处理时只标记，定期批量更新，避免频繁调用 API
 5. **索引维护**：定期分析慢查询，优化索引
-6. **数据归档**：考虑历史数据归档策略（如只保留最近1年的详细操作）
