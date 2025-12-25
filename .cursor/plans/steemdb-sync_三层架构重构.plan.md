@@ -29,6 +29,8 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+
+
 ## 第一部分：Raw Operation Sync
 
 ### 1.1 数据模型设计
@@ -63,6 +65,8 @@ type SyncState struct {
 }
 ```
 
+
+
 ### 1.2 同步服务实现
 
 **文件**: `internal/sync/raw_syncer.go`（新建）**核心功能**：
@@ -71,9 +75,9 @@ type SyncState struct {
 - 参考 `sps-fund-watcher/internal/sync/syncer.go` 的实现
 - 批量处理区块，使用 `GetOpsInBlocks` 而不是 `GetBlocks` + `GetOpsInBlock`
 - **正确存储链上时间**：
-  - Regular operations：使用 `block.Timestamp`（区块时间戳）
-  - Virtual operations：使用 `opObj.Timestamp`（操作对象的时间戳）
-  - 确保 `timestamp` 字段存储的是区块链上的实际发生时间，而非入库时间
+- Regular operations：使用 `block.Timestamp`（区块时间戳）
+- Virtual operations：使用 `opObj.Timestamp`（操作对象的时间戳）
+- 确保 `timestamp` 字段存储的是区块链上的实际发生时间，而非入库时间
 - 保存所有 operations 到 `operations` 集合
 - 使用 upsert 防止重复（唯一索引：`block_num + trx_id + op_in_trx + is_virtual + virtual_op_num`）
 
@@ -96,6 +100,8 @@ func (s *RawSyncer) SyncBlocks(ctx context.Context, startBlock int64) error {
 }
 ```
 
+
+
 ### 1.3 存储层实现
 
 **文件**: `internal/database/mongodb.go`（修改）**新增方法**：
@@ -113,21 +119,21 @@ func (s *RawSyncer) SyncBlocks(ctx context.Context, startBlock int64) error {
 - **分表方案**: 按区块高度范围分表
 - **分表粒度**: 每 1000 万区块一个集合（`operations_0_10000000`, `operations_10000000_20000000`, ...）
 - **理由**: 
-  - 总 operations 数量约 24 亿条，总存储空间约 1.6 TB
-  - 单集合 24 亿条文档会导致查询性能下降和维护困难
-  - 分表后每个集合约 2.4 亿条文档，160 GB，性能和维护性更好
+- 总 operations 数量约 24 亿条，总存储空间约 1.6 TB
+- 单集合 24 亿条文档会导致查询性能下降和维护困难
+- 分表后每个集合约 2.4 亿条文档，160 GB，性能和维护性更好
 - **查询设计**: 
-  - Layer 2 的 batch size 设计应确保每次查询只涉及单个集合
-  - 正常情况下不会出现跨集合查询（batch size 远小于 1000 万区块范围）
-  - 跨集合查询仅用于特殊情况（如 backfill 工具处理大范围数据）
+- Layer 2 的 batch size 设计应确保每次查询只涉及单个集合
+- 正常情况下不会出现跨集合查询（batch size 远小于 1000 万区块范围）
+- 跨集合查询仅用于特殊情况（如 backfill 工具处理大范围数据）
 
 **索引**（每个集合都有相同的索引结构）：
 
 - 唯一索引：`{block_num: 1, trx_id: 1, op_in_trx: 1, is_virtual: 1, virtual_op_num: 1}`
 - 查询索引：
-  - `{block_num: 1, timestamp: -1}` - 按区块号和链上时间排序（用于 Layer 2 按时间顺序处理）
-  - `{timestamp: 1}` - 按链上时间排序（用于按区块链时间顺序查询）
-  - `{trx_id: 1}`, `{op_type: 1}` - 其他查询场景
+- `{block_num: 1, timestamp: -1}` - 按区块号和链上时间排序（用于 Layer 2 按时间顺序处理）
+- `{timestamp: 1}` - 按链上时间排序（用于按区块链时间顺序查询）
+- `{trx_id: 1}`, `{op_type: 1}` - 其他查询场景
 
 ### 1.4 入口程序
 
@@ -170,6 +176,8 @@ func (p *BusinessProcessor) ProcessOperations(ctx context.Context, startBlock, e
     // 5. 更新处理进度（每个业务类型单独记录）
 }
 ```
+
+
 
 ### 2.2 业务处理器实现
 
@@ -224,6 +232,7 @@ business_processor:
 ```
 
 **Batch Size 设计原则**：
+
 - `batch_size` 按 operations 数量控制，每次处理 1000 条 operations
 - 1000 条 operations 约对应 40-50 个区块（按 24 operations/区块计算）
 - 远小于单个集合的 1000 万区块范围，确保不会跨集合查询
@@ -334,6 +343,8 @@ steemdb-sync/
 │       └── mongodb.go   # 新增 operations、sync_state、business_processing_state 相关方法
 ```
 
+
+
 ### 修改文件
 
 - `internal/database/models.go` - 添加 `Operation`、`SyncState`、`BusinessProcessingState` 模型
@@ -350,9 +361,8 @@ steemdb-sync/
 
 ### 0. 分表实现
 
-**参考**: `steemdb-sync_Layer1存储空间评估.md`
+**参考**: `steemdb-sync_Layer1存储空间评估.md`**集合命名规则**：
 
-**集合命名规则**：
 ```go
 func GetCollectionName(blockNum int64) string {
     rangeSize := int64(10_000_000) // 每 1000 万区块一个集合
@@ -363,47 +373,55 @@ func GetCollectionName(blockNum int64) string {
 ```
 
 **集合和索引创建策略**：
+
 - **集合创建**：自动创建（MongoDB 默认行为，第一次插入数据时自动创建）
 - **索引创建**：自动创建（在第一次插入数据到新集合前，确保索引存在）
 - **实现方式**：
   ```go
-  func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
-      collection := m.db.Collection(collectionName)
-      
-      // 检查索引是否已存在（通过尝试创建，如果已存在则忽略错误）
-      // 或者先检查集合是否存在，如果不存在则创建索引
-      indexes := []mongo.IndexModel{
-          // 唯一索引
-          {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_id", Value: 1}, 
-                       {Key: "op_in_trx", Value: 1}, {Key: "is_virtual", Value: 1}, 
-                       {Key: "virtual_op_num", Value: 1}}, 
-           Options: options.Index().SetUnique(true)},
-          // 查询索引
-          {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
-          {Keys: bson.D{{Key: "timestamp", Value: 1}}},
-          {Keys: bson.D{{Key: "trx_id", Value: 1}}},
-          {Keys: bson.D{{Key: "op_type", Value: 1}}},
+      func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
+          collection := m.db.Collection(collectionName)
+          
+          // 检查索引是否已存在（通过尝试创建，如果已存在则忽略错误）
+          // 或者先检查集合是否存在，如果不存在则创建索引
+          indexes := []mongo.IndexModel{
+              // 唯一索引
+              {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_id", Value: 1}, 
+                           {Key: "op_in_trx", Value: 1}, {Key: "is_virtual", Value: 1}, 
+                           {Key: "virtual_op_num", Value: 1}}, 
+               Options: options.Index().SetUnique(true)},
+              // 查询索引
+              {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
+              {Keys: bson.D{{Key: "timestamp", Value: 1}}},
+              {Keys: bson.D{{Key: "trx_id", Value: 1}}},
+              {Keys: bson.D{{Key: "op_type", Value: 1}}},
+          }
+          
+          _, err := collection.Indexes().CreateMany(ctx, indexes)
+          // 如果索引已存在，MongoDB 会返回错误，可以忽略
+          if err != nil && !strings.Contains(err.Error(), "already exists") {
+              return err
+          }
+          return nil
       }
-      
-      _, err := collection.Indexes().CreateMany(ctx, indexes)
-      // 如果索引已存在，MongoDB 会返回错误，可以忽略
-      if err != nil && !strings.Contains(err.Error(), "already exists") {
-          return err
-      }
-      return nil
-  }
   ```
+
+
+
+
 - **调用时机**：在 `InsertOperations` 中，插入数据前调用 `EnsureCollectionIndexes` 确保索引存在
 
 **查询设计**：
+
 - **Layer 2 正常处理**：batch size 设计为 1000 条 operations（约 40-50 个区块），远小于单个集合的 1000 万区块范围，确保只查询单个集合
 - **跨集合查询**：仅在以下情况使用：
-  1. Backfill 工具处理大范围数据（如补齐 1000 万区块范围）
-  2. 特殊查询需求（如按时间范围查询跨集合的数据）
+
+1. Backfill 工具处理大范围数据（如补齐 1000 万区块范围）
+2. 特殊查询需求（如按时间范围查询跨集合的数据）
+
 - **查询实现**：
-  - 先判断查询范围是否跨多个集合
-  - 如果只涉及单个集合，直接查询该集合
-  - 如果跨多个集合，并行查询所有相关集合，合并结果并按 `timestamp` 排序
+- 先判断查询范围是否跨多个集合
+- 如果只涉及单个集合，直接查询该集合
+- 如果跨多个集合，并行查询所有相关集合，合并结果并按 `timestamp` 排序
 
 ### 1. GetOpsInBlocks 方法
 
@@ -420,9 +438,9 @@ func GetCollectionName(blockNum int64) string {
 - 使用 `virtual_<block_num>_<virtual_op_num>` 作为唯一标识
 - 在 `operations` 集合中用 `is_virtual` 和 `virtual_op_num` 字段标识
 - **Timestamp 存储**：
-  - Regular operations：使用 `block.Timestamp`（区块时间戳）
-  - Virtual operations：使用 `opObj.Timestamp`（操作对象的时间戳）
-  - 确保 `timestamp` 字段存储的是区块链上的实际发生时间，而非入库时间（`created_at`）
+- Regular operations：使用 `block.Timestamp`（区块时间戳）
+- Virtual operations：使用 `opObj.Timestamp`（操作对象的时间戳）
+- 确保 `timestamp` 字段存储的是区块链上的实际发生时间，而非入库时间（`created_at`）
 
 ### 3. 唯一索引设计
 
@@ -489,6 +507,8 @@ backfill:
   default_batch_size: 1000
 ```
 
+
+
 ## 测试策略
 
 1. **单元测试**：测试各个 handler 的业务逻辑
@@ -500,5 +520,3 @@ backfill:
 
 1. **Phase 1**：实现 Layer 1，开始同步所有 operations
 2. **Phase 2**：实现 Layer 2，开始业务处理，支持恢复机制
-3. **Phase 3**：实现 Layer 3，补齐工具，支持新增业务逻辑补齐
-4. **Phase 4**：测试和优化
