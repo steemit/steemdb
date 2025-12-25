@@ -166,14 +166,58 @@ func (s *AccountService) SearchAccounts(ctx context.Context, query string, limit
 	}, nil
 }
 
-// GetAccountHistory retrieves account history
-func (s *AccountService) GetAccountHistory(ctx context.Context, name string, params models.PaginationParams) (*models.AccountSearchResult, error) {
-	// For now, return empty result as placeholder
-	return &models.AccountSearchResult{
-		Accounts: []models.AccountSummary{},
-		Total:    0,
-		Page:     params.Page,
-		PageSize: params.PageSize,
+// GetAccountHistory retrieves account operation history from account_operations collection
+func (s *AccountService) GetAccountHistory(ctx context.Context, name string, params models.PaginationParams) (*models.AccountHistoryResult, error) {
+	collection := s.db.Collection("account_operations")
+
+	// Build filter
+	filter := bson.M{
+		"account": name,
+	}
+
+	// Count total documents
+	total, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count account operations: %w", err)
+	}
+
+	// Calculate pagination
+	skip := (params.Page - 1) * params.PageSize
+	totalPages := int((total + int64(params.PageSize) - 1) / int64(params.PageSize))
+
+	// Build find options
+	findOptions := options.Find().
+		SetSort(bson.M{"block_time": -1}). // Sort by block time descending (newest first)
+		SetSkip(int64(skip)).
+		SetLimit(int64(params.PageSize))
+
+	// Query account_operations
+	cursor, err := collection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find account operations: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var operations []models.AccountOperation
+	for cursor.Next(ctx) {
+		var op models.AccountOperation
+		if err := cursor.Decode(&op); err != nil {
+			s.logger.Error("Failed to decode account operation", utils.Error(err))
+			continue
+		}
+		operations = append(operations, op)
+	}
+
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error: %w", err)
+	}
+
+	return &models.AccountHistoryResult{
+		Operations: operations,
+		Total:      total,
+		Page:       params.Page,
+		PageSize:   params.PageSize,
+		TotalPages: totalPages,
 	}, nil
 }
 

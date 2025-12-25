@@ -37,6 +37,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis
 			accounts.GET("/stats", accountHandler.GetAccountStats)
 			accounts.GET("/top", accountHandler.GetTopAccounts)
 			accounts.GET("/:name", accountHandler.GetAccount)
+			accounts.GET("/:name/history", accountHandler.GetAccountHistory)
 		}
 
 		// Block routes

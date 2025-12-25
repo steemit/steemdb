@@ -143,6 +143,47 @@ func (h *AccountHandler) GetTopAccounts(c *gin.Context) {
 	h.respondWithSuccess(c, accounts)
 }
 
+// GetAccountHistory handles GET /api/v1/accounts/:name/history
+func (h *AccountHandler) GetAccountHistory(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		h.respondWithError(c, http.StatusBadRequest, "Account name is required")
+		return
+	}
+
+	// Parse pagination parameters
+	params := models.PaginationParams{
+		Page:     1,
+		PageSize: 20,
+	}
+
+	if page := c.Query("page"); page != "" {
+		if p, err := strconv.Atoi(page); err == nil && p > 0 {
+			params.Page = p
+		}
+	}
+
+	if pageSize := c.Query("page_size"); pageSize != "" {
+		if ps, err := strconv.Atoi(pageSize); err == nil && ps > 0 && ps <= 100 {
+			params.PageSize = ps
+		}
+	}
+
+	result, err := h.accountService.GetAccountHistory(c.Request.Context(), name, params)
+	if err != nil {
+		h.logger.Error("Failed to get account history", utils.String("name", name), utils.Error(err))
+		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve account history")
+		return
+	}
+
+	h.respondWithSuccessAndMeta(c, result.Operations, &models.Meta{
+		Page:       result.Page,
+		PageSize:   result.PageSize,
+		Total:      result.Total,
+		TotalPages: result.TotalPages,
+	})
+}
+
 // Helper methods
 
 func (h *AccountHandler) respondWithSuccess(c *gin.Context, data interface{}) {
