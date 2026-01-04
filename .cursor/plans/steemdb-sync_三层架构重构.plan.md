@@ -29,8 +29,6 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-
-
 ## 第一部分：Raw Operation Sync
 
 ### 1.1 数据模型设计
@@ -65,8 +63,6 @@ type SyncState struct {
 }
 ```
 
-
-
 ### 1.2 同步服务实现
 
 **文件**: `internal/sync/raw_syncer.go`（新建）**核心功能**：
@@ -99,8 +95,6 @@ func (s *RawSyncer) SyncBlocks(ctx context.Context, startBlock int64) error {
     // 5. 更新 sync_state
 }
 ```
-
-
 
 ### 1.3 存储层实现
 
@@ -176,8 +170,6 @@ func (p *BusinessProcessor) ProcessOperations(ctx context.Context, startBlock, e
     // 5. 更新处理进度（每个业务类型单独记录）
 }
 ```
-
-
 
 ### 2.2 业务处理器实现
 
@@ -343,8 +335,6 @@ steemdb-sync/
 │       └── mongodb.go   # 新增 operations、sync_state、business_processing_state 相关方法
 ```
 
-
-
 ### 修改文件
 
 - `internal/database/models.go` - 添加 `Operation`、`SyncState`、`BusinessProcessingState` 模型
@@ -378,35 +368,32 @@ func GetCollectionName(blockNum int64) string {
 - **索引创建**：自动创建（在第一次插入数据到新集合前，确保索引存在）
 - **实现方式**：
   ```go
-          func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
-              collection := m.db.Collection(collectionName)
-              
-              // 检查索引是否已存在（通过尝试创建，如果已存在则忽略错误）
-              // 或者先检查集合是否存在，如果不存在则创建索引
-              indexes := []mongo.IndexModel{
-                  // 唯一索引
-                  {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_id", Value: 1}, 
-                               {Key: "op_in_trx", Value: 1}, {Key: "is_virtual", Value: 1}, 
-                               {Key: "virtual_op_num", Value: 1}}, 
-                   Options: options.Index().SetUnique(true)},
-                  // 查询索引
-                  {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
-                  {Keys: bson.D{{Key: "timestamp", Value: 1}}},
-                  {Keys: bson.D{{Key: "trx_id", Value: 1}}},
-                  {Keys: bson.D{{Key: "op_type", Value: 1}}},
+              func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
+                  collection := m.db.Collection(collectionName)
+                  
+                  // 检查索引是否已存在（通过尝试创建，如果已存在则忽略错误）
+                  // 或者先检查集合是否存在，如果不存在则创建索引
+                  indexes := []mongo.IndexModel{
+                      // 唯一索引
+                      {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "trx_id", Value: 1}, 
+                                   {Key: "op_in_trx", Value: 1}, {Key: "is_virtual", Value: 1}, 
+                                   {Key: "virtual_op_num", Value: 1}}, 
+                       Options: options.Index().SetUnique(true)},
+                      // 查询索引
+                      {Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
+                      {Keys: bson.D{{Key: "timestamp", Value: 1}}},
+                      {Keys: bson.D{{Key: "trx_id", Value: 1}}},
+                      {Keys: bson.D{{Key: "op_type", Value: 1}}},
+                  }
+                  
+                  _, err := collection.Indexes().CreateMany(ctx, indexes)
+                  // 如果索引已存在，MongoDB 会返回错误，可以忽略
+                  if err != nil && !strings.Contains(err.Error(), "already exists") {
+                      return err
+                  }
+                  return nil
               }
-              
-              _, err := collection.Indexes().CreateMany(ctx, indexes)
-              // 如果索引已存在，MongoDB 会返回错误，可以忽略
-              if err != nil && !strings.Contains(err.Error(), "already exists") {
-                  return err
-              }
-              return nil
-          }
   ```
-
-
-
 
 - **调用时机**：在 `InsertOperations` 中，插入数据前调用 `EnsureCollectionIndexes` 确保索引存在
 
@@ -507,13 +494,8 @@ backfill:
   default_batch_size: 1000
 ```
 
-
-
 ## 测试策略
 
 1. **单元测试**：测试各个 handler 的业务逻辑
 2. **集成测试**：测试三层架构的协作
 3. **恢复机制测试**：测试业务处理服务重启后能否正确恢复
-4. **性能测试**：确保同步速度满足要求
-
-## 实施步骤
