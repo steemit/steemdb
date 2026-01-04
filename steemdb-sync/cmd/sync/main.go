@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/steemit/steemdb/sync/internal/database"
-	"github.com/steemit/steemdb/sync/internal/services"
+	"github.com/steemit/steemdb/sync/internal/sync"
 	"github.com/steemit/steemdb/sync/internal/utils"
 )
 
@@ -35,17 +34,9 @@ func main() {
 	}
 	defer logger.Sync()
 
-	logger.Info("Starting SteemDB Sync Service",
+	logger.Info("Starting SteemDB Sync Service (Layer 1: Raw Operation Sync)",
 		utils.String("version", "1.0.0"),
 		utils.String("config", configPath),
-	)
-
-	// Debug: Log actual configuration values
-	logger.Info("Configuration loaded",
-		utils.String("mongodb_uri", cfg.MongoDB.URI),
-		utils.String("redis_uri", cfg.Redis.URI),
-		utils.String("env_database_mongodb_uri", os.Getenv("DATABASE_MONGODB_URI")),
-		utils.String("env_mongodb_uri", os.Getenv("MONGODB_URI")),
 	)
 
 	// Initialize database
@@ -53,83 +44,84 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to connect to MongoDB", utils.Error(err))
 	}
+	defer func() {
+		if err := db.Close(context.Background()); err != nil {
+			logger.Error("Failed to close database connection", utils.Error(err))
+		}
+	}()
 
-	// Initialize Steem client
+	// Initialize Steem client (has retry and node switching logic)
 	steemClient := utils.NewSteemClient(cfg.Steem.Nodes, logger)
+
+	// Create Raw Syncer
+	rawSyncer := sync.NewRawSyncer(steemClient, db, logger, cfg)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create indexes
-	if err := db.CreateIndexes(ctx); err != nil {
-		logger.Error("Failed to create database indexes", utils.Error(err))
+	// Get sync state to determine start block
+	syncState, err := db.GetSyncState(ctx)
+	if err != nil {
+		logger.Fatal("Failed to get sync state", utils.Error(err))
 	}
 
-	// Initialize services
-	serviceManager := services.NewManager(cfg, db, steemClient, logger)
+	startBlock := cfg.Sync.StartBlock
+	if syncState.LastBlock > 0 && syncState.LastBlock >= startBlock {
+		startBlock = syncState.LastBlock + 1
+		logger.Info("Resuming from last synced block",
+			utils.Int64("start_block", startBlock),
+			utils.Int64("last_block", syncState.LastBlock),
+		)
+	} else {
+		logger.Info("Starting from configured block",
+			utils.Int64("start_block", startBlock),
+		)
+	}
 
-	// Start services
-	var wg sync.WaitGroup
-
-	// Start block sync service
-	wg.Add(1)
+	// Start sync loop in a goroutine
 	go func() {
-		defer wg.Done()
-		if err := serviceManager.BlockSync.Start(ctx); err != nil {
-			logger.Error("Block sync service error", utils.Error(err))
-		}
-	}()
+		ticker := time.NewTicker(cfg.Sync.BlockInterval)
+		defer ticker.Stop()
 
-	// Start cron tab service (waits for sync to catch up)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := serviceManager.CronTab.Start(ctx); err != nil {
-			logger.Error("Cron tab service error", utils.Error(err))
-		}
-	}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Get current sync state to determine actual start block
+				currentState, err := db.GetSyncState(ctx)
+				if err != nil {
+					logger.Error("Failed to get sync state", utils.Error(err))
+					time.Sleep(5 * time.Second)
+					continue
+				}
 
-	// Start metrics server if enabled
-	if cfg.Metrics.Enabled {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			logger.Info("Starting metrics server", utils.Int("port", cfg.Metrics.Port))
-			if err := serviceManager.StartMetricsServer(ctx); err != nil {
-				logger.Error("Metrics server error", utils.Error(err))
+				actualStartBlock := cfg.Sync.StartBlock
+				if currentState.LastBlock > 0 && currentState.LastBlock >= cfg.Sync.StartBlock {
+					actualStartBlock = currentState.LastBlock + 1
+				}
+
+				if err := rawSyncer.SyncBlocks(ctx, actualStartBlock); err != nil {
+					logger.Error("Error syncing blocks", utils.Error(err))
+					time.Sleep(5 * time.Second)
+				}
 			}
-		}()
-	}
+		}
+	}()
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	logger.Info("SteemDB Sync Service started successfully")
+	logger.Info("SteemDB Sync Service (Layer 1) started successfully")
 	<-sigChan
 
 	logger.Info("Shutting down SteemDB Sync Service...")
 	cancel()
 
-	// Wait for all services to stop with timeout
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		logger.Info("All services stopped gracefully")
-	case <-time.After(30 * time.Second):
-		logger.Warn("Force shutdown after timeout")
-	}
-
-	// Close database connection
-	if err := db.Close(context.Background()); err != nil {
-		logger.Error("Failed to close database connection", utils.Error(err))
-	}
+	// Wait a bit for graceful shutdown
+	time.Sleep(2 * time.Second)
 
 	logger.Info("SteemDB Sync Service stopped")
 }

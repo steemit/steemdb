@@ -373,13 +373,13 @@ type Status struct {
 
 // Operation represents a blockchain operation
 type Operation struct {
-	ID        primitive.ObjectID `bson:"_id" json:"id"`
-	BlockNum  int64              `bson:"block_num" json:"block_num"`
-	BlockTime time.Time          `bson:"block_time" json:"block_time"`
-	TrxID     string             `bson:"trx_id" json:"trx_id"`        // 交易ID（用于 tx_id 查询）
-	TrxInBlock int               `bson:"trx_in_block" json:"trx_in_block"` // 交易在区块中的索引
-	OpType    string             `bson:"op_type" json:"op_type"`      // comment, vote, transfer等
-	OpIndex   int                `bson:"op_index" json:"op_index"`    // 操作在交易中的索引
+	ID         primitive.ObjectID `bson:"_id" json:"id"`
+	BlockNum   int64              `bson:"block_num" json:"block_num"`
+	BlockTime  time.Time          `bson:"block_time" json:"block_time"`
+	TrxID      string             `bson:"trx_id" json:"trx_id"`             // 交易ID（用于 tx_id 查询）
+	TrxInBlock int                `bson:"trx_in_block" json:"trx_in_block"` // 交易在区块中的索引
+	OpType     string             `bson:"op_type" json:"op_type"`           // comment, vote, transfer等
+	OpIndex    int                `bson:"op_index" json:"op_index"`         // 操作在交易中的索引
 
 	// 操作数据（反范式化）
 	Data bson.M `bson:"data" json:"data"` // 操作具体数据
@@ -433,4 +433,67 @@ type GlobalStats struct {
 	LastBlockTime time.Time `bson:"last_block_time" json:"last_block_time"`
 
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+}
+
+// RawOperation represents a raw blockchain operation (Layer 1)
+// This is the complete operation data stored before business processing
+// RawBlock represents a raw blockchain block as stored in Layer 1
+type RawBlock struct {
+	ID                    int64         `bson:"_id"`                     // Block number
+	Number                int64         `bson:"block_num"`               // Block number (redundant)
+	Hash                  string        `bson:"block_id"`                // Block hash (block_id)
+	Previous              string        `bson:"previous"`                // Previous block hash
+	Timestamp             time.Time     `bson:"timestamp"`               // Block timestamp
+	Witness               string        `bson:"witness"`                 // Witness who produced this block
+	TransactionMerkleRoot string        `bson:"transaction_merkle_root"` // Transaction merkle root
+	Extensions            []interface{} `bson:"extensions"`              // Block extensions
+	WitnessSignature      string        `bson:"witness_signature"`       // Witness signature
+	TransactionCount      int           `bson:"tx_count"`                // Number of transactions in this block
+	OperationCount        int           `bson:"op_count"`                // Number of operations in this block (including virtual)
+	CreatedAt             time.Time     `bson:"created_at"`              // Record creation time
+}
+
+// RawTransaction represents a raw blockchain transaction as stored in Layer 1
+type RawTransaction struct {
+	ID             primitive.ObjectID `bson:"_id"`
+	BlockNum       int64              `bson:"block_num"`        // Block number
+	TrxID          string             `bson:"trx_id"`           // Transaction ID (unique identifier)
+	TrxInBlock     int                `bson:"trx_in_block"`     // Transaction index in block
+	RefBlockNum    uint16             `bson:"ref_block_num"`    // Reference block number
+	RefBlockPrefix uint32             `bson:"ref_block_prefix"` // Reference block prefix
+	Expiration     time.Time          `bson:"expiration"`       // Transaction expiration time
+	Extensions     []interface{}      `bson:"extensions"`       // Transaction extensions
+	Signatures     []string           `bson:"signatures"`       // Transaction signatures
+	OperationCount int                `bson:"op_count"`         // Number of operations in this transaction
+	CreatedAt      time.Time          `bson:"created_at"`       // Record creation time
+}
+
+// RawOperation represents a raw blockchain operation as stored in Layer 1
+type RawOperation struct {
+	ID           primitive.ObjectID `bson:"_id"`
+	BlockNum     int64              `bson:"block_num"`      // Block number
+	TrxID        string             `bson:"trx_id"`         // Transaction ID
+	TrxInBlock   int                `bson:"trx_in_block"`   // Transaction index in block
+	OpInTrx      int                `bson:"op_in_trx"`      // Operation index in transaction
+	OpType       string             `bson:"op_type"`        // Operation type
+	OpData       bson.M             `bson:"op_data"`        // Complete operation data
+	IsVirtual    bool               `bson:"is_virtual"`     // Whether it's a virtual operation
+	VirtualOpNum int                `bson:"virtual_op_num"` // Virtual operation number (if virtual)
+	Timestamp    time.Time          `bson:"timestamp"`      // Blockchain operation time (on-chain time)
+	CreatedAt    time.Time          `bson:"created_at"`     // Record creation time (insertion time)
+}
+
+// SyncState represents the sync state (Layer 1)
+type SyncState struct {
+	ID                    string    `bson:"_id"`
+	LastBlock             int64     `bson:"last_block"`
+	LastIrreversibleBlock int64     `bson:"last_irreversible_block"`
+	UpdatedAt             time.Time `bson:"updated_at"`
+}
+
+// BusinessProcessingState represents the business processing state (Layer 2)
+type BusinessProcessingState struct {
+	ID        string    `bson:"_id"`        // Business type (e.g., "comments", "votes", "transfers")
+	LastBlock int64     `bson:"last_block"` // Last processed block height
+	UpdatedAt time.Time `bson:"updated_at"` // Last update time
 }

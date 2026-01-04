@@ -13,7 +13,7 @@ mongodb:
   uri: "mongodb://localhost:27017"
   database: "steemdb_test"
   pool_size: 10
-  timeout: 10s
+  timeout: 30s
 
 redis:
   uri: "redis://localhost:6379"
@@ -22,8 +22,8 @@ redis:
   pool_size: 10
 
 sync:
-  block_batch_size: 10000
-  block_interval: 10s
+  batch_size: 100  # 小批量用于测试
+  block_interval: 2s
   start_block: 1
 
 history:

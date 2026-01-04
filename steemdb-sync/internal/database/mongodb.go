@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -341,5 +342,497 @@ func (m *MongoDB) MarkAccountNeedsUpdate(ctx context.Context, accountName string
 		return fmt.Errorf("failed to mark account needs update: %w", err)
 	}
 
+	return nil
+}
+
+// ============================================================================
+// Layer 1: Raw Operation Sync - Collection Sharding Support
+// ============================================================================
+
+const (
+	// CollectionRangeSize is the block range size for each operations collection
+	// Each collection stores 10 million blocks (e.g., operations_0_10000000)
+	CollectionRangeSize = int64(10_000_000)
+)
+
+// GetBlocksCollectionName returns the collection name for a given block number
+// Collection naming: blocks_{start_block}_{end_block}
+// Example: blocks_0_10000000, blocks_10000000_20000000
+func GetBlocksCollectionName(blockNum int64) string {
+	startBlock := (blockNum / CollectionRangeSize) * CollectionRangeSize
+	endBlock := startBlock + CollectionRangeSize
+	return fmt.Sprintf("blocks_%d_%d", startBlock, endBlock)
+}
+
+// GetTransactionsCollectionName returns the collection name for a given block number
+// Collection naming: transactions_{start_block}_{end_block}
+// Example: transactions_0_10000000, transactions_10000000_20000000
+func GetTransactionsCollectionName(blockNum int64) string {
+	startBlock := (blockNum / CollectionRangeSize) * CollectionRangeSize
+	endBlock := startBlock + CollectionRangeSize
+	return fmt.Sprintf("transactions_%d_%d", startBlock, endBlock)
+}
+
+// GetOperationsCollectionName returns the collection name for a given block number
+// Collection naming: operations_{start_block}_{end_block}
+// Example: operations_0_10000000, operations_10000000_20000000
+func GetOperationsCollectionName(blockNum int64) string {
+	startBlock := (blockNum / CollectionRangeSize) * CollectionRangeSize
+	endBlock := startBlock + CollectionRangeSize
+	return fmt.Sprintf("operations_%d_%d", startBlock, endBlock)
+}
+
+// GetOperationsCollection returns the MongoDB collection for a given block number
+func (m *MongoDB) GetOperationsCollection(blockNum int64) *mongo.Collection {
+	collectionName := GetOperationsCollectionName(blockNum)
+	return m.database.Collection(collectionName)
+}
+
+// GetCollectionsInRange returns all collection names that cover the given block range
+// Returns collections for operations (can be extended for blocks/transactions)
+func GetCollectionsInRange(startBlock, endBlock int64) []string {
+	collections := make(map[string]bool)
+	
+	// Calculate start and end collection ranges
+	startCollectionStart := (startBlock / CollectionRangeSize) * CollectionRangeSize
+	endCollectionStart := (endBlock / CollectionRangeSize) * CollectionRangeSize
+	
+	// Add all collections in the range
+	for collectionStart := startCollectionStart; collectionStart <= endCollectionStart; collectionStart += CollectionRangeSize {
+		collectionEnd := collectionStart + CollectionRangeSize
+		collectionName := fmt.Sprintf("operations_%d_%d", collectionStart, collectionEnd)
+		collections[collectionName] = true
+	}
+	
+	result := make([]string, 0, len(collections))
+	for name := range collections {
+		result = append(result, name)
+	}
+	return result
+}
+
+// EnsureCollectionIndexes ensures that indexes exist for a given collection
+// This is called before inserting data to ensure indexes are created
+func (m *MongoDB) EnsureCollectionIndexes(ctx context.Context, collectionName string) error {
+	collection := m.database.Collection(collectionName)
+	
+	indexes := []mongo.IndexModel{
+		// Unique index: block_num + trx_id + op_in_trx + is_virtual + virtual_op_num
+		{
+			Keys: bson.D{
+				{Key: "block_num", Value: 1},
+				{Key: "trx_id", Value: 1},
+				{Key: "op_in_trx", Value: 1},
+				{Key: "is_virtual", Value: 1},
+				{Key: "virtual_op_num", Value: 1},
+			},
+			Options: options.Index().SetUnique(true),
+		},
+		// Query indexes
+		{Keys: bson.D{{Key: "block_num", Value: 1}, {Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "timestamp", Value: 1}}},
+		{Keys: bson.D{{Key: "trx_id", Value: 1}}},
+		{Keys: bson.D{{Key: "op_type", Value: 1}}},
+	}
+	
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	if err != nil {
+		// Check if error is due to existing indexes (ignore if so)
+		if !strings.Contains(err.Error(), "already exists") && !strings.Contains(err.Error(), "duplicate key") {
+			return fmt.Errorf("failed to create indexes for collection %s: %w", collectionName, err)
+		}
+	}
+	
+	return nil
+}
+
+// InsertOperations inserts multiple operations into MongoDB with sharding support
+// Automatically routes to the correct collection based on block number
+// Ensures indexes exist before inserting
+func (m *MongoDB) InsertOperations(ctx context.Context, ops []*RawOperation) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	
+	// Group operations by collection
+	opsByCollection := make(map[string][]*RawOperation)
+	for _, op := range ops {
+		collectionName := GetOperationsCollectionName(op.BlockNum)
+		opsByCollection[collectionName] = append(opsByCollection[collectionName], op)
+	}
+	
+	// Insert operations for each collection
+	for collectionName, collectionOps := range opsByCollection {
+		// Ensure indexes exist before inserting
+		if err := m.EnsureCollectionIndexes(ctx, collectionName); err != nil {
+			return fmt.Errorf("failed to ensure indexes for collection %s: %w", collectionName, err)
+		}
+		
+		collection := m.database.Collection(collectionName)
+		now := time.Now()
+		
+		// Prepare bulk write operations (upsert to prevent duplicates)
+		models := make([]mongo.WriteModel, 0, len(collectionOps))
+		for _, op := range collectionOps {
+			op.CreatedAt = now
+			
+			filter := bson.M{
+				"block_num":      op.BlockNum,
+				"trx_id":         op.TrxID,
+				"op_in_trx":      op.OpInTrx,
+				"is_virtual":     op.IsVirtual,
+				"virtual_op_num": op.VirtualOpNum,
+			}
+			
+			update := bson.M{"$set": op}
+			upsertModel := mongo.NewUpdateOneModel().
+				SetFilter(filter).
+				SetUpdate(update).
+				SetUpsert(true)
+			models = append(models, upsertModel)
+		}
+		
+		opts := options.BulkWrite().SetOrdered(false)
+		if _, err := collection.BulkWrite(ctx, models, opts); err != nil {
+			return fmt.Errorf("failed to bulk write operations to collection %s: %w", collectionName, err)
+		}
+	}
+	
+	return nil
+}
+
+// InsertBlocks inserts multiple blocks into MongoDB with sharding support
+func (m *MongoDB) InsertBlocks(ctx context.Context, blocks []*RawBlock) error {
+	if len(blocks) == 0 {
+		return nil
+	}
+	
+	// Group blocks by collection
+	blocksByCollection := make(map[string][]*RawBlock)
+	for _, block := range blocks {
+		collectionName := GetBlocksCollectionName(block.Number)
+		blocksByCollection[collectionName] = append(blocksByCollection[collectionName], block)
+	}
+	
+	// Insert blocks for each collection
+	for collectionName, collectionBlocks := range blocksByCollection {
+		collection := m.database.Collection(collectionName)
+		now := time.Now()
+		
+		// Prepare bulk write operations (upsert to prevent duplicates)
+		models := make([]mongo.WriteModel, 0, len(collectionBlocks))
+		for _, block := range collectionBlocks {
+			block.CreatedAt = now
+			
+			filter := bson.M{"_id": block.Number}
+			update := bson.M{"$set": block}
+			upsertModel := mongo.NewUpdateOneModel().
+				SetFilter(filter).
+				SetUpdate(update).
+				SetUpsert(true)
+			models = append(models, upsertModel)
+		}
+		
+		opts := options.BulkWrite().SetOrdered(false)
+		if _, err := collection.BulkWrite(ctx, models, opts); err != nil {
+			return fmt.Errorf("failed to bulk write blocks to collection %s: %w", collectionName, err)
+		}
+		
+		// Ensure indexes exist
+		if err := m.EnsureBlocksCollectionIndexes(ctx, collectionName); err != nil {
+			m.logger.Warn("Failed to ensure indexes for blocks collection",
+				utils.String("collection", collectionName),
+				utils.Error(err),
+			)
+		}
+	}
+	
+	return nil
+}
+
+// InsertTransactions inserts multiple transactions into MongoDB with sharding support
+func (m *MongoDB) InsertTransactions(ctx context.Context, transactions []*RawTransaction) error {
+	if len(transactions) == 0 {
+		return nil
+	}
+	
+	// Group transactions by collection
+	txsByCollection := make(map[string][]*RawTransaction)
+	for _, tx := range transactions {
+		collectionName := GetTransactionsCollectionName(tx.BlockNum)
+		txsByCollection[collectionName] = append(txsByCollection[collectionName], tx)
+	}
+	
+	// Insert transactions for each collection
+	for collectionName, collectionTxs := range txsByCollection {
+		collection := m.database.Collection(collectionName)
+		now := time.Now()
+		
+		// Prepare bulk write operations (upsert to prevent duplicates)
+		models := make([]mongo.WriteModel, 0, len(collectionTxs))
+		for _, tx := range collectionTxs {
+			tx.CreatedAt = now
+			
+			filter := bson.M{
+				"block_num": tx.BlockNum,
+				"trx_id":    tx.TrxID,
+			}
+			update := bson.M{"$set": tx}
+			upsertModel := mongo.NewUpdateOneModel().
+				SetFilter(filter).
+				SetUpdate(update).
+				SetUpsert(true)
+			models = append(models, upsertModel)
+		}
+		
+		opts := options.BulkWrite().SetOrdered(false)
+		if _, err := collection.BulkWrite(ctx, models, opts); err != nil {
+			return fmt.Errorf("failed to bulk write transactions to collection %s: %w", collectionName, err)
+		}
+		
+		// Ensure indexes exist
+		if err := m.EnsureTransactionsCollectionIndexes(ctx, collectionName); err != nil {
+			m.logger.Warn("Failed to ensure indexes for transactions collection",
+				utils.String("collection", collectionName),
+				utils.Error(err),
+			)
+		}
+	}
+	
+	return nil
+}
+
+// EnsureBlocksCollectionIndexes ensures that indexes exist for a blocks collection
+func (m *MongoDB) EnsureBlocksCollectionIndexes(ctx context.Context, collectionName string) error {
+	collection := m.database.Collection(collectionName)
+	
+	indexes := []mongo.IndexModel{
+		// Unique index on block number (already unique via _id)
+		{Keys: bson.D{{Key: "block_num", Value: 1}}},
+		// Query indexes
+		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "witness", Value: 1}}},
+		{Keys: bson.D{{Key: "block_id", Value: 1}}},
+	}
+	
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	if err != nil {
+		if !strings.Contains(err.Error(), "already exists") && !strings.Contains(err.Error(), "duplicate key") {
+			return fmt.Errorf("failed to create indexes for collection %s: %w", collectionName, err)
+		}
+	}
+	
+	return nil
+}
+
+// EnsureTransactionsCollectionIndexes ensures that indexes exist for a transactions collection
+func (m *MongoDB) EnsureTransactionsCollectionIndexes(ctx context.Context, collectionName string) error {
+	collection := m.database.Collection(collectionName)
+	
+	indexes := []mongo.IndexModel{
+		// Unique index: block_num + trx_id
+		{
+			Keys: bson.D{
+				{Key: "block_num", Value: 1},
+				{Key: "trx_id", Value: 1},
+			},
+			Options: options.Index().SetUnique(true),
+		},
+		// Query indexes
+		{Keys: bson.D{{Key: "block_num", Value: 1}}},
+		{Keys: bson.D{{Key: "trx_id", Value: 1}}},
+	}
+	
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	if err != nil {
+		if !strings.Contains(err.Error(), "already exists") && !strings.Contains(err.Error(), "duplicate key") {
+			return fmt.Errorf("failed to create indexes for collection %s: %w", collectionName, err)
+		}
+	}
+	
+	return nil
+}
+
+// querySingleCollection queries operations from a single collection
+func (m *MongoDB) querySingleCollection(ctx context.Context, collectionName string, startBlock, endBlock int64, filter bson.M) ([]*RawOperation, error) {
+	collection := m.database.Collection(collectionName)
+	
+	// Build query filter
+	queryFilter := bson.M{
+		"block_num": bson.M{
+			"$gte": startBlock,
+			"$lte": endBlock,
+		},
+	}
+	
+	// Merge with additional filters
+	for k, v := range filter {
+		queryFilter[k] = v
+	}
+	
+	// Query with sort by timestamp
+	opts := options.Find().
+		SetSort(bson.D{{Key: "timestamp", Value: 1}})
+	
+	cursor, err := collection.Find(ctx, queryFilter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query collection %s: %w", collectionName, err)
+	}
+	defer cursor.Close(ctx)
+	
+	var operations []*RawOperation
+	if err := cursor.All(ctx, &operations); err != nil {
+		return nil, fmt.Errorf("failed to decode operations from collection %s: %w", collectionName, err)
+	}
+	
+	return operations, nil
+}
+
+// QueryOperations queries operations from a single collection or multiple collections
+// Automatically handles single-collection or cross-collection queries
+func (m *MongoDB) QueryOperations(ctx context.Context, startBlock, endBlock int64, filter bson.M) ([]*RawOperation, error) {
+	// Determine which collections to query
+	collections := GetCollectionsInRange(startBlock, endBlock)
+	
+	// If only one collection, query directly
+	if len(collections) == 1 {
+		return m.querySingleCollection(ctx, collections[0], startBlock, endBlock, filter)
+	}
+	
+	// Multiple collections: query in parallel and merge results
+	return m.QueryOperationsAcrossCollections(ctx, startBlock, endBlock, filter)
+}
+
+// QueryOperationsAcrossCollections queries operations across multiple collections
+// Used for backfill or large range queries
+func (m *MongoDB) QueryOperationsAcrossCollections(ctx context.Context, startBlock, endBlock int64, filter bson.M) ([]*RawOperation, error) {
+	collections := GetCollectionsInRange(startBlock, endBlock)
+	
+	// Query all collections in parallel (using goroutines)
+	type result struct {
+		ops []*RawOperation
+		err error
+	}
+	
+	results := make(chan result, len(collections))
+	
+	for _, collectionName := range collections {
+		go func(name string) {
+			ops, err := m.querySingleCollection(ctx, name, startBlock, endBlock, filter)
+			results <- result{ops: ops, err: err}
+		}(collectionName)
+	}
+	
+	// Collect results
+	var allOperations []*RawOperation
+	for i := 0; i < len(collections); i++ {
+		res := <-results
+		if res.err != nil {
+			return nil, res.err
+		}
+		allOperations = append(allOperations, res.ops...)
+	}
+	
+	// Sort by timestamp (blockchain time order)
+	sort.Slice(allOperations, func(i, j int) bool {
+		return allOperations[i].Timestamp.Before(allOperations[j].Timestamp)
+	})
+	
+	return allOperations, nil
+}
+
+// GetSyncState retrieves the current sync state
+func (m *MongoDB) GetSyncState(ctx context.Context) (*SyncState, error) {
+	collection := m.Collection("sync_state")
+	
+	var state SyncState
+	err := collection.FindOne(ctx, bson.M{}).Decode(&state)
+	if err == mongo.ErrNoDocuments {
+		// Return default state if not found
+		return &SyncState{
+			ID:                    "current",
+			LastBlock:             0,
+			LastIrreversibleBlock: 0,
+			UpdatedAt:             time.Now(),
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync state: %w", err)
+	}
+	return &state, nil
+}
+
+// UpdateSyncState updates the sync state using $max to ensure last_block only increases
+func (m *MongoDB) UpdateSyncState(ctx context.Context, lastBlock, lastIrreversibleBlock int64) error {
+	collection := m.Collection("sync_state")
+	
+	filter := bson.M{}
+	update := bson.M{
+		"$set": bson.M{
+			"last_irreversible_block": lastIrreversibleBlock,
+			"updated_at":               time.Now(),
+		},
+		"$max": bson.M{
+			"last_block": lastBlock,
+		},
+		"$setOnInsert": bson.M{
+			"_id": "current",
+		},
+	}
+	
+	opts := options.Update().SetUpsert(true)
+	_, err := collection.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		return fmt.Errorf("failed to update sync state: %w", err)
+	}
+	
+	return nil
+}
+
+// ============================================================================
+// Layer 2: Business Processing State Management
+// ============================================================================
+
+// GetBusinessProcessingState retrieves the business processing state for a given business type
+func (m *MongoDB) GetBusinessProcessingState(ctx context.Context, businessType string) (*BusinessProcessingState, error) {
+	collection := m.Collection("business_processing_state")
+	
+	var state BusinessProcessingState
+	err := collection.FindOne(ctx, bson.M{"_id": businessType}).Decode(&state)
+	if err == mongo.ErrNoDocuments {
+		// Return default state if not found
+		return &BusinessProcessingState{
+			ID:        businessType,
+			LastBlock: 0,
+			UpdatedAt: time.Now(),
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get business processing state for %s: %w", businessType, err)
+	}
+	return &state, nil
+}
+
+// UpdateBusinessProcessingState updates the business processing state
+func (m *MongoDB) UpdateBusinessProcessingState(ctx context.Context, businessType string, lastBlock int64) error {
+	collection := m.Collection("business_processing_state")
+	
+	filter := bson.M{"_id": businessType}
+	update := bson.M{
+		"$set": bson.M{
+			"last_block": lastBlock,
+			"updated_at": time.Now(),
+		},
+		"$setOnInsert": bson.M{
+			"_id": businessType,
+		},
+	}
+	
+	opts := options.Update().SetUpsert(true)
+	_, err := collection.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		return fmt.Errorf("failed to update business processing state for %s: %w", businessType, err)
+	}
+	
 	return nil
 }
