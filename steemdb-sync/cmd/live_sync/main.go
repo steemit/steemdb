@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/steemit/steemdb-sync/internal/config"
+	"github.com/steemit/steemdb-sync/internal/metrics"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"github.com/steemit/steemdb-sync/internal/mongo"
 	"github.com/steemit/steemdb-sync/internal/rpc"
@@ -51,6 +53,20 @@ func main() {
 
 	nextBlock := startBlock + 1
 	log.Printf("Starting live sync from block %d", nextBlock)
+
+	// Start metrics HTTP server (optional, for monitoring)
+	go func() {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", metrics.Handler())
+		metricsServer := &http.Server{
+			Addr:    ":9091",
+			Handler: metricsMux,
+		}
+		log.Printf("Starting metrics server on :9091/metrics")
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Metrics server error: %v", err)
+		}
+	}()
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
@@ -138,6 +154,10 @@ func main() {
 				log.Printf("Failed to update max block: %v", err)
 			}
 
+			// Update metrics
+			metrics.UpdateCurrentBlock(nextBlock)
+			metrics.RecordIngestOp("rpc")
+			
 			log.Printf("Synced block %d (%d transactions, %d operations)", nextBlock, len(modelTxs), len(modelOps))
 			nextBlock++
 

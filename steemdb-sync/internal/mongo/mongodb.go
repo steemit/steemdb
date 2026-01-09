@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/steemit/steemdb-sync/internal/config"
+	"github.com/steemit/steemdb-sync/internal/metrics"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -119,6 +120,7 @@ func (c *Client) BulkUpsertOperations(ctx context.Context, ops []*model.Operatio
 		return nil
 	}
 
+	startTime := time.Now()
 	models := make([]mongo.WriteModel, 0, len(ops))
 	for _, op := range ops {
 		filter := bson.M{"_id": op.ID}
@@ -131,6 +133,11 @@ func (c *Client) BulkUpsertOperations(ctx context.Context, ops []*model.Operatio
 
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := c.operations.BulkWrite(ctx, models, opts)
+	duration := time.Since(startTime)
+	
+	// Record metrics
+	metrics.RecordMongoWrite("operations", "bulk_upsert", duration, err)
+
 	if err != nil {
 		return errors.Wrap(err, "failed to bulk upsert operations")
 	}
@@ -144,6 +151,7 @@ func (c *Client) BulkUpsertBlocks(ctx context.Context, blocks []*model.Block) er
 		return nil
 	}
 
+	startTime := time.Now()
 	models := make([]mongo.WriteModel, 0, len(blocks))
 	for _, block := range blocks {
 		filter := bson.M{"_id": block.BlockNum}
@@ -156,6 +164,11 @@ func (c *Client) BulkUpsertBlocks(ctx context.Context, blocks []*model.Block) er
 
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := c.blocks.BulkWrite(ctx, models, opts)
+	duration := time.Since(startTime)
+	
+	// Record metrics
+	metrics.RecordMongoWrite("blocks", "bulk_upsert", duration, err)
+
 	if err != nil {
 		return errors.Wrap(err, "failed to bulk upsert blocks")
 	}
@@ -169,6 +182,7 @@ func (c *Client) BulkUpsertTransactions(ctx context.Context, txs []*model.Transa
 		return nil
 	}
 
+	startTime := time.Now()
 	models := make([]mongo.WriteModel, 0, len(txs))
 	for _, tx := range txs {
 		filter := bson.M{"_id": tx.ID}
@@ -181,6 +195,11 @@ func (c *Client) BulkUpsertTransactions(ctx context.Context, txs []*model.Transa
 
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := c.transactions.BulkWrite(ctx, models, opts)
+	duration := time.Since(startTime)
+	
+	// Record metrics
+	metrics.RecordMongoWrite("transactions", "bulk_upsert", duration, err)
+
 	if err != nil {
 		return errors.Wrap(err, "failed to bulk upsert transactions")
 	}

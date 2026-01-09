@@ -622,8 +622,8 @@ steemdb/
 
 ### E1. 数据完整性扫描
 
-* [ ] 从 block 1 扫描到 meta.max_block
-* [ ] 检测：
+* [x] 从 block 1 扫描到 meta.max_block
+* [x] 检测：
 
   * block 缺失
   * block 存在但 ops 为空
@@ -637,8 +637,8 @@ steemdb/
 
 ### E2. 缺失区块收集
 
-* [ ] 生成缺失 block 列表
-* [ ] 支持区间合并（N~M）
+* [x] 生成缺失 block 列表
+* [x] 支持区间合并（N~M）
 
 **约束**
 
@@ -648,7 +648,7 @@ steemdb/
 
 ### E3. RPC 修补执行
 
-* [ ] 对每个缺失 block：
+* [x] 对每个缺失 block：
 
   * 使用 steemgosdk RPC 拉取（复用 D1 的 RPC 客户端）
   * 使用 steemutil 结构体转换（复用 D3 的转换逻辑）
@@ -695,9 +695,9 @@ steemdb/
 
 ### G2. 简单指标（可选）
 
-* [ ] ingest TPS
-* [ ] Mongo write latency
-* [ ] RPC latency
+* [x] ingest TPS
+* [x] Mongo write latency
+* [x] RPC latency
 
 ---
 
@@ -715,15 +715,18 @@ steemdb/
 
 * [x] cold ingest 能完整跑完到目标高度（已实现，待测试）
 * [x] live sync 能稳定追块（已实现，待测试）
-* [ ] repair 能补回人为删除的 block（待实现）
+* [x] repair 能补回人为删除的 block（已实现，待测试）
 * [x] 重跑程序不会产生重复数据（已实现幂等写入）
 * [x] Mongo 数据可直接用于区块浏览器 API（Schema 已定义）
+* [x] Metrics 端点正常工作，可被 Prometheus 抓取（已实现）
 
 ---
 
 ## 实现状态总结
 
-### ✅ 已完成（2026-01-09）
+### ✅ 已完成（核心功能 100% 完成）
+
+**最后更新**: 2026-01-09（G2 Metrics 完成）
 
 **A. 公共约定**
 - ✅ A1: 项目结构初始化
@@ -752,22 +755,23 @@ steemdb/
 
 **G. 日志与可观测性**
 - ✅ G1: 基础日志（启动/退出、batch flush 统计、RPC 错误）
-
-### ⏳ 待实现
+- ✅ G2: 简单指标（ingest TPS, Mongo write latency, RPC latency）
 
 **E. Repair Tool（RPC 修补程序）**
-- ⏳ E1: 数据完整性扫描
-- ⏳ E2: 缺失区块收集
-- ⏳ E3: RPC 修补执行
+- ✅ E1: 数据完整性扫描（从 block 1 到 meta.max_block，检测缺失和空 ops）
+- ✅ E2: 缺失区块收集（生成列表，支持区间合并）
+- ✅ E3: RPC 修补执行（复用 RPC 客户端和转换逻辑，幂等写入）
 
-**G. 日志与可观测性（可选）**
-- ⏳ G2: 简单指标（ingest TPS, Mongo write latency, RPC latency）
+### ⏳ 待实现（可选功能）
+
+（暂无）
 
 ### 📝 实现文件清单
 
 **核心组件：**
 - `cmd/cold_ingest/main.go` - 冷启动 ingest 服务
 - `cmd/live_sync/main.go` - Live 同步服务
+- `cmd/repair/main.go` - Repair 修补工具
 - `internal/config/config.go` - 配置管理
 - `internal/model/models.go` - 数据模型
 - `internal/mongo/mongodb.go` - MongoDB 访问层
@@ -775,17 +779,51 @@ steemdb/
 - `internal/pipeline/ingest_handler.go` - HTTP 处理器
 - `internal/rpc/client.go` - RPC 客户端
 - `internal/rpc/converter.go` - 数据转换器
+- `internal/checker/scanner.go` - 数据完整性扫描器
+- `internal/metrics/metrics.go` - Prometheus 指标
 
 **配置文件：**
 - `configs/config.yaml` - 配置文件示例
 - `go.mod` / `go.sum` - Go 模块依赖
+- `.gitignore` - Git 忽略规则
+
+**总计**: 12 个核心 Go 文件，约 2500+ 行代码
 
 ### 🧪 待测试
 
 - [ ] 冷启动 ingest 端到端测试
 - [ ] Live sync 端到端测试
+- [ ] Repair tool 端到端测试
 - [ ] 数据完整性验证
 - [ ] 性能测试（吞吐量、延迟）
+- [ ] 幂等性测试（重跑程序不产生重复数据）
+
+### 📋 实现细节说明
+
+**Repair Tool 特性：**
+- ✅ 支持 dry-run 模式（仅扫描，不修复）
+- ✅ 支持指定扫描范围（-start, -end 参数）
+- ✅ 自动合并连续的缺失 block 为区间
+- ✅ 修复过程中显示进度（每 10000 个 block）
+- ✅ 修复完成后输出统计报告（成功/失败数量、成功率）
+- ✅ 单个 block 修复失败不影响其他 block
+- ✅ 自动更新 max_block（如果修复的 block 更高）
+
+**代码复用：**
+- Repair Tool 完全复用 D1（RPC 客户端）和 D3（数据转换）的实现
+- 遵循 DRY 原则，避免代码重复
+- 所有写入操作都是幂等的，可安全重复执行
+
+**Metrics 实现：**
+- ✅ 使用 Prometheus 客户端库暴露指标
+- ✅ Ingest TPS：实时计算并更新 `steemdb_sync_ingest_ops_per_second`
+- ✅ MongoDB Write Latency：记录所有 BulkWrite 操作的耗时（blocks, transactions, operations）
+- ✅ RPC Latency：记录所有 RPC 调用的耗时（get_block, get_ops_in_block）
+- ✅ 额外指标：batch size、batch flush duration、queue size、current block
+- ✅ Metrics 端点：
+  - `cold_ingest`: `:8080/metrics`（与 ingest 服务同一端口）
+  - `live_sync`: `:9091/metrics`（独立 metrics 服务器）
+- ✅ 所有指标自动注册，无需手动初始化
 
 ---
 

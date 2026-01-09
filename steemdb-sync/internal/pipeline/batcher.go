@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/steemit/steemdb-sync/internal/config"
+	"github.com/steemit/steemdb-sync/internal/metrics"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"github.com/steemit/steemdb-sync/internal/mongo"
 )
@@ -65,6 +66,11 @@ func (b *Batcher) Stop() error {
 func (b *Batcher) AddOperation(op *model.Operation) error {
 	select {
 	case b.ops <- op:
+		// Record metrics
+		metrics.RecordIngestOp(op.Source)
+		metrics.UpdateQueueSize(len(b.ops))
+		metrics.UpdateCurrentBlock(op.BlockNum)
+		
 		// Update max block seen
 		b.maxBlockMu.Lock()
 		if op.BlockNum > b.maxBlockSeen {
@@ -155,8 +161,18 @@ func (b *Batcher) flush(ctx context.Context) error {
 		return nil
 	}
 
+	// Record batch metrics
+	startTime := time.Now()
+	
 	// Write to MongoDB
-	if err := b.mongoClient.BulkUpsertOperations(ctx, batch); err != nil {
+	err := b.mongoClient.BulkUpsertOperations(ctx, batch)
+	duration := time.Since(startTime)
+	
+	// Record metrics
+	metrics.RecordBatch(len(batch), duration)
+	metrics.UpdateQueueSize(len(b.ops))
+	
+	if err != nil {
 		return errors.Wrap(err, "failed to flush batch")
 	}
 

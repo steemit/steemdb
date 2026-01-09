@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steemit/steemdb-sync/internal/config"
+	"github.com/steemit/steemdb-sync/internal/metrics"
 	"github.com/steemit/steemdb-sync/internal/mongo"
 	"github.com/steemit/steemdb-sync/internal/pipeline"
 )
@@ -54,6 +55,12 @@ func main() {
 	// Create HTTP handler
 	handler := pipeline.NewIngestHandler(batcher)
 	http.HandleFunc("/ingest/applied_op", handler.HandleAppliedOp)
+	
+	// Add metrics endpoint
+	http.Handle("/metrics", metrics.Handler())
+
+	// Start TPS calculator
+	metrics.StartTPSCalculator(1 * time.Second)
 
 	// Start HTTP server
 	server := &http.Server{
