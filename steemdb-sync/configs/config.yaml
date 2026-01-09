@@ -1,0 +1,34 @@
+# SteemDB Sync Configuration
+
+# MongoDB connection settings
+mongo:
+  uri: "mongodb://localhost:27017"
+  database: "steemdb"
+  min_pool_size: 10
+  max_pool_size: 100
+
+# Steem RPC node settings
+rpc:
+  endpoint: "https://api.steemit.com"
+  max_retry: 3
+  timeout: "30s"
+
+# Cold start phase settings
+cold_start:
+  target_height: 0  # Set to target block height for cold start
+  safety_margin: 5  # Safety margin in blocks
+
+# Batch processing settings
+batch:
+  size: 1000           # Number of operations per batch
+  flush_interval: "1s" # Time interval for batch flush
+
+# Ingest service settings (for cold_ingest)
+ingest:
+  listen_addr: ":8080"  # HTTP server listen address
+  queue_size: 100000    # Maximum queue size for operations
+
+# Logging settings
+log:
+  level: "info"   # debug, info, warn, error
+  format: "text"   # text or json
