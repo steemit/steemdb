@@ -362,9 +362,9 @@ MongoDB BulkWrite
 
 ### A1. 项目结构初始化
 
-* [ ] 在 `steemdb/steemdb-sync/` 目录下初始化 Go 项目（Go ≥ 1.22）
-* [ ] 使用 Go Modules
-* [ ] 目录结构：
+* [x] 在 `steemdb/steemdb-sync/` 目录下初始化 Go 项目（Go ≥ 1.22）
+* [x] 使用 Go Modules
+* [x] 目录结构：
 
 ```text
 steemdb/
@@ -398,14 +398,14 @@ steemdb/
 
 ### A2. 通用配置模块
 
-* [ ] 定义配置结构体：
+* [x] 定义配置结构体：
 
   * Mongo URI / DB
   * RPC endpoint
   * cold start target height
   * batch size
   * batch flush interval
-* [ ] 支持：
+* [x] 支持：
 
   * env
   * yaml 配置文件
@@ -418,7 +418,7 @@ steemdb/
 
 ### A3. 依赖库说明
 
-* [ ] 添加 Go 依赖：
+* [x] 添加 Go 依赖：
 
   * **steemgosdk**: 用于与 Steem RPC 节点通讯
     * 包路径: `github.com/steemit/steemgosdk/api`
@@ -441,10 +441,10 @@ steemdb/
 
 ### B1. 定义 Mongo 数据模型（仅结构）
 
-* [ ] `Block`
-* [ ] `Transaction`
-* [ ] `Operation`
-* [ ] `Meta`
+* [x] `Block`
+* [x] `Transaction`
+* [x] `Operation`
+* [x] `Meta`
 
 **约束**
 
@@ -455,8 +455,8 @@ steemdb/
 
 ### B2. Mongo 初始化与索引
 
-* [ ] 建立 Mongo client
-* [ ] 自动创建索引：
+* [x] 建立 Mongo client
+* [x] 自动创建索引：
 
   * blocks._id
   * transactions._id
@@ -475,9 +475,9 @@ steemdb/
 
 ### B3. BulkWrite 封装
 
-* [ ] 封装通用 `BulkUpsert(ops []Operation)`
-* [ ] 支持 ordered=false
-* [ ] 忽略 duplicate key 错误
+* [x] 封装通用 `BulkUpsert(ops []Operation)`
+* [x] 支持 ordered=false
+* [x] 忽略 duplicate key 错误
 
 **约束**
 
@@ -490,9 +490,9 @@ steemdb/
 
 ### C1. HTTP 接收接口
 
-* [ ] 启动 HTTP server
-* [ ] POST `/ingest/applied_op`
-* [ ] JSON decode 到 Operation struct
+* [x] 启动 HTTP server
+* [x] POST `/ingest/applied_op`
+* [x] JSON decode 到 Operation struct
 
 **约束**
 
@@ -503,9 +503,9 @@ steemdb/
 
 ### C2. 内存缓冲队列
 
-* [ ] 使用 buffered channel
-* [ ] channel 容量 ≥ 100k
-* [ ] 单独 goroutine 负责消费
+* [x] 使用 buffered channel
+* [x] channel 容量 ≥ 100k
+* [x] 单独 goroutine 负责消费
 
 **约束**
 
@@ -516,11 +516,11 @@ steemdb/
 
 ### C3. Batch 聚合器
 
-* [ ] 按以下条件 flush：
+* [x] 按以下条件 flush：
 
   * 条数达到 batch_size
   * 或时间达到 batch_interval
-* [ ] flush 后调用 Mongo BulkWrite
+* [x] flush 后调用 Mongo BulkWrite
 
 **约束**
 
@@ -531,9 +531,9 @@ steemdb/
 
 ### C4. 冷启动终止逻辑
 
-* [ ] 从配置读取 target_height
-* [ ] ingest 维护 max_block_seen
-* [ ] 当 max_block_seen ≥ target_height：
+* [x] 从配置读取 target_height
+* [x] ingest 维护 max_block_seen
+* [x] 当 max_block_seen ≥ target_height：
 
   * flush 所有 batch
   * 更新 meta.cold_start_done
@@ -550,13 +550,13 @@ steemdb/
 
 ### D1. RPC 客户端封装
 
-* [ ] 使用 **steemgosdk** 实现 RPC 客户端封装
-* [ ] 创建 `internal/rpc/client.go`，封装 steemgosdk API
-* [ ] 支持：
+* [x] 使用 **steemgosdk** 实现 RPC 客户端封装
+* [x] 创建 `internal/rpc/client.go`，封装 steemgosdk API
+* [x] 支持：
 
   * get_block（使用 `api.GetBlock(blockNum)`）
   * get_ops_in_block（使用 `api.GetOpsInBlock(blockNum, onlyVirtual)`）
-* [ ] 支持重试与超时（steemgosdk 已内置，可配置）
+* [x] 支持重试与超时（steemgosdk 已内置，可配置）
 
 **约束**
 
@@ -569,9 +569,9 @@ steemdb/
 
 ### D2. Live block 同步逻辑
 
-* [ ] 从 meta.max_block 读取起始高度
-* [ ] 顺序请求 block N+1
-* [ ] 若 block 不存在：
+* [x] 从 meta.max_block 读取起始高度
+* [x] 顺序请求 block N+1
+* [x] 若 block 不存在：
 
   * sleep
   * retry
@@ -585,13 +585,13 @@ steemdb/
 
 ### D3. RPC 数据 → Mongo Schema 转换
 
-* [ ] 使用 **steemutil/protocol** 的结构体作为中间格式
-* [ ] 转换流程：
+* [x] 使用 **steemutil/protocol** 的结构体作为中间格式
+* [x] 转换流程：
 
   * RPC 返回 → `protocolapi.Block` / `protocol.OperationObject`
   * `protocolapi.Block` → Mongo `Block`
   * `protocol.OperationObject` → Mongo `Operation`
-* [ ] 处理：
+* [x] 处理：
 
   * block → Block
   * trx → Transaction
@@ -609,8 +609,8 @@ steemdb/
 
 ### D4. 写入与进度推进
 
-* [ ] 使用 BulkWrite
-* [ ] 成功写入后更新 meta.max_block
+* [x] 使用 BulkWrite
+* [x] 成功写入后更新 meta.max_block
 
 **约束**
 
@@ -665,8 +665,8 @@ steemdb/
 
 ### F1. meta 集合维护
 
-* [ ] 初始化 meta 文档
-* [ ] 维护字段：
+* [x] 初始化 meta 文档
+* [x] 维护字段：
 
   * max_block
   * cold_start_done
@@ -683,9 +683,9 @@ steemdb/
 
 ### G1. 基础日志
 
-* [ ] 启动 / 退出日志
-* [ ] batch flush 统计
-* [ ] RPC 请求错误
+* [x] 启动 / 退出日志
+* [x] batch flush 统计
+* [x] RPC 请求错误
 
 **约束**
 
@@ -713,11 +713,79 @@ steemdb/
 
 ## I. 最终交付检查表
 
-* [ ] cold ingest 能完整跑完到目标高度
-* [ ] live sync 能稳定追块
-* [ ] repair 能补回人为删除的 block
-* [ ] 重跑程序不会产生重复数据
-* [ ] Mongo 数据可直接用于区块浏览器 API
+* [x] cold ingest 能完整跑完到目标高度（已实现，待测试）
+* [x] live sync 能稳定追块（已实现，待测试）
+* [ ] repair 能补回人为删除的 block（待实现）
+* [x] 重跑程序不会产生重复数据（已实现幂等写入）
+* [x] Mongo 数据可直接用于区块浏览器 API（Schema 已定义）
+
+---
+
+## 实现状态总结
+
+### ✅ 已完成（2026-01-09）
+
+**A. 公共约定**
+- ✅ A1: 项目结构初始化
+- ✅ A2: 通用配置模块（YAML + ENV）
+- ✅ A3: 依赖库（steemgosdk + steemutil）
+
+**B. MongoDB Schema & Access Layer**
+- ✅ B1: 数据模型定义（Block, Transaction, Operation, Meta）
+- ✅ B2: MongoDB 初始化和索引创建
+- ✅ B3: BulkWrite 封装
+
+**C. Cold Start Ingest**
+- ✅ C1: HTTP 接收接口（POST /ingest/applied_op）
+- ✅ C2: 内存缓冲队列（buffered channel，容量 100k）
+- ✅ C3: Batch 聚合器（按条数/时间 flush）
+- ✅ C4: 冷启动终止逻辑（达到 target_height 后退出）
+
+**D. Live RPC 同步程序**
+- ✅ D1: RPC 客户端封装（使用 steemgosdk）
+- ✅ D2: Live block 同步逻辑（顺序请求 block）
+- ✅ D3: RPC 数据转换（使用 steemutil 结构体）
+- ✅ D4: 写入与进度推进（BulkWrite + 更新 meta.max_block）
+
+**F. 状态与元数据管理**
+- ✅ F1: meta 集合维护（已在 mongo 包中实现）
+
+**G. 日志与可观测性**
+- ✅ G1: 基础日志（启动/退出、batch flush 统计、RPC 错误）
+
+### ⏳ 待实现
+
+**E. Repair Tool（RPC 修补程序）**
+- ⏳ E1: 数据完整性扫描
+- ⏳ E2: 缺失区块收集
+- ⏳ E3: RPC 修补执行
+
+**G. 日志与可观测性（可选）**
+- ⏳ G2: 简单指标（ingest TPS, Mongo write latency, RPC latency）
+
+### 📝 实现文件清单
+
+**核心组件：**
+- `cmd/cold_ingest/main.go` - 冷启动 ingest 服务
+- `cmd/live_sync/main.go` - Live 同步服务
+- `internal/config/config.go` - 配置管理
+- `internal/model/models.go` - 数据模型
+- `internal/mongo/mongodb.go` - MongoDB 访问层
+- `internal/pipeline/batcher.go` - 批处理管道
+- `internal/pipeline/ingest_handler.go` - HTTP 处理器
+- `internal/rpc/client.go` - RPC 客户端
+- `internal/rpc/converter.go` - 数据转换器
+
+**配置文件：**
+- `configs/config.yaml` - 配置文件示例
+- `go.mod` / `go.sum` - Go 模块依赖
+
+### 🧪 待测试
+
+- [ ] 冷启动 ingest 端到端测试
+- [ ] Live sync 端到端测试
+- [ ] 数据完整性验证
+- [ ] 性能测试（吞吐量、延迟）
 
 ---
 
