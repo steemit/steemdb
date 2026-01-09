@@ -1,35 +1,4 @@
 services:
-  # SteemDB Sync Service (blockchain synchronization)
-  steemdb-sync:
-    build:
-      context: .
-      dockerfile: steemdb-sync/Dockerfile
-    # ports:
-    #   - "9091:9091"  # Metrics port
-    environment:
-      - DATABASE_MONGODB_URI=mongodb://mongo:27017/
-      - DATABASE_REDIS_URI=redis://redis:6379
-      - STEEM_NODES=https://api.steemit.com,https://api.steemitdev.com
-      - LOG_LEVEL=info
-    volumes:
-      # Mount configuration directory from host to container
-      # Edit steemdb-sync/configs/config.yaml on host to change application settings
-      # Restart container after configuration changes: docker-compose restart steemdb-sync
-      - ./steemdb-sync/configs:/app/configs
-      - ./steemdb-sync/logs:/var/log
-    depends_on:
-      - mongo
-      - redis
-    restart: unless-stopped
-    networks:
-      - steemdb-network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9091/metrics"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
   # SteemDB Web Service (includes Nginx + Go backend)
   steemdb-web:
     build:
@@ -109,8 +78,6 @@ services:
     # ports:
     #   - "9091:9090"
     volumes:
-      - ./steemdb-sync/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./steemdb-sync/monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

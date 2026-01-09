@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// Comment represents a post or comment (aligned with steemdb-sync Comment model)
+// Comment represents a post or comment
 type Comment struct {
 	ID             string                 `bson:"_id" json:"id"` // author/permlink
 	Author         string                 `bson:"author" json:"author"`

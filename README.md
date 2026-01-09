@@ -19,7 +19,6 @@ A high-performance, modern blockchain explorer and data synchronization system f
 
 SteemDB is a comprehensive blockchain data platform that provides:
 
-- **Real-time Blockchain Synchronization**: High-performance data sync service that processes 200-500 blocks/second
 - **RESTful API**: Modern web API for accessing blockchain data
 - **WebSocket Support**: Real-time data streaming for live updates
 - **Modern Web Interface**: React-based frontend with TypeScript
@@ -27,8 +26,7 @@ SteemDB is a comprehensive blockchain data platform that provides:
 
 ### Key Features
 
-- ⚡ **High Performance**: 3-5x faster than the original Python implementation
-- 🔄 **Real-time Sync**: Continuous blockchain data synchronization
+- ⚡ **High Performance**: Modern Go implementation
 - 📊 **Rich APIs**: RESTful API with WebSocket support
 - 🎨 **Modern UI**: React 19 with TypeScript and Tailwind CSS
 - 📈 **Monitoring**: Built-in Prometheus metrics and Grafana dashboards
@@ -44,19 +42,19 @@ SteemDB is a comprehensive blockchain data platform that provides:
 │                      SteemDB System                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐ │
-│  │  steemdb-    │    │  steemdb-    │    │  steemdb-    │ │
-│  │  sync        │    │  web         │    │  frontend    │ │
-│  │              │    │              │    │              │ │
-│  │  • Block     │    │  • REST API  │    │  • React UI  │ │
-│  │    Sync      │    │  • WebSocket │    │  • TypeScript│ │
-│  │  • History   │    │  • Nginx     │    │  • Tailwind  │ │
-│  │  • Witnesses │    │  • Go Backend│    │  • Vite      │ │
-│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘ │
+│  ┌──────────────┐    ┌──────────────┐ │
+│  │  steemdb-    │    │  steemdb-    │ │
+│  │  web         │    │  frontend    │ │
+│  │              │    │              │ │
+│  │  • REST API  │    │  • React UI  │ │
+│  │  • WebSocket │    │  • TypeScript│ │
+│  │  • Nginx     │    │  • Tailwind  │ │
+│  │  • Go Backend│    │  • Vite      │ │
+│  └──────┬───────┘    └──────┬───────┘ │
 │         │                    │                    │         │
-│         └────────────────────┼────────────────────┘         │
-│                              │                               │
-│         ┌────────────────────┴────────────────────┐         │
+│         └────────────────────┘                    │
+│                                                    │
+│         ┌────────────────────┐                   │
 │         │                                          │         │
 │    ┌────▼─────┐                            ┌─────▼────┐    │
 │    │ MongoDB  │                            │  Redis   │    │
@@ -86,21 +84,6 @@ SteemDB is a comprehensive blockchain data platform that provides:
 - **Process Management**: Supervisord
 
 ## 📦 Projects
-
-### steemdb-sync
-
-High-performance blockchain synchronization service that replaces the original Python services (sync, history, witnesses).
-
-**Features:**
-- Real-time block synchronization (200-500 blocks/second)
-- Account history collection (6-hour intervals)
-- Witness monitoring (1-minute intervals)
-- 16+ operation type handlers (including account_create, comment, vote, transfer, etc.)
-- Comprehensive error handling and automatic recovery
-- Prometheus metrics endpoint
-- Environment variable support for log level configuration
-
-**Documentation**: [steemdb-sync/README.md](steemdb-sync/README.md)
 
 ### steemdb-web
 
@@ -159,9 +142,6 @@ This is the fastest way to get started with all services running.
 
 2. **Configure services** (optional)
    ```bash
-   # Edit sync service configuration
-   vim steemdb-sync/configs/config.yaml
-   
    # Edit web service configuration
    vim steemdb-web/configs/config.yaml
    ```
@@ -181,28 +161,16 @@ This is the fastest way to get started with all services running.
    
    # Check health endpoints
    curl http://localhost/health
-   curl http://localhost:9091/metrics
    ```
 
 5. **Access services**
    - **Frontend**: http://localhost/
    - **API**: http://localhost/api/v1/
    - **WebSocket**: ws://localhost/ws
-   - **Prometheus**: http://localhost:9091
-   - **Grafana**: http://localhost:3000 (admin/admin123)
    - **MongoDB**: localhost:27017
    - **Redis**: localhost:6379
 
 ### Manual Development Setup
-
-#### Sync Service
-
-```bash
-cd steemdb-sync
-go mod download
-go build -o steemdb-sync cmd/sync/main.go
-./steemdb-sync configs/config.yaml
-```
 
 #### Web Service
 
@@ -228,11 +196,8 @@ The project includes a unified `docker-compose.yml` at the root directory that o
 
 **Available Services:**
 - `steemdb-web` - Web API service with Nginx and frontend
-- `steemdb-sync` - Blockchain synchronization service (if added to compose)
 - `mongo` - MongoDB database
 - `redis` - Redis cache
-- `prometheus` - Metrics collection
-- `grafana` - Visualization dashboards
 
 **Common Commands:**
 
@@ -263,9 +228,8 @@ docker-compose down -v
 
 #### Configuration Mounting
 
-Both `steemdb-sync` and `steemdb-web` support configuration mounting from the host, allowing you to modify settings without rebuilding images:
+`steemdb-web` supports configuration mounting from the host, allowing you to modify settings without rebuilding images:
 
-- **Sync Service**: `./steemdb-sync/configs:/app/configs`
 - **Web Service**: `./steemdb-web/configs:/app/configs`
 
 **To modify configuration:**
@@ -274,21 +238,15 @@ Both `steemdb-sync` and `steemdb-web` support configuration mounting from the ho
    ```bash
    # Edit web service config
    vim steemdb-web/configs/config.yaml
-   
-   # Edit sync service config
-   vim steemdb-sync/configs/config.yaml
    ```
 
 2. Restart the service to apply changes:
    ```bash
    docker-compose restart steemdb-web
-   # or
-   docker-compose restart steemdb-sync
    ```
 
 **For detailed configuration instructions:**
 - [steemdb-web/docker/CONFIGURATION.md](steemdb-web/docker/CONFIGURATION.md)
-- [steemdb-sync/README.md](steemdb-sync/README.md#configuration)
 
 ### Production Deployment
 
@@ -320,16 +278,6 @@ Both `steemdb-sync` and `steemdb-web` support configuration mounting from the ho
 ```
 steemdb/
 ├── docker-compose.yml          # Unified Docker Compose configuration
-├── steemdb-sync/               # Blockchain synchronization service
-│   ├── cmd/sync/               # Main entry point
-│   ├── internal/               # Internal packages
-│   │   ├── blockchain/         # Operation processors
-│   │   ├── database/           # MongoDB operations
-│   │   ├── services/           # Business logic
-│   │   └── utils/              # Utilities
-│   ├── pkg/steem/              # Steem RPC client
-│   ├── configs/                # Configuration files
-│   └── monitoring/             # Prometheus configs
 ├── steemdb-web/                # Web API service
 │   ├── cmd/web/                # Main entry point
 │   ├── internal/               # Internal packages
@@ -354,9 +302,6 @@ steemdb/
    # Start dependencies (MongoDB, Redis)
    docker-compose up -d mongo redis
    
-   # Run sync service locally
-   cd steemdb-sync && go run cmd/sync/main.go configs/config.yaml
-   
    # Run web service locally
    cd steemdb-web && go run cmd/web/main.go configs/config.yaml
    
@@ -366,9 +311,6 @@ steemdb/
 
 2. **Run tests**
    ```bash
-   # Sync service tests
-   cd steemdb-sync && go test ./...
-   
    # Web service tests
    cd steemdb-web && go test ./...
    
@@ -378,9 +320,6 @@ steemdb/
 
 3. **Build for production**
    ```bash
-   # Build sync service
-   cd steemdb-sync && go build -o steemdb-sync cmd/sync/main.go
-   
    # Build web service
    cd steemdb-web && go build -o steemdb-web cmd/web/main.go
    
@@ -389,13 +328,6 @@ steemdb/
    ```
 
 ### Adding New Features
-
-#### Adding a New Operation Type (Sync Service)
-
-1. Add handler to `steemdb-sync/internal/blockchain/operation_processor.go`
-2. Register handler in `registerHandlers()`
-3. Add database model if needed
-4. Write tests
 
 #### Adding a New API Endpoint (Web Service)
 
@@ -415,17 +347,12 @@ steemdb/
 
 ### Prometheus Metrics
 
-Both services expose Prometheus metrics:
+The web service exposes Prometheus metrics:
 
-- **Sync Service**: `http://localhost:9091/metrics`
 - **Web Service**: `http://localhost:9090/metrics` (if exposed)
 
 ### Key Metrics
 
-- `steemdb_blocks_processed_total` - Total blocks processed
-- `steemdb_operations_processed_total` - Total operations processed
-- `steemdb_processing_duration_seconds` - Processing time histograms
-- `steemdb_errors_total` - Error counts by type
 - `steemdb_http_requests_total` - HTTP request counts
 - `steemdb_websocket_connections` - Active WebSocket connections
 
@@ -433,15 +360,13 @@ Both services expose Prometheus metrics:
 
 Access Grafana at `http://localhost:3000`:
 - Default credentials: `admin/admin123`
-- Pre-configured dashboards for sync and web services
-- Custom dashboards can be imported from `steemdb-sync/monitoring/`
+- Pre-configured dashboards for web services
 
 ### Health Checks
 
 All services include health check endpoints:
 
 - **Web Service**: `http://localhost/health` (via Nginx)
-- **Sync Service**: `http://localhost:9090/health` (if exposed)
 - **MongoDB**: Internal health check via `mongosh`
 - **Redis**: Internal health check via `redis-cli ping`
 
@@ -458,13 +383,7 @@ docker-compose ps
 
 ### Environment Variables
 
-Both services support environment variable overrides:
-
-**Sync Service:**
-- `MONGODB_URI` - MongoDB connection string
-- `REDIS_ADDR` - Redis address
-- `STEEM_NODES` - Comma-separated Steem node URLs
-- `LOG_LEVEL` - Logging level (debug, info, warn, error)
+The web service supports environment variable overrides:
 
 **Web Service:**
 - `SERVER_MODE` - Server mode (development, production)
@@ -474,7 +393,6 @@ Both services support environment variable overrides:
 
 ### Configuration Files
 
-- **Sync Service**: `steemdb-sync/configs/config.yaml`
 - **Web Service**: `steemdb-web/configs/config.yaml`
 
 See individual project READMEs for detailed configuration options.
@@ -517,7 +435,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [x] Legacy API compatibility (302 redirects)
 - [x] WebSocket real-time streaming (aligned with legacy live.py)
 - [x] Frontend pages (Posts, Labs, Dashboard, Accounts, Witnesses)
-- [x] Comprehensive monitoring (Prometheus + Grafana)
 - [x] Docker and Docker Compose deployment
 - [x] Environment variable configuration support
 
@@ -535,7 +452,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Documentation
 
-- [steemdb-sync/README.md](steemdb-sync/README.md) - Sync service documentation
 - [steemdb-web/README.md](steemdb-web/README.md) - Web service documentation
 - [steemdb-frontend/README.md](steemdb-frontend/README.md) - Frontend documentation
 - [steemdb-web/docker/CONFIGURATION.md](steemdb-web/docker/CONFIGURATION.md) - Docker configuration guide
@@ -546,7 +462,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 steemdb/
 ├── README.md                 # This file - main project documentation
 ├── docker-compose.yml        # Unified Docker Compose configuration
-├── steemdb-sync/            # Blockchain synchronization service
 ├── steemdb-web/             # Web API service (includes frontend)
 └── steemdb-frontend/         # React frontend application
 ```
@@ -556,8 +471,6 @@ steemdb/
 **Service Ports:**
 - `80` - Web service (Nginx + Frontend + API)
 - `9090` - Web service metrics (if exposed)
-- `9091` - Prometheus
-- `3000` - Grafana
 - `27017` - MongoDB
 - `6379` - Redis
 
@@ -565,8 +478,7 @@ steemdb/
 - Health: `http://localhost/health`
 - API: `http://localhost/api/v1/`
 - WebSocket: `ws://localhost/ws`
-- Metrics: `http://localhost:9091/metrics`
-- Grafana: `http://localhost:3000`
+- Metrics: `http://localhost:9090/metrics` (if exposed)
 
 ---
 
