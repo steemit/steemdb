@@ -4,6 +4,10 @@
 *.dll
 *.so
 *.dylib
+# Compiled Go binaries (in project root)
+/cold_ingest
+/live_sync
+/repair
 # Note: Do not ignore cmd/ directories, only compiled binaries
 
 # Test binary, built with `go test -c`
