@@ -14,16 +14,16 @@ import (
 
 // Batcher handles batching operations for bulk writes
 type Batcher struct {
-	cfg          *config.Config
-	mongoClient  *mongo.Client
-	batchSize    int
+	cfg           *config.Config
+	mongoClient   *mongo.Client
+	batchSize     int
 	flushInterval time.Duration
-	ops          chan *model.Operation
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cancel       context.CancelFunc
-	maxBlockSeen uint32
-	maxBlockMu   sync.RWMutex
+	ops           chan *model.Operation
+	wg            sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
+	maxBlockSeen  uint32
+	maxBlockMu    sync.RWMutex
 }
 
 // NewBatcher creates a new batcher
@@ -36,13 +36,13 @@ func NewBatcher(cfg *config.Config, mongoClient *mongo.Client) (*Batcher, error)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	b := &Batcher{
-		cfg:          cfg,
-		mongoClient:  mongoClient,
-		batchSize:    cfg.Batch.Size,
+		cfg:           cfg,
+		mongoClient:   mongoClient,
+		batchSize:     cfg.Batch.Size,
 		flushInterval: flushInterval,
-		ops:          make(chan *model.Operation, cfg.Ingest.QueueSize),
-		ctx:          ctx,
-		cancel:       cancel,
+		ops:           make(chan *model.Operation, cfg.Ingest.QueueSize),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	return b, nil
@@ -59,18 +59,30 @@ func (b *Batcher) Stop() error {
 	close(b.ops)
 	b.cancel()
 	b.wg.Wait()
-	return b.flush(context.Background())
+	// Note: run() goroutine already flushes remaining batch when channel closes,
+	// so we don't need to call flush() again here.
+	// If there are any remaining operations in the channel buffer, they will be
+	// handled by the next flush() call from run() before it exits.
+	return nil
 }
 
 // AddOperation adds an operation to the batch queue
 func (b *Batcher) AddOperation(op *model.Operation) error {
+	// Check if context is cancelled first
+	select {
+	case <-b.ctx.Done():
+		return errors.New("batcher stopped")
+	default:
+	}
+
+	// Try to send to channel
 	select {
 	case b.ops <- op:
 		// Record metrics
 		metrics.RecordIngestOp(op.Source)
 		metrics.UpdateQueueSize(len(b.ops))
 		metrics.UpdateCurrentBlock(op.BlockNum)
-		
+
 		// Update max block seen
 		b.maxBlockMu.Lock()
 		if op.BlockNum > b.maxBlockSeen {
@@ -80,6 +92,25 @@ func (b *Batcher) AddOperation(op *model.Operation) error {
 		return nil
 	case <-b.ctx.Done():
 		return errors.New("batcher stopped")
+	default:
+		// Channel might be full or closed, try one more time with context check
+		select {
+		case b.ops <- op:
+			// Record metrics
+			metrics.RecordIngestOp(op.Source)
+			metrics.UpdateQueueSize(len(b.ops))
+			metrics.UpdateCurrentBlock(op.BlockNum)
+
+			// Update max block seen
+			b.maxBlockMu.Lock()
+			if op.BlockNum > b.maxBlockSeen {
+				b.maxBlockSeen = op.BlockNum
+			}
+			b.maxBlockMu.Unlock()
+			return nil
+		case <-b.ctx.Done():
+			return errors.New("batcher stopped")
+		}
 	}
 }
 
@@ -136,22 +167,24 @@ func (b *Batcher) run() {
 func (b *Batcher) flush(ctx context.Context) error {
 	// Collect operations from channel up to batch size
 	batch := make([]*model.Operation, 0, b.batchSize)
-	
+
 	// Collect from channel with timeout
 	timeout := time.NewTimer(100 * time.Millisecond)
 	defer timeout.Stop()
 
-	for len(batch) < b.batchSize {
+	channelClosed := false
+	for len(batch) < b.batchSize && !channelClosed {
 		select {
 		case op, ok := <-b.ops:
 			if !ok {
-				// Channel closed
-				break
+				// Channel closed, exit loop
+				channelClosed = true
+			} else {
+				batch = append(batch, op)
 			}
-			batch = append(batch, op)
 		case <-timeout.C:
-			// Timeout, flush what we have
-			break
+			// Timeout, flush what we have (exit loop)
+			channelClosed = true
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -163,15 +196,15 @@ func (b *Batcher) flush(ctx context.Context) error {
 
 	// Record batch metrics
 	startTime := time.Now()
-	
+
 	// Write to MongoDB
 	err := b.mongoClient.BulkUpsertOperations(ctx, batch)
 	duration := time.Since(startTime)
-	
+
 	// Record metrics
 	metrics.RecordBatch(len(batch), duration)
 	metrics.UpdateQueueSize(len(b.ops))
-	
+
 	if err != nil {
 		return errors.Wrap(err, "failed to flush batch")
 	}
