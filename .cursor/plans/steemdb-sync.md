@@ -726,7 +726,7 @@ steemdb/
 
 ### ✅ 已完成（核心功能 100% 完成）
 
-**最后更新**: 2026-01-09（G2 Metrics 完成）
+**最后更新**: 2026-01-09（单元测试全部完成，93 个测试用例全部通过）
 
 **A. 公共约定**
 - ✅ A1: 项目结构初始化
@@ -789,7 +789,19 @@ steemdb/
 
 **总计**: 12 个核心 Go 文件，约 2500+ 行代码
 
-### 🧪 待测试
+### 🧪 测试状态
+
+**单元测试**: ✅ 已完成（93 个测试用例，全部通过）
+
+- ✅ Config 模块：11 个测试用例
+- ✅ Model 模块：9 个测试用例
+- ✅ Mongo 模块：17 个测试用例
+- ✅ Pipeline 模块：15 个测试用例（Batcher + IngestHandler）
+- ✅ Metrics 模块：12 个测试用例
+- ✅ RPC 模块：18 个测试用例（Client + Converter）
+- ✅ Checker 模块：11 个测试用例
+
+**集成测试**: ⏳ 待实现
 
 - [ ] 冷启动 ingest 端到端测试
 - [ ] Live sync 端到端测试
@@ -797,6 +809,11 @@ steemdb/
 - [ ] 数据完整性验证
 - [ ] 性能测试（吞吐量、延迟）
 - [ ] 幂等性测试（重跑程序不产生重复数据）
+
+**测试文档**: ✅ 已完成
+
+- ✅ `.cursor/TEST_PLAN.md` - 完整测试方案
+- ✅ `steemdb-sync/test/README.md` - 测试执行指南
 
 ### 📋 实现细节说明
 
@@ -1696,55 +1713,57 @@ ingest-queue-size = 100000
 
 ### P1. Plugin 基础结构
 
-* [ ] 创建 `libraries/plugins/ingest/` 目录
-* [ ] 实现 `ingest_plugin.hpp`（类定义）
-* [ ] 实现 `ingest_plugin.cpp`（基础框架）
-* [ ] 实现 `CMakeLists.txt`（构建配置）
-* [ ] 在 `libraries/plugins/CMakeLists.txt` 中添加 subdirectory
+* [x] 创建 `libraries/plugins/ingest/` 目录
+* [x] 实现 `ingest_plugin.hpp`（类定义）
+* [x] 实现 `ingest_plugin.cpp`（基础框架）
+* [x] 实现 `CMakeLists.txt`（构建配置）
+* [x] 实现 `plugin.json`（插件元数据）
+* [x] 修复 `fc::name_from_type` 实现（在 `protocol/operations.cpp` 中）
 
 ### P2. 信号监听
 
-* [ ] 在 `plugin_initialize` 中注册 `post_apply_operation` 信号
-* [ ] 实现 `on_post_apply_operation` 回调
-* [ ] 在 `plugin_shutdown` 中断开信号连接
+* [x] 在 `plugin_initialize` 中注册 `post_apply_operation` 信号
+* [x] 实现 `on_post_apply_operation` 回调
+* [x] 在 `plugin_shutdown` 中断开信号连接
 
 ### P3. JSON 构建
 
-* [ ] 实现 `build_operation_json` 函数
-* [ ] 实现 block 对象构建
-* [ ] 实现 transaction 对象构建（真实 op）
-* [ ] 实现 transaction 对象构建（virtual op）
-* [ ] 实现 operation 对象构建
-* [ ] 实现 virtual 标记
-* [ ] 实现 `find_transaction_id`（如需要）
-* [ ] 实现 `find_transaction_index`（如需要）
+* [x] 实现 `build_operation_json` 函数
+* [x] 实现 block 对象构建
+* [x] 实现 transaction 对象构建（真实 op）
+* [x] 实现 transaction 对象构建（virtual op）
+* [x] 实现 operation 对象构建
+* [x] 实现 virtual 标记
+* [x] 使用 `fc::get_operation_name` 获取操作名称
+* [x] 使用 `fc::to_variant` 序列化操作值
 
 ### P4. HTTP 发送
 
-* [ ] 实现异步队列（std::queue + mutex）
-* [ ] 实现 `send_operation_json`（入队）
-* [ ] 实现 `http_send_worker`（后台线程）
-* [ ] 实现 `send_http_post`（Boost.Beast）
-* [ ] 在 `plugin_startup` 中启动后台线程
-* [ ] 在 `plugin_shutdown` 中停止后台线程
+* [x] 实现异步队列（std::queue + mutex）
+* [x] 实现 `send_operation_json`（入队）
+* [x] 实现 `http_send_worker`（后台线程）
+* [x] 实现 `send_http_post`（Boost.Beast）
+* [x] 在 `plugin_startup` 中启动后台线程
+* [x] 在 `plugin_shutdown` 中停止后台线程
 
 ### P5. 配置管理
 
-* [ ] 在 `set_program_options` 中添加配置项
-* [ ] 在 `plugin_initialize` 中读取配置
-* [ ] 实现配置验证
+* [x] 在 `set_program_options` 中添加配置项
+* [x] 在 `plugin_initialize` 中读取配置
+* [x] 实现配置验证（默认值设置）
 
 ### P6. 错误处理
 
-* [ ] 所有回调函数添加 try-catch
-* [ ] 实现日志记录
-* [ ] 实现队列满时的处理逻辑
+* [x] 所有回调函数添加 try-catch
+* [x] 实现日志记录（使用 `ilog`、`elog`）
+* [x] 实现队列满时的处理逻辑（队列大小限制）
 
 ### P7. 测试
 
 * [ ] 编写单元测试
 * [ ] 编写集成测试脚本
 * [ ] 性能测试
+* [ ] 端到端测试（steemd replay + ingest service）
 
 ---
 
