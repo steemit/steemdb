@@ -2,8 +2,18 @@
 
 # MongoDB connection settings
 mongo:
-  uri: "mongodb://localhost:27017"
-  database: "steemdb"
+  # MongoDB connection URI
+  # Format: mongodb://[username:password@]host[:port][/database][?options]
+  # Examples:
+  #   - Without auth: mongodb://localhost:27017
+  #   - With auth: mongodb://admin:123456@127.0.0.1:27017/steemdb_test?authSource=admin
+  #   - With auth (different database): mongodb://user:pass@host:27017/mydb?authSource=admin
+  # Note: Database name resolution priority:
+  #   1. 'database' field (if set)
+  #   2. Database name in URI (if present)
+  #   3. Default value "steemdb"
+  uri: "mongodb://admin:123456@127.0.0.1:27017/steemdb_test?authSource=admin"
+  # database: "steemdb_test"  # Optional: if not set, will be parsed from URI or use default
   min_pool_size: 10
   max_pool_size: 100
 

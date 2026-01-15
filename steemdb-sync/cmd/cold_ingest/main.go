@@ -55,6 +55,7 @@ func main() {
 	// Create HTTP handler
 	handler := pipeline.NewIngestHandler(batcher)
 	http.HandleFunc("/ingest/applied_op", handler.HandleAppliedOp)
+	http.HandleFunc("/ingest/applied_ops", handler.HandleAppliedOps)
 	
 	// Add metrics endpoint
 	http.Handle("/metrics", metrics.Handler())

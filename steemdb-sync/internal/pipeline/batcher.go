@@ -74,9 +74,9 @@ func (b *Batcher) Start() {
 func (b *Batcher) Stop() error {
 	b.stopOnce.Do(func() {
 		// Close the channel to let run() drain buffered operations and flush remaining batch.
-		close(b.ops)
+	close(b.ops)
 		// Cancel context to prevent new AddOperation calls from blocking/panicking on a closed channel.
-		b.cancel()
+	b.cancel()
 	})
 	b.wg.Wait()
 	return nil
@@ -284,7 +284,7 @@ func (b *Batcher) FlushOperationsAndBlocks(ctx context.Context, ops []*model.Ope
 	if len(blocksToWrite) > 0 {
 		if err := b.mongoClient.BulkUpsertBlocks(ctx, blocksToWrite); err != nil {
 			return errors.Wrap(err, "failed to flush blocks")
-		}
+	}
 
 		// Mark blocks as written
 		b.blocksWrittenMu.Lock()

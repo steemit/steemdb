@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -91,6 +93,9 @@ func Load(configPath string) (*Config, error) {
 		},
 	}
 
+	// Store original URI to detect if it was changed by YAML
+	originalURI := cfg.Mongo.URI
+
 	// Load from YAML file if provided
 	if configPath != "" {
 		data, err := os.ReadFile(configPath)
@@ -98,13 +103,40 @@ func Load(configPath string) (*Config, error) {
 			return nil, errors.Wrapf(err, "failed to read config file: %s", configPath)
 		}
 
+		// Temporarily set Database to empty to detect if it's set in YAML
+		originalDatabase := cfg.Mongo.Database
+		cfg.Mongo.Database = ""
+
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, errors.Wrapf(err, "failed to parse config file: %s", configPath)
+		}
+
+		// If database was not set in YAML (still empty), restore original or parse from URI
+		if cfg.Mongo.Database == "" {
+			// Check if URI was changed (meaning YAML was loaded)
+			if cfg.Mongo.URI != originalURI {
+				// YAML was loaded but database not set, try to parse from URI
+				if dbName := parseDatabaseFromURI(cfg.Mongo.URI); dbName != "" {
+					cfg.Mongo.Database = dbName
+				} else {
+					// Use default
+					cfg.Mongo.Database = originalDatabase
+				}
+			}
+			// If URI wasn't changed, keep the default database
 		}
 	}
 
 	// Override with environment variables
 	loadFromEnv(cfg)
+
+	// Resolve database name: use database field if set, otherwise parse from URI, otherwise use default
+	if cfg.Mongo.Database == "" {
+		if dbName := parseDatabaseFromURI(cfg.Mongo.URI); dbName != "" {
+			cfg.Mongo.Database = dbName
+		}
+		// If still empty, use default value (already set in initial struct)
+	}
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
@@ -112,6 +144,29 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseDatabaseFromURI extracts database name from MongoDB URI
+// Format: mongodb://[username:password@]host[:port][/database][?options]
+func parseDatabaseFromURI(uri string) string {
+	parsedURL, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+
+	// Extract database name from path
+	// Path format: /database or /database?options
+	path := strings.TrimPrefix(parsedURL.Path, "/")
+	if path == "" {
+		return ""
+	}
+
+	// Remove query parameters if present
+	if idx := strings.Index(path, "?"); idx >= 0 {
+		path = path[:idx]
+	}
+
+	return path
 }
 
 // loadFromEnv loads configuration from environment variables
@@ -144,8 +199,15 @@ func (c *Config) Validate() error {
 	if c.Mongo.URI == "" {
 		return errors.New("mongo.uri is required")
 	}
+	
+	// Ensure database is set: use database field if set, otherwise parse from URI, otherwise use default
 	if c.Mongo.Database == "" {
-		return errors.New("mongo.database is required")
+		if dbName := parseDatabaseFromURI(c.Mongo.URI); dbName != "" {
+			c.Mongo.Database = dbName
+		} else {
+			// Use default if still empty
+			c.Mongo.Database = "steemdb"
+		}
 	}
 	if c.RPC.Endpoint == "" {
 		return errors.New("rpc.endpoint is required")
