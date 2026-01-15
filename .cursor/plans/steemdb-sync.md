@@ -726,7 +726,7 @@ steemdb/
 
 ### ✅ 已完成（核心功能 100% 完成）
 
-**最后更新**: 2026-01-09（单元测试全部完成，93 个测试用例全部通过）
+**最后更新**: 2026-01-14（Ingest Plugin 核心功能完成，包括批量发送、重试机制、ACK机制、block-only支持）
 
 **A. 公共约定**
 - ✅ A1: 项目结构初始化
@@ -739,10 +739,13 @@ steemdb/
 - ✅ B3: BulkWrite 封装
 
 **C. Cold Start Ingest**
-- ✅ C1: HTTP 接收接口（POST /ingest/applied_op）
+- ✅ C1: HTTP 接收接口（POST /ingest/applied_op 和 POST /ingest/applied_ops）
 - ✅ C2: 内存缓冲队列（buffered channel，容量 100k）
 - ✅ C3: Batch 聚合器（按条数/时间 flush）
 - ✅ C4: 冷启动终止逻辑（达到 target_height 后退出）
+- ✅ C5: Block-only 记录支持（确保所有 blocks 都被记录，包括没有 operations 的）
+- ✅ C6: ACK 机制（只有成功写入 MongoDB 后才返回 200）
+- ✅ C7: 同步 flush 方法（FlushOperationsAndBlocks，保证数据持久化）
 
 **D. Live RPC 同步程序**
 - ✅ D1: RPC 客户端封装（使用 steemgosdk）
@@ -782,12 +785,21 @@ steemdb/
 - `internal/checker/scanner.go` - 数据完整性扫描器
 - `internal/metrics/metrics.go` - Prometheus 指标
 
+**Steemd Plugin（C++）：**
+- `steem/libraries/plugins/ingest/ingest_plugin.cpp` - Ingest 插件实现
+  - 批量发送（支持 `/ingest/applied_ops` 端点）
+  - Block-only 记录发送
+  - 自动重试机制（3秒延迟，最多5次）
+  - 阻塞式队列（保护 API 端点）
+  - 连接池优化
+  - Dry run 模式
+
 **配置文件：**
 - `configs/config.yaml` - 配置文件示例
 - `go.mod` / `go.sum` - Go 模块依赖
 - `.gitignore` - Git 忽略规则
 
-**总计**: 12 个核心 Go 文件，约 2500+ 行代码
+**总计**: 12 个核心 Go 文件 + 1 个 C++ 插件，约 3000+ 行代码
 
 ### 🧪 测试状态
 
@@ -1711,7 +1723,7 @@ ingest-queue-size = 100000
 
 ## 8. TODO 清单（给 Cursor）
 
-### P1. Plugin 基础结构
+### ✅ P1. Plugin 基础结构（已完成）
 
 * [x] 创建 `libraries/plugins/ingest/` 目录
 * [x] 实现 `ingest_plugin.hpp`（类定义）
@@ -1720,43 +1732,58 @@ ingest-queue-size = 100000
 * [x] 实现 `plugin.json`（插件元数据）
 * [x] 修复 `fc::name_from_type` 实现（在 `protocol/operations.cpp` 中）
 
-### P2. 信号监听
+### ✅ P2. 信号监听（已完成）
 
 * [x] 在 `plugin_initialize` 中注册 `post_apply_operation` 信号
+* [x] 在 `plugin_initialize` 中注册 `post_apply_block` 信号（用于 block-only 记录）
 * [x] 实现 `on_post_apply_operation` 回调
+* [x] 实现 `on_post_apply_block` 回调（检测并发送 block-only 记录）
 * [x] 在 `plugin_shutdown` 中断开信号连接
 
-### P3. JSON 构建
+### ✅ P3. JSON 构建（已完成）
 
 * [x] 实现 `build_operation_json` 函数
+* [x] 实现 `build_block_only_json` 函数（用于 block-only 记录）
 * [x] 实现 block 对象构建
 * [x] 实现 transaction 对象构建（真实 op）
 * [x] 实现 transaction 对象构建（virtual op）
 * [x] 实现 operation 对象构建
 * [x] 实现 virtual 标记
+* [x] 实现 `block_only` 标记（用于标识 block-only 记录）
 * [x] 使用 `fc::get_operation_name` 获取操作名称
 * [x] 使用 `fc::to_variant` 序列化操作值
 
-### P4. HTTP 发送
+### ✅ P4. HTTP 发送（已完成）
 
 * [x] 实现异步队列（std::queue + mutex）
+* [x] 实现阻塞式队列（队列满时等待，保护 API 端点）
 * [x] 实现 `send_operation_json`（入队）
 * [x] 实现 `http_send_worker`（后台线程）
-* [x] 实现 `send_http_post`（Boost.Beast）
-* [x] 在 `plugin_startup` 中启动后台线程
-* [x] 在 `plugin_shutdown` 中停止后台线程
+* [x] 实现 `http_retry_worker`（重试线程，3秒延迟，最多5次）
+* [x] 实现 `send_http_post`（单条发送，Boost.Beast）
+* [x] 实现 `send_http_batch`（批量发送，使用 `/ingest/applied_ops` 端点）
+* [x] 实现连接池（复用 TCP 连接）
+* [x] 实现重试机制（失败时重新入队，3秒后重试）
+* [x] 在 `plugin_startup` 中启动后台线程和重试线程
+* [x] 在 `plugin_shutdown` 中停止所有线程
 
-### P5. 配置管理
+### ✅ P5. 配置管理（已完成）
 
 * [x] 在 `set_program_options` 中添加配置项
 * [x] 在 `plugin_initialize` 中读取配置
 * [x] 实现配置验证（默认值设置）
+* [x] 添加 `--ingest-batch-size` 配置（批量大小）
+* [x] 添加 `--ingest-batch-timeout` 配置（批量超时）
+* [x] 添加 `--ingest-dry-run` 配置（干运行模式）
 
-### P6. 错误处理
+### ✅ P6. 错误处理（已完成）
 
 * [x] 所有回调函数添加 try-catch
-* [x] 实现日志记录（使用 `ilog`、`elog`）
-* [x] 实现队列满时的处理逻辑（队列大小限制）
+* [x] 实现日志记录（使用 `ilog`、`elog`、`wlog`）
+* [x] 实现阻塞式队列（队列满时等待，而不是丢弃）
+* [x] 实现重试机制（失败时自动重试，最多5次）
+* [x] 实现详细的调试日志（队列大小、发送状态、重试状态）
+* [x] 实现连接错误处理和重连机制
 
 ### P7. 测试
 
