@@ -20,9 +20,12 @@ This service implements a three-phase synchronization architecture:
 
 The cold start phase uses a custom C++ plugin (`ingest_plugin`) for the `steemd` node. This plugin:
 
-- Listens to `applied_operation` signals during blockchain replay
+- Listens to `applied_operation` and `applied_block` signals during blockchain replay
 - Serializes operations to JSON format
-- Sends operation data to the Go ingest service via HTTP POST
+- Sends operation data to the Go ingest service via HTTP POST (single or batch)
+- **Sends block-only records** for blocks without operations (ensures all blocks are recorded)
+- **Automatic retry mechanism**: Retries failed HTTP requests with 3-second delay (up to 5 attempts)
+- **Blocking queue**: Blocks replay when queue is full to protect the API endpoint
 - Runs asynchronously to avoid blocking steemd replay
 
 ### Plugin Location
@@ -41,7 +44,35 @@ The plugin accepts the following command-line options:
 --ingest-endpoint <url>        # HTTP endpoint for ingest service (default: http://localhost:8080/ingest/applied_op)
 --ingest-http-timeout <ms>      # HTTP request timeout in milliseconds (default: 5000)
 --ingest-queue-size <size>      # Maximum queue size for pending operations (default: 100000)
+--ingest-batch-size <size>       # Number of operations to batch before sending (default: 100, 1 = disable batching)
+--ingest-batch-timeout <ms>      # Max milliseconds to wait before sending a batch (default: 100)
+--ingest-dry-run                 # Dry run mode: write to file instead of sending HTTP (default: false)
 ```
+
+### Plugin Features
+
+#### Batch Sending
+- **Automatic batching**: Operations are collected and sent in batches to improve throughput
+- **Batch endpoint**: When `batch_size > 1`, uses `/ingest/applied_ops` endpoint
+- **Single endpoint**: When `batch_size = 1`, uses `/ingest/applied_op` endpoint (backward compatible)
+- **Configurable batch size**: Adjust `--ingest-batch-size` to balance latency and throughput
+
+#### Block-Only Records
+- **Automatic detection**: Plugin detects blocks without operations
+- **Block-only JSON**: Sends special records with `"block_only": true` marker
+- **Complete block coverage**: Ensures all blocks (including empty ones) are recorded in MongoDB
+
+#### Retry Mechanism
+- **Automatic retry**: Failed HTTP requests are automatically retried
+- **Retry delay**: 3 seconds between retry attempts
+- **Max retries**: Up to 5 retry attempts before dropping
+- **Retry queue**: Failed batches are queued separately and retried asynchronously
+
+#### Reliability Features
+- **Blocking queue**: When queue is full, replay blocks until space is available (protects API endpoint)
+- **Connection pooling**: Reuses TCP connections for better performance
+- **ACK mechanism**: Service only returns 200 after data is successfully written to MongoDB
+- **Error handling**: Comprehensive error logging and graceful degradation
 
 ### Building steemd with Ingest Plugin
 
@@ -65,19 +96,34 @@ make -j$(nproc)
 
 1. Start the Go ingest service first:
    ```bash
-   ./cold_ingest -config configs/config.yaml
+   ../bin/cold_ingest -config configs/config.yaml
    ```
 
 2. Run steemd replay with the ingest plugin:
    ```bash
    steemd --replay-blockchain \
           --plugin ingest \
-          --ingest-endpoint http://localhost:8080/ingest/applied_op \
+          --ingest-endpoint http://localhost:8080/ingest/applied_ops \
           --ingest-http-timeout 5000 \
-          --ingest-queue-size 100000
+          --ingest-queue-size 100000 \
+          --ingest-batch-size 100 \
+          --ingest-batch-timeout 100
    ```
 
-The plugin will automatically send all operations to the ingest service during replay.
+The plugin will automatically send all operations (and block-only records) to the ingest service during replay.
+
+### Dry Run Mode
+
+For testing without a running ingest service, use dry run mode:
+
+```bash
+steemd --replay-blockchain \
+       --plugin ingest \
+       --ingest-dry-run \
+       --data-dir /var/steem
+```
+
+Operations will be written to `{data-dir}/ingest/ingest_YYYYMMDD_HHMMSS_mmm.jsonl` files in JSON Lines format.
 
 ## Configuration
 
@@ -85,22 +131,38 @@ See `configs/config.yaml` for configuration examples.
 
 ## Development
 
+### Building
+
+All binaries are built to `steemdb/bin/` directory:
+
 ```bash
 # Build all components
-go build ./cmd/...
+mkdir -p ../bin
+go build -o ../bin/cold_ingest ./cmd/cold_ingest
+go build -o ../bin/live_sync ./cmd/live_sync
+go build -o ../bin/repair ./cmd/repair
 
-# Run cold ingest
-./cold_ingest -config configs/config.yaml
+# Or build all at once
+go build -o ../bin/cold_ingest ./cmd/cold_ingest && \
+go build -o ../bin/live_sync ./cmd/live_sync && \
+go build -o ../bin/repair ./cmd/repair
+```
+
+### Running
+
+```bash
+# Run cold ingest (from steemdb-sync directory)
+../bin/cold_ingest -config configs/config.yaml
 
 # Run live sync
-./live_sync -config configs/config.yaml
+../bin/live_sync -config configs/config.yaml
 
 # Run repair tool (scan and repair missing blocks)
-./repair -config configs/config.yaml
+../bin/repair -config configs/config.yaml
 
 # Repair tool with options
-./repair -config configs/config.yaml -start 1000 -end 2000  # Repair specific range
-./repair -config configs/config.yaml -dry-run               # Scan only, don't repair
+../bin/repair -config configs/config.yaml -start 1000 -end 2000  # Repair specific range
+../bin/repair -config configs/config.yaml -dry-run               # Scan only, don't repair
 ```
 
 ## Metrics
@@ -144,6 +206,17 @@ The ingest plugin requires:
 - [x] MongoDB access layer (`internal/mongo`)
 - [x] Pipeline processing (`internal/pipeline`)
 - [x] **Steemd ingest plugin** (`steem/libraries/plugins/ingest/`)
+  - [x] Operation serialization and HTTP sending
+  - [x] Batch sending with configurable batch size
+  - [x] Block-only records for empty blocks
+  - [x] Automatic retry mechanism (3s delay, max 5 attempts)
+  - [x] Blocking queue to protect API endpoint
+  - [x] Connection pooling for performance
+  - [x] Dry run mode for testing
+- [x] **Service reliability features**
+  - [x] ACK mechanism (only return 200 after successful MongoDB write)
+  - [x] Synchronous flush for guaranteed data persistence
+  - [x] Block-only block handling
 - [x] Unit tests for core modules
 - [x] Prometheus metrics integration
 
