@@ -1,0 +1,74 @@
+# Docker ignore file for steemdb-sync
+# This file prevents large files from being sent to Docker build context
+
+# Compiled binaries
+cold_ingest
+jsonl_replay
+*.exe
+*.test
+*.out
+
+# Test data and blockchain files (VERY LARGE - 380GB+)
+test/steem-test/data/blockchain/
+test/steem-test/data/blockchain/**
+test/steem-test/data/**/*.log
+test/steem-test/data/**/*.index
+
+# Logs
+*.log
+logs/
+test/**/logs/
+test/**/*.log
+test/docker-compose/logs/
+test/docker-compose/steemd-logs/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Documentation (not needed for build)
+docs/
+*.md
+!README.md
+
+# Test files (not needed for build)
+test/e2e/
+test/integration/
+test/performance/
+test/scripts/
+test/steem-test/
+test/test_data/
+test/unit/
+
+# Docker compose test files (not needed for build, but keep Dockerfile accessible)
+test/docker-compose/*
+!test/docker-compose/Dockerfile.cold-ingest
+
+# Config files with secrets
+configs/*.local.yaml
+configs/*.secret.yaml
+configs/*.local.yml
+configs/*.secret.yml
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vendor (if using vendoring)
+vendor/
+
+# Go workspace
+go.work

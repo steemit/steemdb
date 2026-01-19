@@ -1,0 +1,39 @@
+# SteemDB Sync Configuration for Docker Compose Testing
+# This file is a template. Copy to config.yaml and adjust as needed.
+
+# MongoDB connection settings
+mongo:
+  # MongoDB connection URI (will be overridden by environment variable)
+  uri: "mongodb://admin:123456@mongo:27017/steemdb_test?authSource=admin"
+  # database: "steemdb_test"  # Optional: if not set, will be parsed from URI or use default
+  min_pool_size: 10
+  max_pool_size: 100
+
+# Steem RPC node settings (not used in cold ingest, but required by config)
+rpc:
+  endpoint: "https://api.steemit.com"
+  max_retry: 3
+  timeout: "30s"
+
+# Cold start phase settings
+cold_start:
+  # Target block height for cold start (0 = no limit, will run until stopped)
+  # For testing, set a small value like 1000 or 10000
+  target_height: 1000
+  # Safety margin in blocks (cold_ingest will exit when reaching target_height - safety_margin)
+  safety_margin: 5
+
+# Batch processing settings
+batch:
+  size: 1000           # Number of operations per batch
+  flush_interval: "1s" # Time interval for batch flush
+
+# Ingest service settings (for cold_ingest)
+ingest:
+  listen_addr: ":8080"  # HTTP server listen address
+  queue_size: 100000    # Maximum queue size for operations
+
+# Logging settings
+log:
+  level: "info"   # debug, info, warn, error
+  format: "text"   # text or json

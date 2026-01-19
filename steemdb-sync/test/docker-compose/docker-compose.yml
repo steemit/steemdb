@@ -1,0 +1,105 @@
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:4.4
+    container_name: cold-ingest-mongo
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-123456}
+      - MONGO_INITDB_DATABASE=${MONGO_DATABASE:-steemdb_test}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    networks:
+      - cold-ingest-network
+    command: mongod --bind_ip_all
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping')", "--username", "${MONGO_USERNAME:-admin}", "--password", "${MONGO_PASSWORD:-123456}", "--authenticationDatabase", "admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Cold Ingest Service
+  cold-ingest:
+    build:
+      context: ../..
+      dockerfile: test/docker-compose/Dockerfile.cold-ingest
+    container_name: cold-ingest-service
+    ports:
+      - "${INGEST_PORT:-8080}:8080"
+      - "${METRICS_PORT:-9090}:9090"
+    environment:
+      - CONFIG_PATH=/app/configs/config.yaml
+      - MONGO_URI=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-123456}@mongo:27017/${MONGO_DATABASE:-steemdb_test}?authSource=admin
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+      - ingest_data:/app/data
+    networks:
+      - cold-ingest-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Steemd Node with Ingest Plugin
+  steemd:
+    image: ${STEEMD_IMAGE:-steemd:with-ingest}
+    container_name: cold-ingest-steemd
+    environment:
+      - INGEST_ENDPOINT=http://cold-ingest:8080/ingest/applied_ops
+      - INGEST_HTTP_TIMEOUT=${INGEST_HTTP_TIMEOUT:-5000}
+      - INGEST_QUEUE_SIZE=${INGEST_QUEUE_SIZE:-100000}
+      - INGEST_BATCH_SIZE=${INGEST_BATCH_SIZE:-100}
+      - INGEST_BATCH_TIMEOUT=${INGEST_BATCH_TIMEOUT:-1000}
+      - DATA_DIR=/var/steem
+    volumes:
+      - ../steem-test/data:/var/steem
+    networks:
+      - cold-ingest-network
+    depends_on:
+      cold-ingest:
+        condition: service_healthy
+    command:
+      - /usr/local/steemd/bin/steemd
+      - --replay-blockchain
+      - --plugin
+      - ingest
+      - --ingest-endpoint
+      - ${INGEST_ENDPOINT:-http://cold-ingest:8080/ingest/applied_ops}
+      - --ingest-http-timeout
+      - ${INGEST_HTTP_TIMEOUT:-5000}
+      - --ingest-queue-size
+      - ${INGEST_QUEUE_SIZE:-100000}
+      - --ingest-batch-size
+      - ${INGEST_BATCH_SIZE:-100}
+      - --ingest-batch-timeout
+      - ${INGEST_BATCH_TIMEOUT:-1000}
+      - --data-dir
+      - /var/steem
+    restart: unless-stopped
+    # Note: steemd will exit after replay completes, so we don't set restart policy
+
+volumes:
+  mongo_data:
+    driver: local
+  mongo_config:
+    driver: local
+  ingest_data:
+    driver: local
+  steemd_data:
+    driver: local
+
+networks:
+  cold-ingest-network:
+    driver: bridge

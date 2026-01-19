@@ -4,6 +4,7 @@
 set -e
 
 CONTAINER_NAME="mongo-test"
+VOLUME_NAME="mongo-test-data"
 MONGO_USERNAME="${MONGO_USERNAME:-admin}"
 MONGO_PASSWORD="${MONGO_PASSWORD:-123456}"
 MONGO_PORT="${MONGO_PORT:-27017}"
@@ -16,12 +17,13 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     docker rm -f ${CONTAINER_NAME} > /dev/null 2>&1 || true
 fi
 
-# Start MongoDB container
+# Start MongoDB container with named volume
 docker run -d \
     --name ${CONTAINER_NAME} \
     -p ${MONGO_PORT}:27017 \
     -e MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME} \
     -e MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD} \
+    -v ${VOLUME_NAME}:/data/db \
     mongo:4.4
 
 echo "Waiting for MongoDB to be ready..."
@@ -37,7 +39,7 @@ for i in {1..30}; do
         echo "  Container: ${CONTAINER_NAME}"
         echo ""
         echo "To stop the container:"
-        echo "  docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}"
+        echo "  ./stop_mongo.sh"
         exit 0
     fi
     sleep 1
