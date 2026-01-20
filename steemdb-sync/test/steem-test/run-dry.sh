@@ -63,6 +63,7 @@ docker run -d --rm \
   "$STEEMD_IMAGE" \
   /usr/local/steemd/bin/steemd \
     --replay-blockchain \
+    --stop-replay-at-block 1000 \
     --plugin ingest \
     --ingest-dry-run true \
     --data-dir "$DATA_DIR_MOUNT"
