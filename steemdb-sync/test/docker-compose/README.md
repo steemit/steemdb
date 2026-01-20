@@ -134,6 +134,9 @@ INGEST_HTTP_TIMEOUT=5000
 INGEST_QUEUE_SIZE=100000
 INGEST_BATCH_SIZE=100
 INGEST_BATCH_TIMEOUT=1000
+# Stop replay at specific block number (0 = no limit, replay all blocks)
+# Useful for testing with a limited block range
+STOP_REPLAY_AT_BLOCK=0
 ```
 
 ### Service Configuration (configs/config.yaml)
@@ -189,7 +192,13 @@ mongodb://admin:123456@localhost:27017/steemdb_test?authSource=admin
 - **Data**: Persisted in `steemd_data` volume
 - **Logs**: `./steemd-logs/` directory
 
-**Note**: Steemd will automatically exit after replay completes (if `target_height` is set).
+**Configuration**:
+- `STOP_REPLAY_AT_BLOCK`: Stop replay at specific block number (0 = no limit)
+  - Set in `.env` file: `STOP_REPLAY_AT_BLOCK=1000` to stop at block 1000
+  - Useful for quick testing with limited block range
+  - Works independently of `cold_start.target_height` in config.yaml
+
+**Note**: Steemd will automatically exit after replay completes (if `target_height` is set in config.yaml or `STOP_REPLAY_AT_BLOCK` is set in .env).
 
 ## Testing Workflow
 

@@ -23,7 +23,7 @@ mkdir -p configs
 cp configs/config.yaml.template configs/config.yaml
 
 # Edit config.yaml and set target_height (e.g., 1000 for quick test)
-# Optional: Edit .env if you need to change default values
+# Optional: Edit .env to set STOP_REPLAY_AT_BLOCK (e.g., 1000) for quick testing
 ```
 
 ### 3. Start Services
