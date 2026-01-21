@@ -89,6 +89,23 @@ This script checks:
 - Metrics endpoint
 - Network connectivity
 
+### 4.1 Check Mongo Data (blocks + operations)
+
+After running a replay (or pushing test data), verify MongoDB has **complete blocks** and **no orphan operations**:
+
+```bash
+# Validate blocks/operations consistency in MongoDB
+./check-data.sh
+```
+
+Expected range rule:
+- If `.env` sets `STOP_REPLAY_AT_BLOCK > 0`, the script checks block completeness in `[1..STOP_REPLAY_AT_BLOCK]`.
+- Otherwise, it uses `meta.sync_state.max_block` as `expected_max_block`.
+
+The script exits **non-zero** if it detects:
+- missing blocks in the expected range
+- orphan operations (operations referencing non-existent blocks)
+
 ### 5. Stop Services
 
 ```bash
