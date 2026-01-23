@@ -1,16 +1,10 @@
 package pipeline_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/steemit/steemdb-sync/internal/pipeline"
 )
 
