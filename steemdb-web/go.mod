@@ -7,8 +7,8 @@ require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/viper v1.17.0
-	github.com/steemit/steemgosdk v0.0.8
-	github.com/steemit/steemutil v0.0.12
+	github.com/steemit/steemgosdk v0.0.15
+	github.com/steemit/steemutil v0.0.17
 	go.mongodb.org/mongo-driver v1.12.1
 	go.uber.org/zap v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1

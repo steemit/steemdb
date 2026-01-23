@@ -98,10 +98,10 @@ github.com/prometheus/procfs v0.16.1 h1:hZ15bTNuirocR6u0JZ6BAHHmwS1p8B4P6MRqxtzM
 github.com/prometheus/procfs v0.16.1/go.mod h1:teAbpZRB1iIAJYREa1LsoWUXykVXA1KlTmWl8x/U+Is=
 github.com/rogpeppe/go-internal v1.10.0 h1:TMyTOH3F/DB16zRVcYyreMH6GnZZrwQVAoYjRBZyWFQ=
 github.com/rogpeppe/go-internal v1.10.0/go.mod h1:UQnix2H7Ngw/k4C5ijL5+65zddjncjaFoBhdsK/akog=
-github.com/steemit/steemgosdk v0.0.13 h1:XHRxtfJEn1Zsg+i369A89awOyjwOTXYEzikBZvXU58c=
-github.com/steemit/steemgosdk v0.0.13/go.mod h1:H00/H3+r8j/ysA4kdhURXrWlUYuDvBR3H9nJxfW6Hn8=
-github.com/steemit/steemutil v0.0.15 h1:kce/h7e8YWBvgvquScQlZ+3YKJyqxevoqT5qVa4NzNk=
-github.com/steemit/steemutil v0.0.15/go.mod h1:juhYy3fdFrfG8dXARzQcnTIk0bsDGNAro+9IZJRxa3s=
+github.com/steemit/steemgosdk v0.0.15 h1:IYwuijvCJS4zUDUufvr7doqAikfz4WY+vv+cQu45UOY=
+github.com/steemit/steemgosdk v0.0.15/go.mod h1:Cm5msNmNXGJi8aHjVAOtTsUpg97VEyQl1z8rEOPqM0o=
+github.com/steemit/steemutil v0.0.17 h1:TsL3416RqXIHRAzPhrHgtohvNvQIBVkrqV+0Bk4nlR4=
+github.com/steemit/steemutil v0.0.17/go.mod h1:juhYy3fdFrfG8dXARzQcnTIk0bsDGNAro+9IZJRxa3s=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

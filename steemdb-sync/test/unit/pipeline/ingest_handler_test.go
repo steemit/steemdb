@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/steemit/steemdb-sync/internal/pipeline"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestNewIngestHandler tests handler initialization

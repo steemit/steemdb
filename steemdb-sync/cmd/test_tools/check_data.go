@@ -15,6 +15,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"github.com/steemit/steemdb-sync/internal/rpc"
+	protocol "github.com/steemit/steemutil/protocol"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -690,19 +691,57 @@ func validateWithRPC(ctx context.Context, rpcClient *rpc.Client, blocksColl, ope
 				atomic.AddInt64(&stats.TotalErrors, 1)
 				atomic.AddInt64(&stats.OpsCountErrors, 1)
 			} else {
-				// Get operations from RPC
-				rpcOps, err := rpcClient.GetOpsInBlock(ctx, bn, false)
-				if err != nil {
+				// Get operations from RPC with retry for unmarshal errors
+				// Retry up to 3 times for unmarshal errors (which indicate RPC API limitations)
+				var rpcOps []*protocol.OperationObject
+				var rpcErr error
+				retryCount := 0
+				maxRetries := 3
+
+				for retryCount < maxRetries {
+					rpcOps, rpcErr = rpcClient.GetOpsInBlock(ctx, bn, false)
+					if rpcErr == nil {
+						break
+					}
+
+					// Check if this is an unmarshal error (RPC API limitation)
+					errStr := rpcErr.Error()
+					if strings.Contains(errStr, "failed to unmarshal") && strings.Contains(errStr, "value out of range") {
+						retryCount++
+						if retryCount < maxRetries {
+							// Retry after a short delay (unmarshal errors might be transient)
+							time.Sleep(100 * time.Millisecond)
+							continue
+						}
+						// After max retries, skip this block's ops_count validation
+						// This is a known RPC API limitation for historical blocks
+						errorsMu.Lock()
+						errors = append(errors, validationError{
+							BlockNum: bn,
+							Type:     "ops_count",
+							Message:  fmt.Sprintf("Skipped operations count validation due to RPC API unmarshal limitation: %v", rpcErr),
+						})
+						errorsMu.Unlock()
+						atomic.AddInt64(&stats.TotalErrors, 1)
+						atomic.AddInt64(&stats.OpsCountErrors, 1)
+						break
+					}
+
+					// For non-unmarshal errors, record the error immediately
 					errorsMu.Lock()
 					errors = append(errors, validationError{
 						BlockNum: bn,
 						Type:     "ops_count",
-						Message:  fmt.Sprintf("Failed to get operations from RPC: %v", err),
+						Message:  fmt.Sprintf("Failed to get operations from RPC: %v", rpcErr),
 					})
 					errorsMu.Unlock()
 					atomic.AddInt64(&stats.TotalErrors, 1)
 					atomic.AddInt64(&stats.OpsCountErrors, 1)
-				} else {
+					break
+				}
+
+				// Only compare counts if we successfully got RPC data
+				if rpcErr == nil {
 					rpcOpsCount := int64(len(rpcOps))
 					if mongoOpsCount != rpcOpsCount {
 						errorsMu.Lock()

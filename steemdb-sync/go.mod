@@ -6,8 +6,8 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
-	github.com/steemit/steemgosdk v0.0.13
-	github.com/steemit/steemutil v0.0.15
+	github.com/steemit/steemgosdk v0.0.15
+	github.com/steemit/steemutil v0.0.17
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.17.6
 	gopkg.in/yaml.v3 v3.0.1
