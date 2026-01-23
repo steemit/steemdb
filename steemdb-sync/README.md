@@ -41,7 +41,7 @@ The ingest plugin is located in the `steem` repository:
 The plugin accepts the following command-line options:
 
 ```bash
---ingest-endpoint <url>        # HTTP endpoint for ingest service (default: http://localhost:8080/ingest/applied_op)
+--ingest-endpoint <url>        # HTTP endpoint for ingest service (default: http://localhost:8080/ingest/applied_ops)
 --ingest-http-timeout <ms>      # HTTP request timeout in milliseconds (default: 5000)
 --ingest-queue-size <size>      # Maximum queue size for pending operations (default: 100000)
 --ingest-batch-size <size>       # Number of operations to batch before sending (default: 100, 1 = disable batching)
@@ -53,8 +53,8 @@ The plugin accepts the following command-line options:
 
 #### Batch Sending
 - **Automatic batching**: Operations are collected and sent in batches to improve throughput
-- **Batch endpoint**: When `batch_size > 1`, uses `/ingest/applied_ops` endpoint
-- **Single endpoint**: When `batch_size = 1`, uses `/ingest/applied_op` endpoint (backward compatible)
+- **Batch endpoint**: Always uses `/ingest/applied_ops` endpoint (accepts array format)
+- **Single operations**: Even single operations are sent as arrays: `[{...}]`
 - **Configurable batch size**: Adjust `--ingest-batch-size` to balance latency and throughput
 
 #### Block-Only Records

@@ -6,7 +6,7 @@
 set -e
 
 CONTAINER_NAME="${CONTAINER_NAME:-steemd-ingest-test}"
-INGEST_ENDPOINT="${INGEST_ENDPOINT:-http://host.docker.internal:8080/ingest/applied_op}"
+INGEST_ENDPOINT="${INGEST_ENDPOINT:-http://host.docker.internal:8080/ingest/applied_ops}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -36,7 +36,7 @@ fi
 echo ""
 
 # Sample operation JSON (matching the format from steemd ingest plugin)
-SAMPLE_JSON='{
+SAMPLE_JSON='[{
   "block": {
     "num": 1,
     "id": "0000000000000001",
@@ -57,7 +57,7 @@ SAMPLE_JSON='{
     }
   },
   "virtual": false
-}'
+}]'
 
 echo "Sending POST request..."
 echo ""

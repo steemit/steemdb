@@ -24,7 +24,7 @@ Connection: keep-alive
 
 ### 1.2 Request Body Format
 
-**Request body is a JSON array**, where each element is an operation object (format is fully compatible with single endpoint `/ingest/applied_op`).
+**Request body is a JSON array**, where each element is an operation object. The endpoint also accepts a single object (which will be automatically wrapped as an array).
 
 ```json
 [
@@ -249,18 +249,20 @@ failed to flush to database: <error details>
 
 ## 4. Compatibility with Single Endpoint
 
-### 4.1 Endpoint Comparison
+### 4.1 Endpoint Details
 
-| Feature | `/ingest/applied_op` | `/ingest/applied_ops` |
-|---------|---------------------|----------------------|
-| Request Body | Single operation object | Operation object array |
-| Content-Type | `application/json` | `application/json` |
-| Processing | Individual processing | Batch processing |
-| Performance | Lower (one operation per request) | Higher (multiple operations per request) |
+| Feature | `/ingest/applied_ops` |
+|---------|----------------------|
+| Request Body | Operation object array (or single object, automatically wrapped) |
+| Content-Type | `application/json` |
+| Processing | Batch processing |
+| Performance | High (multiple operations per request) |
+
+**Note**: The endpoint accepts both array format `[{...}, {...}]` and single object format `{...}` (which is automatically wrapped as `[{...}]`).
 
 ### 4.2 Data Format Consistency
 
-**Important**: The operation object formats received by both endpoints must be completely consistent to ensure:
+**Important**: The operation object format must be consistent to ensure:
 - Same field structure
 - Same data types
 - Same validation rules
@@ -456,13 +458,13 @@ curl -X POST http://localhost:8080/ingest/applied_ops \
 ## 10. Version Compatibility
 
 - **Current Version**: v1.0
-- **Backward Compatible**: Fully compatible with `/ingest/applied_op` endpoint
+- **Backward Compatible**: Accepts single object format (automatically wrapped as array)
 - **Future Extensions**: Could consider adding compression support (gzip) to improve transmission efficiency
 
 ---
 
 ## 11. Reference Documents
 
-- Single endpoint documentation: Refer to `HandleAppliedOp` implementation
+- Implementation: `steemdb-sync/internal/pipeline/ingest_handler.go`
 - Operation format definition: Refer to "Operation JSON Protocol Definition" in `steemdb-sync/.cursor/plans/steemdb-sync.md`
 - Existing implementation: `steemdb-sync/internal/pipeline/ingest_handler.go`

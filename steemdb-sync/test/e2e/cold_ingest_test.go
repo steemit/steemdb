@@ -709,9 +709,10 @@ func sendMockOperationsBatch(t *testing.T, targetHeight uint32) {
 	}
 }
 
-// sendMockOperations sends operations one by one (legacy, kept for compatibility)
+// sendMockOperations sends operations one by one (legacy, deprecated - use sendMockOperationsBatch instead)
+// Note: This function is kept for backward compatibility but uses the batch endpoint with single-item arrays
 func sendMockOperations(t *testing.T, targetHeight uint32) {
-	ingestURL := "http://localhost:8080/ingest/applied_op"
+	ingestURL := "http://localhost:8080/ingest/applied_ops"
 
 	// Generate and send mock operations
 	for blockNum := uint32(1); blockNum <= targetHeight; blockNum++ {
@@ -790,9 +791,12 @@ func sendBatchOperations(t *testing.T, url string, operations []map[string]inter
 	}
 }
 
-// sendOperationJSON sends a single operation (legacy, kept for compatibility)
+// sendOperationJSON sends a single operation as a batch array (legacy, kept for compatibility)
+// Note: Even single operations are now sent as arrays: [{...}]
 func sendOperationJSON(t *testing.T, url string, opJSON map[string]interface{}) {
-	jsonData, err := json.Marshal(opJSON)
+	// Wrap single operation in array for batch endpoint
+	batchJSON := []map[string]interface{}{opJSON}
+	jsonData, err := json.Marshal(batchJSON)
 	require.NoError(t, err, "Failed to marshal operation JSON")
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))

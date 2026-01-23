@@ -6,7 +6,7 @@
 set -e
 
 CONTAINER_NAME="${CONTAINER_NAME:-steemd-ingest-test}"
-INGEST_ENDPOINT="${INGEST_ENDPOINT:-http://host.docker.internal:8080/ingest/applied_op}"
+INGEST_ENDPOINT="${INGEST_ENDPOINT:-http://host.docker.internal:8080/ingest/applied_ops}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -96,7 +96,7 @@ fi
 # Test 4: Test POST request with sample data
 echo ""
 echo -e "${YELLOW}Test 4: Testing POST request with sample data...${NC}"
-SAMPLE_JSON='{"block":{"num":1,"id":"0000000000000001","timestamp":"2016-03-24T16:05:00"},"transaction":{"id":"test_trx","index":0},"operation":{"index":0,"type":"transfer","value":{}},"virtual":false}'
+SAMPLE_JSON='[{"block":{"num":1,"id":"0000000000000001","timestamp":"2016-03-24T16:05:00"},"transaction":{"id":"test_trx","index":0},"operation":{"index":0,"type":"transfer","value":{}},"virtual":false}]'
 RESPONSE=$(docker exec "$CONTAINER_NAME" curl -s -w "\n%{http_code}" -X POST \
     -H "Content-Type: application/json" \
     -d "$SAMPLE_JSON" \

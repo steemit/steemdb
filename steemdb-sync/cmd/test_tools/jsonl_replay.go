@@ -13,20 +13,22 @@ import (
 	"time"
 )
 
-func main() {
+func runJsonlReplay(args []string) {
+	fs := flag.NewFlagSet("jsonl_replay", flag.ExitOnError)
 	var (
-		jsonlFile    = flag.String("file", "", "Path to JSONL file (required)")
-		endpoint     = flag.String("endpoint", "http://localhost:8080/ingest/applied_ops", "Ingest endpoint URL (batch endpoint)")
-		batchSize    = flag.Int("batch-size", 100, "Number of operations per batch (0 = use single endpoint)")
-		rate         = flag.Int("rate", 0, "Operations per second (0 = no limit)")
-		startBlock  = flag.Uint("start-block", 0, "Start from block number (0 = from beginning)")
-		endBlock    = flag.Uint("end-block", 0, "End at block number (0 = to end)")
-		verbose     = flag.Bool("verbose", false, "Verbose output")
-		showErrors  = flag.Bool("show-errors", true, "Show HTTP errors")
+		jsonlFile   = fs.String("file", "", "Path to JSONL file (required)")
+		endpoint    = fs.String("endpoint", "http://localhost:8080/ingest/applied_ops", "Ingest endpoint URL (batch endpoint)")
+		batchSize   = fs.Int("batch-size", 100, "Number of operations per batch (0 = use single endpoint)")
+		rate        = fs.Int("rate", 0, "Operations per second (0 = no limit)")
+		startBlock  = fs.Uint("start-block", 0, "Start from block number (0 = from beginning)")
+		endBlock    = fs.Uint("end-block", 0, "End at block number (0 = to end)")
+		verbose     = fs.Bool("verbose", false, "Verbose output")
+		showErrors  = fs.Bool("show-errors", true, "Show HTTP errors")
 	)
-	flag.Parse()
+	fs.Parse(args)
 
 	if *jsonlFile == "" {
+		fs.Usage()
 		log.Fatal("Error: -file is required")
 	}
 
@@ -74,10 +76,10 @@ func main() {
 
 	// Determine if we should use batch endpoint
 	useBatch := *batchSize > 0 && strings.Contains(*endpoint, "/applied_ops")
-	
+
 	// For batch mode, collect operations
 	batch := make([]map[string]interface{}, 0, *batchSize)
-	
+
 	// For single mode, use the original endpoint or fallback to single endpoint
 	singleEndpoint := *endpoint
 	if useBatch && strings.Contains(*endpoint, "/applied_ops") {
@@ -147,7 +149,7 @@ func main() {
 					processedInt := int(processed)
 					totalSuccess += processedInt
 					totalErrors += len(ops) - processedInt
-					
+
 					if status, ok := batchResp["status"].(string); ok && status == "partial" {
 						if errors, ok := batchResp["errors"].([]interface{}); ok {
 							if *showErrors && len(errors) > 0 {
@@ -181,7 +183,7 @@ func main() {
 
 		// Use single endpoint (fallback to /applied_op if batch endpoint was specified)
 		singleURL := strings.Replace(*endpoint, "/applied_ops", "/applied_op", 1)
-		
+
 		req, err := http.NewRequest("POST", singleURL, strings.NewReader(string(jsonData)))
 		if err != nil {
 			log.Printf("Error creating request: %v", err)
@@ -269,7 +271,7 @@ func main() {
 		if useBatch {
 			// Add to batch
 			batch = append(batch, opJSON)
-			
+
 			// Send batch when it reaches batchSize
 			if len(batch) >= *batchSize {
 				sendBatch(batch)

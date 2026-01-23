@@ -24,7 +24,7 @@ echo ""
 
 # Check 1: Is cold_ingest running?
 echo -e "${YELLOW}Check 1: Is cold_ingest service running?${NC}"
-if curl -s http://localhost:8080/ingest/applied_op > /dev/null 2>&1; then
+if curl -s http://localhost:8080/ingest/applied_ops > /dev/null 2>&1; then
     echo -e "${GREEN}✓ cold_ingest is accessible on localhost:8080${NC}"
     # Try to get metrics if available
     if curl -s http://localhost:8080/metrics > /dev/null 2>&1; then
@@ -117,11 +117,11 @@ if ! docker exec "$CONTAINER_NAME" which curl > /dev/null 2>&1; then
     docker exec "$CONTAINER_NAME" apt-get install -y -qq curl > /dev/null 2>&1
 fi
 
-SAMPLE_JSON='{"block":{"num":1,"id":"0000000000000001","timestamp":"2016-03-24T16:05:00"},"transaction":{"id":"test","index":0},"operation":{"index":0,"type":"transfer","value":{}},"virtual":false}'
+SAMPLE_JSON='[{"block":{"num":1,"id":"0000000000000001","timestamp":"2016-03-24T16:05:00"},"transaction":{"id":"test","index":0},"operation":{"index":0,"type":"transfer","value":{}},"virtual":false}]'
 RESPONSE=$(docker exec "$CONTAINER_NAME" curl -s -w "\n%{http_code}" -X POST \
     -H "Content-Type: application/json" \
     -d "$SAMPLE_JSON" \
-    "http://host.docker.internal:8080/ingest/applied_op" 2>&1 || echo "ERROR")
+    "http://host.docker.internal:8080/ingest/applied_ops" 2>&1 || echo "ERROR")
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 
 if [ "$HTTP_CODE" = "200" ]; then

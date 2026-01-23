@@ -62,8 +62,7 @@ This Docker Compose setup provides a complete local testing environment for the 
 - MongoDB URI: Set via `MONGO_URI` environment variable
 
 **Endpoints**:
-- `POST /ingest/applied_op` - Single operation endpoint
-- `POST /ingest/applied_ops` - Batch operations endpoint
+- `POST /ingest/applied_ops` - Batch operations endpoint (accepts array of operations, or single object wrapped as array)
 - `GET /metrics` - Prometheus metrics
 
 **Health Check**:

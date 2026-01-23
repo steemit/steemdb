@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"sync/atomic"
@@ -51,78 +52,6 @@ type OperationDataJSON struct {
 	Value map[string]interface{} `json:"value"`
 }
 
-// HandleAppliedOp handles POST /ingest/applied_op
-func (h *IngestHandler) HandleAppliedOp(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Increment request counter
-	requestNum := atomic.AddUint64(&h.requestCount, 1)
-
-	var opJSON OperationJSON
-	if err := json.NewDecoder(r.Body).Decode(&opJSON); err != nil {
-		http.Error(w, errors.Wrap(err, "failed to decode JSON").Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Parse block timestamp
-	// Try RFC3339 first, then try the format used in jsonl file (2006-01-02T15:04:05)
-	blockTimestamp, err := time.Parse(time.RFC3339, opJSON.Block.Timestamp)
-	if err != nil {
-		// Try alternative format (without timezone, e.g., "2016-03-24T16:05:00")
-		blockTimestamp, err = time.Parse("2006-01-02T15:04:05", opJSON.Block.Timestamp)
-		if err != nil {
-			// Fallback to current time if both formats fail
-			blockTimestamp = time.Now()
-		}
-	}
-
-	// Store block info
-	h.batcher.AddBlockInfo(opJSON.Block.Num, opJSON.Block.ID, blockTimestamp)
-
-	// Handle block-only records (blocks without operations)
-	if opJSON.BlockOnly {
-		// Block-only records: synchronously flush blocks to MongoDB (ACK mechanism)
-		if err := h.batcher.FlushOperationsAndBlocks(r.Context(), nil); err != nil {
-			log.Printf("[IngestHandler] Failed to flush block-only record to MongoDB: %v", err)
-			http.Error(w, errors.Wrap(err, "failed to flush block to database").Error(), http.StatusInternalServerError)
-			return
-		}
-		// Log first few requests and every 1000th request for debugging
-		if requestNum <= 3 || requestNum%1000 == 0 {
-			log.Printf("[IngestHandler] Received block-only request #%d: block=%d (no operations)",
-				requestNum, opJSON.Block.Num)
-		}
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Log first few requests and every 1000th request for debugging
-	if requestNum <= 3 || requestNum%1000 == 0 {
-		log.Printf("[IngestHandler] Received request #%d: block=%d, op_type=%s, trx_index=%d, op_index=%d",
-			requestNum, opJSON.Block.Num, opJSON.Operation.Type, opJSON.Transaction.Index, opJSON.Operation.Index)
-	}
-
-	// Convert to internal Operation model
-	op, err := h.convertToOperation(&opJSON)
-	if err != nil {
-		http.Error(w, errors.Wrap(err, "failed to convert operation").Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Synchronously flush operation and blocks to MongoDB (ACK mechanism)
-	// Only return 200 if data is successfully written
-	if err := h.batcher.FlushOperationsAndBlocks(r.Context(), []*model.Operation{op}); err != nil {
-		log.Printf("[IngestHandler] Failed to flush operation to MongoDB: %v", err)
-		http.Error(w, errors.Wrap(err, "failed to flush to database").Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
 // BatchResponse represents the response for batch operations
 type BatchResponse struct {
 	Status    string       `json:"status"`
@@ -146,15 +75,40 @@ func (h *IngestHandler) HandleAppliedOps(w http.ResponseWriter, r *http.Request)
 	// Increment request counter
 	requestNum := atomic.AddUint64(&h.requestCount, 1)
 
-	var operations []OperationJSON
-	if err := json.NewDecoder(r.Body).Decode(&operations); err != nil {
-		http.Error(w, errors.Wrap(err, "failed to decode JSON array").Error(), http.StatusBadRequest)
+	// Read body into memory so we can try multiple decode strategies
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, errors.Wrap(err, "failed to read request body").Error(), http.StatusBadRequest)
 		return
+	}
+
+	// Try to decode as array first
+	var operations []OperationJSON
+	if err := json.Unmarshal(bodyBytes, &operations); err != nil {
+		// If array decode fails, try as single object
+		var singleOp OperationJSON
+		if err2 := json.Unmarshal(bodyBytes, &singleOp); err2 != nil {
+			http.Error(w, errors.Wrap(err, "failed to decode JSON array or object").Error(), http.StatusBadRequest)
+			return
+		}
+		// Successfully decoded as single object, wrap in array
+		operations = []OperationJSON{singleOp}
 	}
 
 	if len(operations) == 0 {
 		http.Error(w, "empty operations array", http.StatusBadRequest)
 		return
+	}
+
+	// Debug log for batches containing blocks < 1000
+	hasLowBlocks := false
+	for _, opJSON := range operations {
+		if opJSON.Block.Num < 1000 {
+			hasLowBlocks = true
+			break
+		}
+	}
+	if hasLowBlocks {
 	}
 
 	// Log batch requests for debugging
@@ -183,6 +137,11 @@ func (h *IngestHandler) HandleAppliedOps(w http.ResponseWriter, r *http.Request)
 		// Store block info
 		h.batcher.AddBlockInfo(opJSON.Block.Num, opJSON.Block.ID, blockTimestamp)
 
+		// Debug log for blocks < 1000
+		if opJSON.Block.Num < 1000 {
+				requestNum, i, opJSON.Block.Num, opJSON.Operation.Type, opJSON.Transaction.Index, opJSON.Operation.Index, opJSON.BlockOnly)
+		}
+
 		// Handle block-only records (blocks without operations)
 		if opJSON.BlockOnly {
 			// Block-only records: only store block info, no operation to add
@@ -193,6 +152,8 @@ func (h *IngestHandler) HandleAppliedOps(w http.ResponseWriter, r *http.Request)
 		// Convert to internal Operation model
 		op, err := h.convertToOperation(&opJSON)
 		if err != nil {
+			if opJSON.Block.Num < 1000 {
+			}
 			batchErrors = append(batchErrors, BatchError{
 				Index: i,
 				Error: errors.Wrap(err, "failed to convert operation").Error(),
@@ -207,18 +168,30 @@ func (h *IngestHandler) HandleAppliedOps(w http.ResponseWriter, r *http.Request)
 
 	// Synchronously flush operations and blocks to MongoDB (ACK mechanism)
 	// Only return 200 if data is successfully written
+	if hasLowBlocks {
+	}
 	if len(opsToFlush) > 0 {
 		if err := h.batcher.FlushOperationsAndBlocks(r.Context(), opsToFlush); err != nil {
 			log.Printf("[IngestHandler] Failed to flush batch to MongoDB: %v", err)
+			if hasLowBlocks {
+			}
 			http.Error(w, errors.Wrap(err, "failed to flush to database").Error(), http.StatusInternalServerError)
 			return
 		}
+		if hasLowBlocks {
+		}
 	} else {
 		// Even if no operations, flush any unwritten blocks (block-only blocks)
+		if hasLowBlocks {
+		}
 		if err := h.batcher.FlushOperationsAndBlocks(r.Context(), nil); err != nil {
 			log.Printf("[IngestHandler] Failed to flush blocks to MongoDB: %v", err)
+			if hasLowBlocks {
+			}
 			http.Error(w, errors.Wrap(err, "failed to flush blocks to database").Error(), http.StatusInternalServerError)
 			return
+		}
+		if hasLowBlocks {
 		}
 	}
 

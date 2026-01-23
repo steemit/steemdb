@@ -73,8 +73,8 @@ services:
       cold-ingest:
         condition: service_healthy
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
-    restart: unless-stopped
-    # Note: steemd will exit after replay completes, so we don't set restart policy
+    # Note: steemd will exit after replay completes (when STOP_REPLAY_AT_BLOCK is reached),
+    # so we don't set restart policy to allow container to stop naturally
 
 volumes:
   mongo_data:

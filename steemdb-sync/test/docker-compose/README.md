@@ -57,6 +57,8 @@ The script will:
 - Wait for services to be healthy
 - Display status and useful commands
 
+**Note**: After replay completes (when `STOP_REPLAY_AT_BLOCK` is reached), use `test_tools check_data` to validate data integrity (see section 4.1).
+
 ### 3. Monitor Services
 
 ```bash
@@ -91,20 +93,118 @@ This script checks:
 
 ### 4.1 Check Mongo Data (blocks + operations)
 
-After running a replay (or pushing test data), verify MongoDB has **complete blocks** and **no orphan operations**:
+After running a replay (or pushing test data), verify MongoDB has **complete blocks** and **no orphan operations** using the `test_tools` utility:
 
 ```bash
-# Validate blocks/operations consistency in MongoDB
-./check-data.sh
+# Basic validation (checks data integrity)
+../../bin/test_tools check_data
+
+# With RPC API validation (validates data correctness against Steem RPC API)
+../../bin/test_tools check_data -validate-rpc
+
+# With RPC validation and custom sampling (check 10% of blocks)
+../../bin/test_tools check_data -validate-rpc -sample-rate 10
+
+# With custom RPC API endpoint
+../../bin/test_tools check_data -validate-rpc -api https://api.steemit.com
 ```
 
-Expected range rule:
-- If `.env` sets `STOP_REPLAY_AT_BLOCK > 0`, the script checks block completeness in `[1..STOP_REPLAY_AT_BLOCK]`.
-- Otherwise, it uses `meta.sync_state.max_block` as `expected_max_block`.
+#### Configuration
 
-The script exits **non-zero** if it detects:
-- missing blocks in the expected range
-- orphan operations (operations referencing non-existent blocks)
+The tool reads all configuration from the `.env` file in the current directory:
+- `MONGO_USERNAME` - MongoDB username (default: `admin`)
+- `MONGO_PASSWORD` - MongoDB password (default: `123456`)
+- `MONGO_DATABASE` - MongoDB database name (default: `steemdb_test`)
+- `MONGO_PORT` - MongoDB port (default: `27017`)
+- `MONGO_HOST` - MongoDB host (default: `localhost`)
+- `STOP_REPLAY_AT_BLOCK` - Expected max block number (if > 0)
+
+#### Expected Block Range
+
+The tool determines the expected maximum block number using the following priority:
+1. `STOP_REPLAY_AT_BLOCK` from `.env` file (if > 0)
+2. `meta.sync_state.max_block` from MongoDB
+
+#### Checks Performed
+
+**Basic Checks** (always performed):
+- **Missing blocks**: Detects gaps in block sequence within `[1..expected_max_block]`
+- **Orphan operations**: Finds operations that reference non-existent blocks
+- **Block coverage**: Reports blocks with zero operations (allowed, but blocks must exist)
+
+**RPC Validation** (optional, with `-validate-rpc` flag):
+- **Block ID validation**: Compares block IDs from MongoDB with RPC API
+- **Timestamp validation**: Compares timestamps from MongoDB with RPC API (allows 1 second difference)
+- **Operations count validation**: Compares operations count from MongoDB with RPC API
+- **Real-time progress**: Shows validation progress during RPC checks
+
+#### Options
+
+- `-env`: Path to .env file (default: look for .env in current directory)
+- `-api`: Steem RPC API endpoint for validation (default: `https://api.steemit.com`)
+- `-validate-rpc`: Enable RPC API validation (slower but more thorough)
+- `-sample-rate`: Sample rate for RPC validation (1 = check all blocks, 100 = check 1% of blocks, default: 100)
+- `-work-dir`: Working directory (default: current directory)
+
+#### Exit Codes
+
+- `0`: All checks passed
+- `1`: Missing blocks, orphan operations, or RPC validation errors detected
+
+#### Example Output
+
+```
+=== Checking Cold Ingest Mongo Data (blocks + operations) ===
+
+Connecting to MongoDB...
+✓ MongoDB is healthy
+
+✓ expected_max_block=1000 (from STOP_REPLAY_AT_BLOCK)
+
+Querying blocks/operations summary...
+expected_max_block=1000
+blocks_count_in_range=1000
+blocks_min_in_range=1
+blocks_max_in_range=1000
+missing_count=0
+missing_sample=
+missing_ranges=
+ops_total=50000
+orphan_ops_count=0
+orphan_ops_sample=
+blocks_with_ops_in_range=950
+blocks_zero_ops_in_range=50
+tail_histogram=[{"block_num":981,"ops":45},...]
+
+Interpretation:
+  expected_max_block: 1000
+  blocks_max_in_range: 1000
+  missing_count:       0
+  orphan_ops_count:    0
+
+✓ No missing blocks in expected range
+✓ No orphan operations
+
+Starting RPC API validation...
+API endpoint: https://api.steemit.com
+Sample rate: 1/100 blocks
+
+Validating 10 blocks (sampled from 1000 total blocks)...
+Progress: 10/10 (100.0%) checked, 0 errors found
+
+RPC Validation Results:
+  Blocks checked: 10
+  Total errors:   0
+  Block ID errors: 0
+  Timestamp errors: 0
+  Operations count errors: 0
+
+✓ All validated blocks match RPC API
+
+=== CHECK PASSED ===
+```
+
+**Note**: The `test_tools check_data` command uses direct MongoDB connection for better performance. It does not require Docker Compose exec access.
 
 ### 5. Stop Services
 
@@ -198,8 +298,7 @@ mongodb://admin:123456@localhost:27017/steemdb_test?authSource=admin
 - **Logs**: `./logs/` directory
 
 **Endpoints**:
-- `POST /ingest/applied_op` - Single operation
-- `POST /ingest/applied_ops` - Batch operations
+- `POST /ingest/applied_ops` - Batch operations (accepts array of operations, or single object wrapped as array)
 - `GET /metrics` - Prometheus metrics
 
 ### Steemd Node
@@ -226,9 +325,9 @@ mongodb://admin:123456@localhost:27017/steemdb_test?authSource=admin
 docker-compose up -d mongo cold-ingest
 
 # Test with mock data or manual HTTP requests
-curl -X POST http://localhost:8080/ingest/applied_op \
+curl -X POST http://localhost:8080/ingest/applied_ops \
   -H "Content-Type: application/json" \
-  -d '{"block": {"num": 1, "id": "..."}, ...}'
+  -d '[{"block": {"num": 1, "id": "..."}, ...}]'
 ```
 
 ### 2. Full E2E Test (with steemd)
@@ -302,6 +401,28 @@ docker-compose logs steemd
 # Verify endpoint configuration
 docker-compose exec steemd env | grep INGEST
 ```
+
+### Data Validation Issues
+
+If you suspect data integrity issues:
+
+```bash
+# Basic data integrity check
+../../bin/test_tools check_data
+
+# With RPC API validation (validates against Steem RPC API)
+../../bin/test_tools check_data -validate-rpc
+
+# Check specific issues
+# - Missing blocks: Check if STOP_REPLAY_AT_BLOCK matches actual data
+# - Orphan operations: Operations referencing non-existent blocks
+# - RPC validation errors: Block IDs, timestamps, or operation counts don't match
+```
+
+**Common Issues**:
+- **Missing blocks**: Replay may have been interrupted. Check `STOP_REPLAY_AT_BLOCK` setting.
+- **Orphan operations**: Data corruption or incomplete block writes. Check cold_ingest logs.
+- **RPC validation errors**: Data may be from a different fork or incorrect replay. Verify blockchain data source.
 
 ### Port Conflicts
 

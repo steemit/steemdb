@@ -37,13 +37,13 @@ Starts a `steemd` container with the ingest plugin enabled. The container will:
 **Environment variables** (optional):
 - `STEEMD_IMAGE`: Docker image name (default: `steemd:with-ingest`)
 - `CONTAINER_NAME`: Container name (default: `steemd-ingest-test`)
-- `INGEST_ENDPOINT`: HTTP endpoint for ingest service (default: `http://host.docker.internal:8080/ingest/applied_op`)
+- `INGEST_ENDPOINT`: HTTP endpoint for ingest service (default: `http://host.docker.internal:8080/ingest/applied_ops`)
 - `INGEST_HTTP_TIMEOUT`: HTTP timeout in milliseconds (default: `5000`)
 - `INGEST_QUEUE_SIZE`: Maximum queue size (default: `100000`)
 
 **Example:**
 ```bash
-INGEST_ENDPOINT=http://host.docker.internal:8080/ingest/applied_op ./run.sh
+INGEST_ENDPOINT=http://host.docker.internal:8080/ingest/applied_ops ./run.sh
 ```
 
 ### `run-dry.sh` - Start steemd in dry-run mode
@@ -148,7 +148,7 @@ data/
 
 - Verify `cold_ingest` service is running and accessible
 - Check container logs: `./logs.sh`
-- Verify ingest endpoint URL is correct (should be `http://host.docker.internal:8080/ingest/applied_op`)
+- Verify ingest endpoint URL is correct (should be `http://host.docker.internal:8080/ingest/applied_ops`)
 
 ### Container is stuck
 

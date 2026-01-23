@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -84,6 +85,9 @@ func (b *Batcher) Stop() error {
 
 // AddBlockInfo stores block information for later writing
 func (b *Batcher) AddBlockInfo(blockNum uint32, blockID string, timestamp time.Time) {
+	if blockNum < 1000 {
+		log.Printf("[Batcher] [DEBUG] Adding block info: block=%d, block_id=%s, timestamp=%v", blockNum, blockID, timestamp)
+	}
 	b.blocksMu.Lock()
 	defer b.blocksMu.Unlock()
 	b.blocks[blockNum] = &blockInfo{
@@ -250,14 +254,39 @@ func (b *Batcher) flushBatch(ctx context.Context, batch []*model.Operation) erro
 // FlushOperationsAndBlocks synchronously flushes operations and blocks to MongoDB
 // This ensures data is written before returning (for ACK mechanism)
 func (b *Batcher) FlushOperationsAndBlocks(ctx context.Context, ops []*model.Operation) error {
+	// Check if any operations/blocks are < 1000 for debug logging
+	hasLowBlocks := false
+	if len(ops) > 0 {
+		for _, op := range ops {
+			if op.BlockNum < 1000 {
+				hasLowBlocks = true
+				break
+			}
+		}
+	}
+
 	if len(ops) == 0 {
 		// Even if no operations, flush any unwritten blocks
+		if hasLowBlocks {
+			log.Printf("[Batcher] [DEBUG] Flushing unwritten blocks (no operations)")
+		}
 		return b.flushUnwrittenBlocks(ctx)
+	}
+
+	if hasLowBlocks {
+		log.Printf("[Batcher] [DEBUG] Flushing %d operations (contains blocks < 1000)", len(ops))
 	}
 
 	// Write operations to MongoDB
 	if err := b.mongoClient.BulkUpsertOperations(ctx, ops); err != nil {
+		if hasLowBlocks {
+			log.Printf("[Batcher] [DEBUG] Failed to flush operations: %v", err)
+		}
 		return errors.Wrap(err, "failed to flush operations")
+	}
+
+	if hasLowBlocks {
+		log.Printf("[Batcher] [DEBUG] Operations flushed successfully")
 	}
 
 	// Extract and write blocks for these operations
@@ -275,6 +304,13 @@ func (b *Batcher) FlushOperationsAndBlocks(ctx context.Context, ops []*model.Ope
 					Timestamp:        blockInfo.Timestamp,
 					TransactionCount: 0,
 				})
+				if op.BlockNum < 1000 {
+					log.Printf("[Batcher] [DEBUG] Preparing to write block=%d, block_id=%s", op.BlockNum, blockInfo.BlockID)
+				}
+			} else {
+				if op.BlockNum < 1000 {
+					log.Printf("[Batcher] [DEBUG] WARNING: Block info not found for block=%d", op.BlockNum)
+				}
 			}
 		}
 	}
@@ -282,14 +318,27 @@ func (b *Batcher) FlushOperationsAndBlocks(ctx context.Context, ops []*model.Ope
 
 	// Write blocks to MongoDB
 	if len(blocksToWrite) > 0 {
+		if hasLowBlocks {
+			log.Printf("[Batcher] [DEBUG] Writing %d blocks to MongoDB", len(blocksToWrite))
+		}
 		if err := b.mongoClient.BulkUpsertBlocks(ctx, blocksToWrite); err != nil {
+			if hasLowBlocks {
+				log.Printf("[Batcher] [DEBUG] Failed to flush blocks: %v", err)
+			}
 			return errors.Wrap(err, "failed to flush blocks")
-	}
+		}
+
+		if hasLowBlocks {
+			log.Printf("[Batcher] [DEBUG] Blocks written successfully")
+		}
 
 		// Mark blocks as written
 		b.blocksWrittenMu.Lock()
 		for _, block := range blocksToWrite {
 			b.blocksWritten[block.BlockNum] = true
+			if block.BlockNum < 1000 {
+				log.Printf("[Batcher] [DEBUG] Marked block=%d as written", block.BlockNum)
+			}
 		}
 		b.blocksWrittenMu.Unlock()
 	}
@@ -305,6 +354,7 @@ func (b *Batcher) flushUnwrittenBlocks(ctx context.Context) error {
 	b.blocksWrittenMu.RLock()
 
 	blocksToWrite := make([]*model.Block, 0)
+	hasLowBlocks := false
 	for blockNum, blockInfo := range b.blocks {
 		if !b.blocksWritten[blockNum] {
 			blocksToWrite = append(blocksToWrite, &model.Block{
@@ -314,6 +364,10 @@ func (b *Batcher) flushUnwrittenBlocks(ctx context.Context) error {
 				Timestamp:        blockInfo.Timestamp,
 				TransactionCount: 0, // Will be updated by aggregation if needed
 			})
+			if blockNum < 1000 {
+				hasLowBlocks = true
+				log.Printf("[Batcher] [DEBUG] Found unwritten block=%d, block_id=%s", blockNum, blockInfo.BlockID)
+			}
 		}
 	}
 
@@ -324,15 +378,29 @@ func (b *Batcher) flushUnwrittenBlocks(ctx context.Context) error {
 		return nil
 	}
 
+	if hasLowBlocks {
+		log.Printf("[Batcher] [DEBUG] Flushing %d unwritten blocks (contains blocks < 1000)", len(blocksToWrite))
+	}
+
 	// Write blocks to MongoDB
 	if err := b.mongoClient.BulkUpsertBlocks(ctx, blocksToWrite); err != nil {
+		if hasLowBlocks {
+			log.Printf("[Batcher] [DEBUG] Failed to flush unwritten blocks: %v", err)
+		}
 		return errors.Wrap(err, "failed to flush unwritten blocks")
+	}
+
+	if hasLowBlocks {
+		log.Printf("[Batcher] [DEBUG] Unwritten blocks flushed successfully")
 	}
 
 	// Mark blocks as written
 	b.blocksWrittenMu.Lock()
 	for _, block := range blocksToWrite {
 		b.blocksWritten[block.BlockNum] = true
+		if block.BlockNum < 1000 {
+			log.Printf("[Batcher] [DEBUG] Marked unwritten block=%d as written", block.BlockNum)
+		}
 	}
 	b.blocksWrittenMu.Unlock()
 

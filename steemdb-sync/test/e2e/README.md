@@ -52,7 +52,7 @@
 
 使用 JSONL 文件回放的测试（推荐用于调试）：
 
-使用 `jsonl_replay` 工具从 JSONL 文件（steemd ingest 插件 dry-run 模式生成）读取数据并发送到 `cold_ingest`。
+使用 `test_tools jsonl_replay` 工具从 JSONL 文件（steemd ingest 插件 dry-run 模式生成）读取数据并发送到 `cold_ingest`。
 
 **使用步骤：**
 
@@ -68,10 +68,10 @@
    ../bin/cold_ingest -config configs/config.yaml
    ```
 
-3. 使用 `jsonl_replay` 工具发送数据（在另一个终端）：
+3. 使用 `test_tools jsonl_replay` 工具发送数据（在另一个终端）：
    ```bash
    cd steemdb-sync
-   ../bin/jsonl_replay -file test/steem-test/data/ingest/ingest_20260111_081033_778.jsonl \
+   ../bin/test_tools jsonl_replay -file test/steem-test/data/ingest/ingest_20260111_081033_778.jsonl \
      -start-block 1 -end-block 1000 -rate 1000
    ```
 
@@ -149,7 +149,7 @@ docker run -d \
   /usr/local/steemd/bin/steemd \
     --replay-blockchain \
     --plugin ingest \
-    --ingest-endpoint http://host.docker.internal:8080/ingest/applied_op \
+    --ingest-endpoint http://host.docker.internal:8080/ingest/applied_ops \
     --data-dir /var/steem
 ```
 
@@ -164,7 +164,7 @@ docker run -d \
   /usr/local/steemd/bin/steemd \
     --replay-blockchain \
     --plugin ingest \
-    --ingest-endpoint http://host.docker.internal:8080/ingest/applied_op \
+    --ingest-endpoint http://host.docker.internal:8080/ingest/applied_ops \
     --data-dir /var/steem
 ```
 
