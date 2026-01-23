@@ -137,10 +137,11 @@ func (h *IngestHandler) HandleAppliedOps(w http.ResponseWriter, r *http.Request)
 		// Store block info
 		h.batcher.AddBlockInfo(opJSON.Block.Num, opJSON.Block.ID, blockTimestamp)
 
-		// Debug log for blocks < 1000
-		if opJSON.Block.Num < 1000 {
-				requestNum, i, opJSON.Block.Num, opJSON.Operation.Type, opJSON.Transaction.Index, opJSON.Operation.Index, opJSON.BlockOnly)
-		}
+	// Debug log for blocks < 1000
+	if opJSON.Block.Num < 1000 {
+		log.Printf("[IngestHandler] [DEBUG] Batch request #%d: Processing op[%d]: block=%d, op_type=%s, trx_index=%d, op_index=%d, block_only=%v",
+			requestNum, i, opJSON.Block.Num, opJSON.Operation.Type, opJSON.Transaction.Index, opJSON.Operation.Index, opJSON.BlockOnly)
+	}
 
 		// Handle block-only records (blocks without operations)
 		if opJSON.BlockOnly {
