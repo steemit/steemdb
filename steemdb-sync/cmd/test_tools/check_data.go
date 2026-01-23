@@ -99,6 +99,21 @@ func runCheckData(args []string) {
 	mongoPort := getEnv(env, "MONGO_PORT", "27017")
 	mongoHost := getEnv(env, "MONGO_HOST", "localhost")
 
+	// Get RPC validation settings from .env (override command line defaults if set)
+	if envRPC := getEnv(env, "RPC_API", ""); envRPC != "" {
+		*apiEndpoint = envRPC
+	}
+	if envValidate := getEnv(env, "VALIDATE_RPC", ""); envValidate != "" {
+		if envValidate == "true" || envValidate == "1" {
+			*validateRPC = true
+		}
+	}
+	if envSample := getEnv(env, "RPC_SAMPLE_RATE", ""); envSample != "" {
+		if sample, err := strconv.Atoi(envSample); err == nil && sample > 0 {
+			*sampleRate = sample
+		}
+	}
+
 	mongoURI := fmt.Sprintf("mongodb://%s:%s@%s:%s/%s?authSource=admin",
 		mongoUsername, mongoPassword, mongoHost, mongoPort, mongoDatabase)
 

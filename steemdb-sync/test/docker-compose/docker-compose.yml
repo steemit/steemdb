@@ -35,6 +35,9 @@ services:
     environment:
       - CONFIG_PATH=/app/configs/config.yaml
       - MONGO_URI=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-123456}@mongo:27017/${MONGO_DATABASE:-steemdb_test}?authSource=admin
+      - VALIDATE_RPC=${VALIDATE_RPC:-false}
+      - RPC_API=${RPC_API:-https://api.steemit.com}
+      - RPC_SAMPLE_RATE=${RPC_SAMPLE_RATE:-100}
     volumes:
       - ./configs:/app/configs:ro
       - ./logs:/app/logs
