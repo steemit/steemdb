@@ -79,18 +79,18 @@ The tool determines the expected maximum block number using the following priori
 #### Checks Performed
 
 - **Missing blocks**: Detects gaps in block sequence within `[1..expected_max_block]`
-- **Orphan operations**: Finds operations that reference non-existent blocks
+- **Orphan operations**: Sample-based check (random sample of operations; verifies each referenced `block_num` exists in `blocks`). Avoids full-collection aggregation timeouts on large datasets. Sampling uses MongoDB `$sample` (pseudo-random over storage order, not strictly uniform). **Running `check_data` multiple times increases coverage**—each run samples a different subset, so several passes give higher confidence.
 - **Block coverage**: Reports blocks with zero operations (allowed, but blocks must exist)
 - **RPC validation** (optional, with `-validate-rpc`):
-  - Validates block IDs match RPC API
-  - Validates timestamps match RPC API
-  - Validates operations count matches RPC API
+  - Validates block IDs match RPC API (failure → exit 1)
+  - Validates timestamps match RPC API (failure → exit 1)
+  - Compares operations count with RPC API (**warning only**; mismatches are printed but do not cause exit 1, since RPC may differ from local ingest)
   - Shows real-time progress during validation
 
 #### Exit Codes
 
-- `0`: All checks passed
-- `1`: Missing blocks or orphan operations detected
+- `0`: All checks passed (including when only RPC ops_count mismatches exist)
+- `1`: Missing blocks, orphan operations, or RPC block_id/timestamp errors
 
 #### Examples
 

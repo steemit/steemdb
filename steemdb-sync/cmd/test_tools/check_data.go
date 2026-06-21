@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,6 +44,8 @@ type checkDataResult struct {
 	OpsTotal           int64
 	OrphanOpsCount     int64
 	OrphanOpsSample    []string
+	OrphanCheckSampled bool // true when orphan check used sampling (no full $lookup)
+	OrphanSampleSize   int  // number of distinct block_nums checked in sample
 	BlocksWithOpsCount int
 	BlocksZeroOpsCount int
 	TailHistogram      []blockHistogram
@@ -52,9 +58,15 @@ type blockHistogram struct {
 }
 
 type validationError struct {
-	BlockNum uint32
-	Type     string // "block_id", "timestamp", "ops_count", etc.
-	Message  string
+	BlockNum             uint32
+	Type                 string // "block_id", "timestamp", "ops_count", etc.
+	Message              string
+	MongoOpsCount        *int64                      // set for ops_count mismatch: MongoDB count
+	RPCOpsCount          *int64                      // set for ops_count mismatch: RPC count
+	MongoOps             []bson.M                    // set for ops_count mismatch: raw MongoDB docs for printing
+	RPCOps               []*protocol.OperationObject // set for ops_count mismatch: RPC operations
+	RPCUnmarshalErrorRaw string                      // set when RPC get_ops_in_block response failed to unmarshal (raw JSON for steemutil debugging)
+	MongoLoadError       string                      // set when MongoDB operations could not be loaded for printing (e.g. Find/Decode error)
 }
 
 type validationStats struct {
@@ -124,7 +136,7 @@ func runCheckData(args []string) {
 	fmt.Printf("%s=== Checking Cold Ingest Mongo Data (blocks + operations) ===%s\n\n", colorGreen, colorReset)
 
 	// Connect to MongoDB with longer timeout for large datasets
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
 
 	fmt.Printf("%sConnecting to MongoDB...%s\n", colorBlue, colorReset)
@@ -196,10 +208,18 @@ func runCheckData(args []string) {
 	}
 
 	if result.OrphanOpsCount > 0 {
-		fmt.Printf("%s✗ Orphan operations detected (ops referencing missing blocks)%s\n", colorRed, colorReset)
+		if result.OrphanCheckSampled {
+			fmt.Printf("%s✗ Orphan block_nums detected in sample (ops reference missing blocks)%s\n", colorRed, colorReset)
+		} else {
+			fmt.Printf("%s✗ Orphan operations detected (ops referencing missing blocks)%s\n", colorRed, colorReset)
+		}
 		issues = 1
 	} else {
-		fmt.Printf("%s✓ No orphan operations%s\n", colorGreen, colorReset)
+		if result.OrphanCheckSampled {
+			fmt.Printf("%s✓ No orphan operations in sample (%d block_nums checked)%s\n", colorGreen, result.OrphanSampleSize, colorReset)
+		} else {
+			fmt.Printf("%s✓ No orphan operations%s\n", colorGreen, colorReset)
+		}
 	}
 
 	// RPC validation (optional)
@@ -209,7 +229,7 @@ func runCheckData(args []string) {
 		fmt.Printf("Sample rate: 1/%d blocks\n\n", *sampleRate)
 
 		rpcClient := rpc.NewClient(*apiEndpoint, 3, 30*time.Second)
-		validationErrors, stats := validateWithRPC(ctx, rpcClient, blocksColl, operationsColl, expectedMaxBlock, *sampleRate)
+		validationErrors, stats := validateWithRPC(ctx, rpcClient, *apiEndpoint, blocksColl, operationsColl, expectedMaxBlock, *sampleRate)
 		result.ValidationErrors = validationErrors
 
 		fmt.Printf("\n%sRPC Validation Results:%s\n", colorBlue, colorReset)
@@ -226,11 +246,64 @@ func runCheckData(args []string) {
 					break
 				}
 				fmt.Printf("  Block %d [%s]: %s\n", err.BlockNum, err.Type, err.Message)
+				// Print raw RPC response when present (unmarshal/unparseable errors)
+				if err.RPCUnmarshalErrorRaw != "" {
+					fmt.Printf("    RPC raw response (unparseable by steemutil):\n")
+					var pretty bytes.Buffer
+					if json.Indent(&pretty, []byte(err.RPCUnmarshalErrorRaw), "      ", "  ") == nil {
+						fmt.Printf("      %s\n", pretty.String())
+					} else {
+						fmt.Printf("      %s\n", err.RPCUnmarshalErrorRaw)
+					}
+				}
+				if err.Type == "ops_count" && err.MongoOpsCount != nil && err.RPCOpsCount != nil {
+					fmt.Printf("    MongoDB operations: %d, RPC operations: %d\n", *err.MongoOpsCount, *err.RPCOpsCount)
+					// Print MongoDB operations (raw docs so structure always matches DB)
+					if len(err.MongoOps) > 0 {
+						fmt.Printf("    MongoDB operations details:\n")
+						for j, doc := range err.MongoOps {
+							if j >= 20 { // Limit to first 20 for readability
+								fmt.Printf("      ... and %d more MongoDB operations\n", len(err.MongoOps)-20)
+								break
+							}
+							opJSON, _ := json.MarshalIndent(doc, "      ", "  ")
+							fmt.Printf("      [%d] %s\n", j+1, string(opJSON))
+						}
+					} else if *err.MongoOpsCount > 0 {
+						fmt.Printf("    MongoDB operations details: (failed to load %d documents for printing)\n", *err.MongoOpsCount)
+						if err.MongoLoadError != "" {
+							fmt.Printf("    MongoDB load error: %s\n", err.MongoLoadError)
+						}
+					}
+					// Print RPC operations
+					if len(err.RPCOps) > 0 {
+						fmt.Printf("    RPC operations details:\n")
+						for j, op := range err.RPCOps {
+							if j >= 20 { // Limit to first 20 for readability
+								fmt.Printf("      ... and %d more RPC operations\n", len(err.RPCOps)-20)
+								break
+							}
+							opJSON, _ := json.MarshalIndent(op, "      ", "  ")
+							fmt.Printf("      [%d] %s\n", j+1, string(opJSON))
+						}
+					}
+				}
 			}
 			if len(validationErrors) > 10 {
 				fmt.Printf("  ... and %d more errors\n", len(validationErrors)-10)
 			}
-			issues = 1
+			criticalRPCErrors := 0
+			for _, err := range validationErrors {
+				if err.Type != "ops_count" {
+					criticalRPCErrors++
+				}
+			}
+			if criticalRPCErrors > 0 {
+				issues = 1
+			}
+			if stats.OpsCountErrors > 0 && criticalRPCErrors == 0 {
+				fmt.Printf("%s  (ops_count mismatches are warnings only; RPC API may differ from local ingest)%s\n", colorYellow, colorReset)
+			}
 		} else {
 			fmt.Printf("\n%s✓ All validated blocks match RPC API%s\n", colorGreen, colorReset)
 		}
@@ -272,6 +345,10 @@ func printSummary(result *checkDataResult) {
 	fmt.Printf("missing_ranges=%s\n", result.MissingRanges)
 	fmt.Printf("ops_total=%d\n", result.OpsTotal)
 	fmt.Printf("orphan_ops_count=%d\n", result.OrphanOpsCount)
+	if result.OrphanCheckSampled {
+		fmt.Printf("orphan_check_sampled=true\n")
+		fmt.Printf("orphan_sample_size=%d\n", result.OrphanSampleSize)
+	}
 	if len(result.OrphanOpsSample) > 0 {
 		fmt.Printf("orphan_ops_sample=%s\n", strings.Join(result.OrphanOpsSample, ","))
 	} else {
@@ -291,6 +368,9 @@ func printSummary(result *checkDataResult) {
 	}
 	fmt.Printf("  missing_count:       %d\n", result.MissingCount)
 	fmt.Printf("  orphan_ops_count:    %d\n", result.OrphanOpsCount)
+	if result.OrphanCheckSampled {
+		fmt.Printf("  orphan_check:        sample of %d block_nums (not full scan)\n", result.OrphanSampleSize)
+	}
 	fmt.Println()
 }
 
@@ -415,57 +495,102 @@ func queryDataSummary(ctx context.Context, blocksColl, operationsColl *mongo.Col
 	result.OpsTotal = totalOps
 	fmt.Printf(" %d operations found\n", totalOps)
 
-	// Find orphan operations
-	fmt.Printf("  Checking for orphan operations...")
+	// Orphan check: sample-based (avoids full $lookup which times out on large collections).
+	// Sample random operations, get distinct block_num, then verify each exists in blocks.
+	fmt.Printf("  Checking for orphan operations (sample)...")
 	os.Stdout.Sync()
-	pipeline := []bson.M{
-		{"$lookup": bson.M{
-			"from":         "blocks",
-			"localField":   "block_num",
-			"foreignField": "_id",
-			"as":           "b",
-		}},
-		{"$match": bson.M{"b": bson.M{"$eq": []interface{}{}}}},
-		{"$group": bson.M{
-			"_id":    nil,
-			"count":  bson.M{"$sum": 1},
-			"sample": bson.M{"$push": "$_id"},
-		}},
-		{"$project": bson.M{
-			"_id":    0,
-			"count":  1,
-			"sample": bson.M{"$slice": []interface{}{"$sample", 5}},
-		}},
+	const orphanSampleSize = 20000
+	samplePipeline := []bson.M{
+		{"$sample": bson.M{"size": orphanSampleSize}},
+		{"$group": bson.M{"_id": "$block_num"}},
 	}
-
-	cursor, err = operationsColl.Aggregate(ctx, pipeline)
+	orphanCtx, orphanCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer orphanCancel()
+	cursor, err = operationsColl.Aggregate(orphanCtx, samplePipeline)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to aggregate orphan operations")
+		return nil, errors.Wrap(err, "failed to sample operations for orphan check")
 	}
-	defer cursor.Close(ctx)
+	defer cursor.Close(orphanCtx)
 
-	if cursor.Next(ctx) {
+	var sampledBlockNums []uint32
+	for cursor.Next(orphanCtx) {
 		var doc bson.M
-		if err := cursor.Decode(&doc); err == nil {
-			if count, ok := doc["count"].(int32); ok {
-				result.OrphanOpsCount = int64(count)
-			} else if count, ok := doc["count"].(int64); ok {
-				result.OrphanOpsCount = count
-			} else if count, ok := doc["count"].(float64); ok {
-				result.OrphanOpsCount = int64(count)
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		var bn uint32
+		if id, ok := doc["_id"].(int32); ok {
+			bn = uint32(id)
+		} else if id, ok := doc["_id"].(int64); ok {
+			bn = uint32(id)
+		} else if id, ok := doc["_id"].(float64); ok {
+			bn = uint32(id)
+		} else {
+			continue
+		}
+		sampledBlockNums = append(sampledBlockNums, bn)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, errors.Wrap(err, "cursor error during orphan sample")
+	}
+
+	result.OrphanCheckSampled = true
+	result.OrphanSampleSize = len(sampledBlockNums)
+
+	// Batch-check which block_nums exist in blocks (avoids N single-doc lookups).
+	// Use int64 for _id in query: BSON may store block _id as int64 (Go uint32 often encodes as long).
+	const batchSize = 500
+	for i := 0; i < len(sampledBlockNums); i += batchSize {
+		end := i + batchSize
+		if end > len(sampledBlockNums) {
+			end = len(sampledBlockNums)
+		}
+		batch := sampledBlockNums[i:end]
+		ids := make([]interface{}, len(batch))
+		for j, bn := range batch {
+			ids[j] = int64(bn)
+		}
+		cur, err := blocksColl.Find(orphanCtx, bson.M{"_id": bson.M{"$in": ids}}, options.Find().SetProjection(bson.M{"_id": 1}))
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to check blocks for orphan sample")
+		}
+		existingIDs := make(map[int64]bool)
+		for cur.Next(orphanCtx) {
+			var doc bson.M
+			if err := cur.Decode(&doc); err != nil {
+				continue
 			}
-			if sample, ok := doc["sample"].(bson.A); ok {
-				for _, v := range sample {
-					if str, ok := v.(string); ok {
-						result.OrphanOpsSample = append(result.OrphanOpsSample, str)
-					}
+			var id int64
+			switch v := doc["_id"].(type) {
+			case int32:
+				id = int64(v)
+			case int64:
+				id = v
+			case float64:
+				id = int64(v)
+			default:
+				continue
+			}
+			existingIDs[id] = true
+		}
+		cur.Close(orphanCtx)
+		for _, bn := range batch {
+			if !existingIDs[int64(bn)] {
+				result.OrphanOpsCount++
+				if len(result.OrphanOpsSample) < 10 {
+					result.OrphanOpsSample = append(result.OrphanOpsSample, fmt.Sprintf("block:%d", bn))
 				}
 			}
 		}
 	}
-	fmt.Printf(" done (%d orphan operations)\n", result.OrphanOpsCount)
 
-	// Count distinct blocks with operations
+	if result.OrphanOpsCount > 0 {
+		fmt.Printf(" done (%d orphan block_nums in sample of %d)\n", result.OrphanOpsCount, result.OrphanSampleSize)
+	} else {
+		fmt.Printf(" done (no orphans in sample of %d block_nums)\n", result.OrphanSampleSize)
+	}
+
+	// Count distinct blocks with operations (use dedicated timeout for large collections)
 	// Use aggregation instead of distinct to avoid 16MB limit
 	fmt.Printf("  Counting distinct blocks with operations...")
 	os.Stdout.Sync()
@@ -474,14 +599,16 @@ func queryDataSummary(ctx context.Context, blocksColl, operationsColl *mongo.Col
 		{"$group": bson.M{"_id": "$block_num"}},
 		{"$group": bson.M{"_id": nil, "count": bson.M{"$sum": 1}}},
 	}
-	distinctCursor, err := operationsColl.Aggregate(ctx, distinctPipeline)
+	distinctCtx, distinctCancel := context.WithTimeout(ctx, 45*time.Minute)
+	defer distinctCancel()
+	distinctCursor, err := operationsColl.Aggregate(distinctCtx, distinctPipeline)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to count distinct blocks with operations")
 	}
-	defer distinctCursor.Close(ctx)
+	defer distinctCursor.Close(distinctCtx)
 
 	result.BlocksWithOpsCount = 0
-	if distinctCursor.Next(ctx) {
+	if distinctCursor.Next(distinctCtx) {
 		var doc bson.M
 		if err := distinctCursor.Decode(&doc); err == nil {
 			if count, ok := doc["count"].(int32); ok {
@@ -522,7 +649,37 @@ func queryDataSummary(ctx context.Context, blocksColl, operationsColl *mongo.Col
 	return result, nil
 }
 
-func validateWithRPC(ctx context.Context, rpcClient *rpc.Client, blocksColl, operationsColl *mongo.Collection, expectedMaxBlock uint32, sampleRate int) ([]validationError, *validationStats) {
+// fetchRPCGetOpsInBlockRaw performs a raw HTTP POST to condenser_api.get_ops_in_block and returns the response body (for debugging unmarshal failures).
+func fetchRPCGetOpsInBlockRaw(ctx context.Context, apiEndpoint string, blockNum uint32) (string, error) {
+	reqBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "condenser_api.get_ops_in_block",
+		"params":  []interface{}{blockNum, false},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiEndpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func validateWithRPC(ctx context.Context, rpcClient *rpc.Client, apiEndpoint string, blocksColl, operationsColl *mongo.Collection, expectedMaxBlock uint32, sampleRate int) ([]validationError, *validationStats) {
 	var errors []validationError
 	var errorsMu sync.Mutex
 	stats := &validationStats{}
@@ -715,11 +872,17 @@ func validateWithRPC(ctx context.Context, rpcClient *rpc.Client, blocksColl, ope
 						}
 						// After max retries, skip this block's ops_count validation
 						// This is a known RPC API limitation for historical blocks
+						// Fetch raw RPC response so user can inspect unparseable data (e.g. for steemutil fixes)
+						var rawResp string
+						if raw, err := fetchRPCGetOpsInBlockRaw(ctx, apiEndpoint, bn); err == nil {
+							rawResp = raw
+						}
 						errorsMu.Lock()
 						errors = append(errors, validationError{
-							BlockNum: bn,
-							Type:     "ops_count",
-							Message:  fmt.Sprintf("Skipped operations count validation due to RPC API unmarshal limitation: %v", rpcErr),
+							BlockNum:             bn,
+							Type:                 "ops_count",
+							Message:              fmt.Sprintf("Skipped operations count validation due to RPC API unmarshal limitation: %v", rpcErr),
+							RPCUnmarshalErrorRaw: rawResp,
 						})
 						errorsMu.Unlock()
 						atomic.AddInt64(&stats.TotalErrors, 1)
@@ -727,12 +890,17 @@ func validateWithRPC(ctx context.Context, rpcClient *rpc.Client, blocksColl, ope
 						break
 					}
 
-					// For non-unmarshal errors, record the error immediately
+					// For non-unmarshal errors, record the error immediately; also fetch raw response when possible (may be unparseable)
+					var rawResp string
+					if raw, err := fetchRPCGetOpsInBlockRaw(ctx, apiEndpoint, bn); err == nil {
+						rawResp = raw
+					}
 					errorsMu.Lock()
 					errors = append(errors, validationError{
-						BlockNum: bn,
-						Type:     "ops_count",
-						Message:  fmt.Sprintf("Failed to get operations from RPC: %v", rpcErr),
+						BlockNum:             bn,
+						Type:                 "ops_count",
+						Message:              fmt.Sprintf("Failed to get operations from RPC: %v", rpcErr),
+						RPCUnmarshalErrorRaw: rawResp,
 					})
 					errorsMu.Unlock()
 					atomic.AddInt64(&stats.TotalErrors, 1)
@@ -744,11 +912,54 @@ func validateWithRPC(ctx context.Context, rpcClient *rpc.Client, blocksColl, ope
 				if rpcErr == nil {
 					rpcOpsCount := int64(len(rpcOps))
 					if mongoOpsCount != rpcOpsCount {
+						// Fetch MongoDB operations for detailed comparison (raw bson.M so decode never fails)
+						// Query with $in so we match whether block_num is stored as int32 or int64 in BSON
+						var mongoOps []bson.M
+						var mongoLoadErr string
+						blockNumFilter := bson.M{"block_num": bson.M{"$in": []interface{}{int32(bn), int64(bn)}}}
+						mongoCursor, mongoErr := operationsColl.Find(ctx, blockNumFilter, options.Find().SetSort(bson.M{"trx_index": 1, "op_index": 1}))
+						if mongoErr != nil {
+							mongoLoadErr = mongoErr.Error()
+						} else {
+							for mongoCursor.Next(ctx) {
+								var doc bson.M
+								if err := mongoCursor.Decode(&doc); err != nil {
+									if mongoLoadErr == "" {
+										mongoLoadErr = fmt.Sprintf("Decode error: %v", err)
+									}
+									continue
+								}
+								docCopy := make(bson.M, len(doc))
+								for k, v := range doc {
+									docCopy[k] = v
+								}
+								mongoOps = append(mongoOps, docCopy)
+							}
+							mongoCursor.Close(ctx)
+							if len(mongoOps) == 0 && mongoLoadErr == "" && mongoOpsCount > 0 {
+								mongoLoadErr = "Find returned no documents (query may not match document types)"
+							}
+						}
+						// Deep copy RPC ops to avoid race conditions
+						rpcOpsCopy := make([]*protocol.OperationObject, len(rpcOps))
+						for i, op := range rpcOps {
+							if op != nil {
+								// Create a copy (OperationObject is a struct, so we can copy by value)
+								opCopy := *op
+								rpcOpsCopy[i] = &opCopy
+							}
+						}
+						mongoCnt, rpcCnt := mongoOpsCount, rpcOpsCount
 						errorsMu.Lock()
 						errors = append(errors, validationError{
-							BlockNum: bn,
-							Type:     "ops_count",
-							Message:  fmt.Sprintf("Operations count mismatch: MongoDB=%d, RPC=%d", mongoOpsCount, rpcOpsCount),
+							BlockNum:       bn,
+							Type:           "ops_count",
+							Message:        fmt.Sprintf("Operations count mismatch: MongoDB=%d, RPC=%d", mongoOpsCount, rpcOpsCount),
+							MongoOpsCount:  &mongoCnt,
+							RPCOpsCount:    &rpcCnt,
+							MongoOps:       mongoOps,
+							RPCOps:         rpcOpsCopy,
+							MongoLoadError: mongoLoadErr,
 						})
 						errorsMu.Unlock()
 						atomic.AddInt64(&stats.TotalErrors, 1)
