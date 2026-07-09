@@ -18,7 +18,26 @@ type Config struct {
 	ColdStart  ColdStartConfig  `yaml:"cold_start"`
 	Batch      BatchConfig      `yaml:"batch"`
 	Ingest     IngestConfig     `yaml:"ingest"`
+	Processor  ProcessorConfig  `yaml:"processor"`
 	Log        LogConfig        `yaml:"log"`
+}
+
+// ProcessorConfig contains operation processor settings
+type ProcessorConfig struct {
+	Enabled          bool                   `yaml:"enabled"`
+	CatchUpSleep     string                 `yaml:"catch_up_sleep"`
+	StartHeight      uint32                 `yaml:"start_height"`
+	AccountRefresher AccountRefresherConfig `yaml:"account_refresher"`
+}
+
+// AccountRefresherConfig contains account dirty-refresh settings
+type AccountRefresherConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Interval       string `yaml:"interval"`
+	BatchSize      int    `yaml:"batch_size"`
+	RPCBatchSize   int    `yaml:"rpc_batch_size"`
+	Workers        int    `yaml:"workers"`
+	ColdStartPause bool   `yaml:"cold_start_pause"`
 }
 
 // MongoConfig contains MongoDB connection settings
@@ -86,6 +105,19 @@ func Load(configPath string) (*Config, error) {
 		Ingest: IngestConfig{
 			ListenAddr: ":8080",
 			QueueSize:  100000,
+		},
+		Processor: ProcessorConfig{
+			Enabled:      true,
+			CatchUpSleep: "1s",
+			StartHeight:  0,
+			AccountRefresher: AccountRefresherConfig{
+				Enabled:        true,
+				Interval:       "30s",
+				BatchSize:      500,
+				RPCBatchSize:   100,
+				Workers:        8,
+				ColdStartPause: true,
+			},
 		},
 		Log: LogConfig{
 			Level:  "info",
@@ -229,4 +261,14 @@ func (c *Config) BatchFlushInterval() (time.Duration, error) {
 // RPCTimeout returns the RPC timeout as time.Duration
 func (c *Config) RPCTimeout() (time.Duration, error) {
 	return time.ParseDuration(c.RPC.Timeout)
+}
+
+// ProcessorCatchUpSleep returns the catch-up sleep duration
+func (c *Config) ProcessorCatchUpSleep() (time.Duration, error) {
+	return time.ParseDuration(c.Processor.CatchUpSleep)
+}
+
+// AccountRefresherInterval returns the refresher interval duration
+func (c *Config) AccountRefresherInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Processor.AccountRefresher.Interval)
 }
