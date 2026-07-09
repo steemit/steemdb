@@ -31,6 +31,17 @@ func (m *MongoInserter) UpsertOne(ctx context.Context, collection string, id int
 	return err
 }
 
+// UpdateOne performs a partial update on a document in the named collection.
+// Returns whether a document was matched (for callers to detect "not found").
+func (m *MongoInserter) UpdateOne(ctx context.Context, collection string, filter bson.M, update bson.M) (bool, error) {
+	col := m.db.Collection(collection)
+	result, err := col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, err
+	}
+	return result.MatchedCount > 0, nil
+}
+
 // QueueAccountDirty marks an account as needing refresh by setting _dirty: true.
 // This is the lazy-update pattern from legacy sync.py: handlers don't fetch full
 // account state, they just flag it. A separate worker periodically refreshes dirty accounts.

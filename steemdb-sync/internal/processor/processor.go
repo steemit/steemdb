@@ -23,10 +23,9 @@ type Processor struct {
 	dispatcher  *Dispatcher
 	cursor      *Cursor
 
-	// Collections from the operations/blocks/meta sets
+	// Collections from the operations/blocks sets
 	opsCol    *drivermongo.Collection
 	blocksCol *drivermongo.Collection
-	metaCol   *drivermongo.Collection
 
 	catchUpSleep time.Duration
 }
@@ -41,13 +40,12 @@ func NewProcessor(ctx *Context, dispatcher *Dispatcher) (*Processor, error) {
 	db := ctx.MongoClient.Database()
 
 	return &Processor{
-		cfg:         ctx.Cfg,
-		mongoClient: ctx.MongoClient,
-		dispatcher:  dispatcher,
-		cursor:      NewCursor(db),
-		opsCol:      db.Collection("operations"),
-		blocksCol:   db.Collection("blocks"),
-		metaCol:     db.Collection("meta"),
+		cfg:          ctx.Cfg,
+		mongoClient:  ctx.MongoClient,
+		dispatcher:   dispatcher,
+		cursor:       NewCursor(db),
+		opsCol:       db.Collection("operations"),
+		blocksCol:    db.Collection("blocks"),
 		catchUpSleep: catchUpSleep,
 	}, nil
 }
@@ -139,10 +137,16 @@ func (p *Processor) Run(ctx context.Context) error {
 	}
 }
 
-// fetchOpsForBlock retrieves all operations for a given block, ordered by _id.
+// fetchOpsForBlock retrieves all operations for a given block, ordered by tx/op index.
+// Sort by the numeric trx_index and op_index fields (NOT by _id string), because the
+// _id format "{block}:{trx}:{op}" sorts lexicographically and would misorder indexes ≥ 10
+// (e.g. "100:10:0" sorts before "100:2:0" as strings).
 func (p *Processor) fetchOpsForBlock(ctx context.Context, blockNum uint32) ([]*model.Operation, error) {
 	filter := bson.M{"block_num": blockNum}
-	opts := options.Find().SetSort(bson.M{"_id": 1})
+	opts := options.Find().SetSort(bson.D{
+		{Key: "trx_index", Value: 1},
+		{Key: "op_index", Value: 1},
+	})
 
 	cursor, err := p.opsCol.Find(ctx, filter, opts)
 	if err != nil {

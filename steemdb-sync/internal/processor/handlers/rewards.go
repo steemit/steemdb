@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/steemit/steemdb-sync/internal/model"
@@ -115,14 +116,19 @@ func (h *AuthorRewardHandler) Handle(ctx context.Context, op *model.Operation, b
 		return fmt.Errorf("failed to upsert author_reward %s: %w", id, err)
 	}
 
-	// Write reward back to the comment document (legacy sync.py:156)
+	// Write reward back to the comment document (legacy sync.py:156).
+	// The comment may not exist yet (it will be created by the comment handler later),
+	// so MatchedCount==0 is expected and harmless. Only log on actual errors.
 	commentID := author + "/" + permlink
-	col := h.inserter.db.Collection("comment")
-	_, err := col.UpdateOne(ctx, bson.M{"_id": commentID}, bson.M{"$set": bson.M{"reward": doc}})
+	matched, err := h.inserter.UpdateOne(ctx, "comment",
+		bson.M{"_id": commentID},
+		bson.M{"$set": bson.M{"reward": doc}},
+	)
 	if err != nil {
-		// Non-fatal: comment may not exist yet (will be created by comment handler later)
-		// Log but don't fail the operation.
-		_ = err
+		// Non-fatal: don't fail the operation, but log the real error.
+		log.Printf("[AuthorReward] Failed to write reward back to comment %s: %v", commentID, err)
+	} else if !matched {
+		// Normal during cold start: comment doc not yet created. No-op.
 	}
 
 	// Queue author account for refresh
