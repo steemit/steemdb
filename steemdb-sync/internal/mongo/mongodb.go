@@ -303,3 +303,9 @@ func (c *Client) CheckBlockExists(ctx context.Context, blockNum uint32) (bool, e
 	}
 	return count > 0, nil
 }
+
+// Database returns the underlying *mongo.Database for direct collection access.
+// Used by the processor package to write to business collections (account, comment, vote, ...).
+func (c *Client) Database() *mongo.Database {
+	return c.db
+}
