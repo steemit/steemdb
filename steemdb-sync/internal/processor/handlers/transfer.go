@@ -27,9 +27,8 @@ func (h *TransferHandler) Handle(ctx context.Context, op *model.Operation, block
 	v := op.OpValue
 	from := GetString(v, "from")
 	to := GetString(v, "to")
-	amountStr := GetString(v, "amount")
 
-	amountVal, amountType := SplitAmount(amountStr)
+	amountVal, amountType := ParseAsset(GetField(v, "amount"))
 
 	id := fmt.Sprintf("%d/%s/%s", op.BlockNum, from, to)
 

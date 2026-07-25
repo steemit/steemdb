@@ -30,9 +30,8 @@ func (h *CurationRewardHandler) Handle(ctx context.Context, op *model.Operation,
 	curator := GetString(v, "curator")
 	commentAuthor := GetString(v, "comment_author")
 	commentPermlink := GetString(v, "comment_permlink")
-	rewardStr := GetString(v, "reward")
 
-	rewardVal := AmountValue(rewardStr)
+	rewardVal := AssetValue(GetField(v, "reward"))
 
 	id := fmt.Sprintf("%d/%s/%s/%s", op.BlockNum, curator, commentAuthor, commentPermlink)
 
@@ -89,9 +88,9 @@ func (h *AuthorRewardHandler) Handle(ctx context.Context, op *model.Operation, b
 	author := GetString(v, "author")
 	permlink := GetString(v, "permlink")
 
-	sbdPayout := AmountValue(GetString(v, "sbd_payout"))
-	steemPayout := AmountValue(GetString(v, "steem_payout"))
-	vestingPayout := AmountValue(GetString(v, "vesting_payout"))
+	sbdPayout := AssetValue(GetField(v, "sbd_payout"))
+	steemPayout := AssetValue(GetField(v, "steem_payout"))
+	vestingPayout := AssetValue(GetField(v, "vesting_payout"))
 
 	id := fmt.Sprintf("%d/%s/%s", op.BlockNum, author, permlink)
 

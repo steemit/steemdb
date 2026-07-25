@@ -55,6 +55,28 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Processor Service (consumes operations → derived collections)
+  processor:
+    build:
+      context: ../..
+      dockerfile: test/docker-compose/Dockerfile.cold-ingest
+    container_name: cold-ingest-processor
+    ports:
+      - "9092:9092"
+    environment:
+      - CONFIG_PATH=/app/configs/config.yaml
+      - MONGO_URI=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-123456}@mongo:27017/${MONGO_DATABASE:-steemdb_test}?authSource=admin
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    networks:
+      - cold-ingest-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["/app/processor", "-config", "/app/configs/config.yaml"]
+    restart: unless-stopped
+
   # Steemd Node with Ingest Plugin
   steemd:
     image: ${STEEMD_IMAGE:-steemd:with-ingest}

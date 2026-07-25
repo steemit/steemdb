@@ -15,6 +15,7 @@ CMD=(
     --ingest-batch-size "${INGEST_BATCH_SIZE:-100}"
     --ingest-batch-timeout "${INGEST_BATCH_TIMEOUT:-1000}"
     --data-dir "${DATA_DIR:-/var/steem}"
+    --p2p-seed-node ""
 )
 
 # Add --stop-replay-at-block if STOP_REPLAY_AT_BLOCK is set and not 0
