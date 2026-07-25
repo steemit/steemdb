@@ -19,6 +19,9 @@ COPY configs/ ./configs/
 # Build cold_ingest binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cold_ingest ./cmd/cold_ingest
 
+# Build processor binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o processor ./cmd/processor
+
 # Final stage
 FROM alpine:latest
 
@@ -32,8 +35,9 @@ RUN addgroup -g 1000 appuser && \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from builder
+# Copy binaries from builder
 COPY --from=builder /build/cold_ingest /app/cold_ingest
+COPY --from=builder /build/processor /app/processor
 
 # Create directories
 RUN mkdir -p /app/configs /app/logs /app/data && \
