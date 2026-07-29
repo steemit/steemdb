@@ -66,6 +66,10 @@ func main() {
 	dispatcher.Register("curation_reward", handlers.NewCurationRewardHandler(inserter))
 	dispatcher.Register("author_reward", handlers.NewAuthorRewardHandler(inserter))
 
+	// Batch 2 handlers (comment — phase 1: op data only, no get_content RPC)
+	dispatcher.Register("comment", handlers.NewCommentHandler(inserter))
+	dispatcher.Register("comment_options", handlers.NewCommentOptionsHandler(inserter))
+
 	log.Printf("[Processor] Registered handlers for op_types: %v", dispatcher.RegisteredTypes())
 
 	// Create processor
