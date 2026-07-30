@@ -42,6 +42,18 @@ func (m *MongoInserter) UpdateOne(ctx context.Context, collection string, filter
 	return result.MatchedCount > 0, nil
 }
 
+// UpsertOneByFilter upserts a document using a multi-field filter (not just _id).
+// Used by handlers that follow legacy sync.py Pattern B (benefactor_reward, reblog,
+// follow, witness_vote). The filter fields should also be present in the doc so that
+// upsert-insert creates a complete document.
+func (m *MongoInserter) UpsertOneByFilter(ctx context.Context, collection string, filter bson.M, doc bson.M) error {
+	col := m.db.Collection(collection)
+	update := bson.M{"$set": doc}
+	opts := options.Update().SetUpsert(true)
+	_, err := col.UpdateOne(ctx, filter, update, opts)
+	return err
+}
+
 // QueueAccountDirty marks an account as needing refresh by setting _dirty: true.
 // This is the lazy-update pattern from legacy sync.py: handlers don't fetch full
 // account state, they just flag it. A separate worker periodically refreshes dirty accounts.

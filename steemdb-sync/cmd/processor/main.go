@@ -70,6 +70,17 @@ func main() {
 	dispatcher.Register("comment", handlers.NewCommentHandler(inserter))
 	dispatcher.Register("comment_options", handlers.NewCommentOptionsHandler(inserter))
 
+	// Batch 4 handlers (remaining op_types)
+	dispatcher.Register("convert", handlers.NewConvertHandler(inserter))
+	dispatcher.Register("transfer_to_vesting", handlers.NewVestingDepositHandler(inserter))
+	dispatcher.Register("fill_vesting_withdraw", handlers.NewVestingWithdrawHandler(inserter))
+	dispatcher.Register("comment_benefactor_reward", handlers.NewBenefactorRewardHandler(inserter))
+	dispatcher.Register("custom_json", handlers.NewCustomJSONHandler(inserter))
+	dispatcher.Register("feed_publish", handlers.NewFeedPublishHandler(inserter))
+	dispatcher.Register("account_witness_vote", handlers.NewWitnessVoteHandler(inserter))
+	dispatcher.Register("pow", handlers.NewPowHandler(inserter))
+	dispatcher.Register("pow2", handlers.NewPowHandler(inserter))
+
 	log.Printf("[Processor] Registered handlers for op_types: %v", dispatcher.RegisteredTypes())
 
 	// Create processor

@@ -137,3 +137,58 @@ func (h *AuthorRewardHandler) Handle(ctx context.Context, op *model.Operation, b
 
 	return nil
 }
+
+// BenefactorRewardHandler processes "comment_benefactor_reward" virtual operations
+// → writes to the "benefactor_reward" collection.
+// Mirrors legacy sync.py:save_benefactor_reward (line 227).
+//
+// Uses Pattern B: multi-field query filter (no _id).
+// filter: {_block, benefactor, permlink, author}
+type BenefactorRewardHandler struct {
+	inserter *MongoInserter
+}
+
+// NewBenefactorRewardHandler creates a new BenefactorRewardHandler.
+func NewBenefactorRewardHandler(inserter *MongoInserter) *BenefactorRewardHandler {
+	return &BenefactorRewardHandler{inserter: inserter}
+}
+
+// Handle processes a comment_benefactor_reward operation.
+func (h *BenefactorRewardHandler) Handle(ctx context.Context, op *model.Operation, blockTS time.Time) error {
+	v := op.OpValue
+	benefactor := GetString(v, "benefactor")
+	permlink := GetString(v, "permlink")
+	author := GetString(v, "author")
+
+	// Legacy parses vesting_payout and stores it as "reward"
+	rewardVal := AssetValue(GetField(v, "vesting_payout"))
+
+	filter := bson.M{
+		"_block":     op.BlockNum,
+		"benefactor": benefactor,
+		"permlink":   permlink,
+		"author":     author,
+	}
+
+	doc := bson.M{
+		"_block":     op.BlockNum,
+		"_ts":        blockTS,
+		"benefactor": benefactor,
+		"permlink":   permlink,
+		"author":     author,
+		"reward":     rewardVal,
+	}
+	// Preserve other fields from op_value (e.g. original vesting_payout string)
+	for k, val := range v {
+		if _, exists := doc[k]; !exists {
+			doc[k] = val
+		}
+	}
+
+	if err := h.inserter.UpsertOneByFilter(ctx, "benefactor_reward", filter, doc); err != nil {
+		return fmt.Errorf("failed to upsert benefactor_reward: %w", err)
+	}
+
+	// Legacy does NOT queue_update_account for benefactor_reward
+	return nil
+}
