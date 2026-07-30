@@ -4,10 +4,13 @@ import (
 	"time"
 )
 
-// Block represents a blockchain block
+// Block represents a blockchain block.
+// Aligned with sync's model.Block: _id is the block number (uint32),
+// block_num mirrors _id, timestamp is the block time.
 type Block struct {
-	ID                    string                   `json:"id" bson:"_id"`
-	Number                int64                    `json:"number" bson:"number"`
+	ID                    uint32                   `json:"id" bson:"_id"`
+	BlockNum              uint32                   `json:"block_num" bson:"block_num"`
+	BlockID               string                   `json:"block_id" bson:"block_id"`
 	Previous              string                   `json:"previous" bson:"previous"`
 	Timestamp             time.Time                `json:"timestamp" bson:"timestamp"`
 	Witness               string                   `json:"witness" bson:"witness"`
@@ -35,21 +38,24 @@ type Transaction struct {
 	Timestamp         time.Time   `json:"timestamp" bson:"timestamp"`
 }
 
-// Operation represents a blockchain operation
+// Operation represents a blockchain operation.
+// Aligned with sync's model.Operation: _id is "block:trx:op" string,
+// op_type/op_value/trx_index/op_index match sync field names.
 type Operation struct {
 	ID        string                 `json:"id" bson:"_id"`
-	Type      string                 `json:"type" bson:"type"`
-	Value     map[string]interface{} `json:"value" bson:"value"`
-	BlockNum  int64                  `json:"block_num" bson:"block_num"`
-	TxNum     int                    `json:"tx_num" bson:"tx_num"`
-	OpNum     int                    `json:"op_num" bson:"op_num"`
-	Timestamp time.Time              `json:"timestamp" bson:"timestamp"`
+	BlockNum  uint32                 `json:"block_num" bson:"block_num"`
+	TrxID     string                 `json:"trx_id" bson:"trx_id"`
+	TrxIndex  int32                  `json:"trx_index" bson:"trx_index"`
+	OpIndex   int32                  `json:"op_index" bson:"op_index"`
+	OpType    string                 `json:"op_type" bson:"op_type"`
+	OpValue   map[string]interface{} `json:"op_value" bson:"op_value"`
 	Virtual   bool                   `json:"virtual" bson:"virtual"`
+	Source    string                 `json:"source" bson:"source"`
 }
 
 // BlockSummary represents a simplified block view for lists
 type BlockSummary struct {
-	Number           int64     `json:"number"`
+	Number           uint32    `json:"number"`        // mirrors block_num / _id
 	Timestamp        time.Time `json:"timestamp"`
 	Witness          string    `json:"witness"`
 	TransactionCount int       `json:"transaction_count"`

@@ -59,7 +59,7 @@ class ApiClient {
 
   // Account endpoints
   async getAccount(username: string): Promise<ApiResponse<Account>> {
-    return this.request<Account>(`/accounts/${username}`);
+    return this.request<Account>(`/v1/accounts/${username}`);
   }
 
   async getAccounts(params: PaginationParams & { search?: string }): Promise<ApiResponse<PaginatedResponse<Account>>> {
@@ -71,7 +71,7 @@ class ApiClient {
       ...(params.search && { search: params.search }),
     });
 
-    return this.request<PaginatedResponse<Account>>(`/accounts?${searchParams}`);
+    return this.request<PaginatedResponse<Account>>(`/v1/accounts?${searchParams}`);
   }
 
   async getAccountHistory(username: string, params: PaginationParams): Promise<ApiResponse<any[]>> {
@@ -80,12 +80,12 @@ class ApiClient {
       limit: params.limit.toString(),
     });
 
-    return this.request<any[]>(`/accounts/${username}/history?${searchParams}`);
+    return this.request<any[]>(`/v1/accounts/${username}/history?${searchParams}`);
   }
 
   // Block endpoints
   async getBlock(blockNumber: number): Promise<ApiResponse<Block>> {
-    return this.request<Block>(`/blocks/${blockNumber}`);
+    return this.request<Block>(`/v1/blocks/${blockNumber}`);
   }
 
   async getBlocks(params: PaginationParams): Promise<ApiResponse<PaginatedResponse<Block>>> {
@@ -96,11 +96,11 @@ class ApiClient {
       ...(params.order && { order: params.order }),
     });
 
-    return this.request<PaginatedResponse<Block>>(`/blocks?${searchParams}`);
+    return this.request<PaginatedResponse<Block>>(`/v1/blocks?${searchParams}`);
   }
 
   async getLatestBlocks(limit: number = 10): Promise<ApiResponse<Block[]>> {
-    return this.request<Block[]>(`/blocks/latest?limit=${limit}`);
+    return this.request<Block[]>(`/v1/blocks/latest?limit=${limit}`);
   }
 
   // Witness endpoints
@@ -112,24 +112,24 @@ class ApiClient {
       ...(params.order && { order: params.order }),
     });
 
-    return this.request<PaginatedResponse<Witness>>(`/witnesses?${searchParams}`);
+    return this.request<PaginatedResponse<Witness>>(`/v1/witnesses?${searchParams}`);
   }
 
   async getWitness(username: string): Promise<ApiResponse<Witness>> {
-    return this.request<Witness>(`/witnesses/${username}`);
+    return this.request<Witness>(`/v1/witnesses/${username}`);
   }
 
   async getTopWitnesses(limit: number = 21): Promise<ApiResponse<Witness[]>> {
-    return this.request<Witness[]>(`/witnesses/top?limit=${limit}`);
+    return this.request<Witness[]>(`/v1/witnesses/top?limit=${limit}`);
   }
 
   // Statistics endpoints
   async getGlobalStats(): Promise<ApiResponse<GlobalStats>> {
-    return this.request<GlobalStats>('/stats/global');
+    return this.request<GlobalStats>('/v1/stats/global');
   }
 
   async getBlockchainProps(): Promise<ApiResponse<BlockchainProps>> {
-    return this.request<BlockchainProps>('/stats/props');
+    return this.request<BlockchainProps>('/v1/stats/props');
   }
 
   // Dashboard endpoint
@@ -151,29 +151,29 @@ class ApiClient {
       ...(type && { type }),
     });
 
-    return this.request<any[]>(`/search?${searchParams}`);
+    return this.request<any[]>(`/v1/search?${searchParams}`);
   }
 
   // Chart data endpoints
   async getAccountGrowthData(days: number = 30): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>(`/charts/accounts/growth?days=${days}`);
+    return this.request<any[]>(`/v1/charts/accounts/growth?days=${days}`);
   }
 
   async getBlockProductionData(days: number = 7): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>(`/charts/blocks/production?days=${days}`);
+    return this.request<any[]>(`/v1/charts/blocks/production?days=${days}`);
   }
 
   async getTransactionVolumeData(days: number = 30): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>(`/charts/transactions/volume?days=${days}`);
+    return this.request<any[]>(`/v1/charts/transactions/volume?days=${days}`);
   }
 
   async getWitnessVotingData(): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>('/charts/witnesses/voting');
+    return this.request<any[]>('/v1/charts/witnesses/voting');
   }
 
   // Health check
   async healthCheck(): Promise<ApiResponse<{ status: string; timestamp: number }>> {
-    return this.request<{ status: string; timestamp: number }>('/health');
+    return this.request<{ status: string; timestamp: number }>('/v1/health');
   }
 
   // Post/Comment endpoints

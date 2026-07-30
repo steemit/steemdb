@@ -31,10 +31,10 @@ func NewBlockService(db *database.MongoDB, redis *database.Redis, logger utils.L
 
 // GetBlock retrieves a block by number
 func (s *BlockService) GetBlock(ctx context.Context, blockNum int64) (*models.Block, error) {
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 	var block models.Block
 
-	err := collection.FindOne(ctx, bson.M{"number": blockNum}).Decode(&block)
+	err := collection.FindOne(ctx, bson.M{"_id": blockNum}).Decode(&block)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("block not found: %d", blockNum)
@@ -47,10 +47,10 @@ func (s *BlockService) GetBlock(ctx context.Context, blockNum int64) (*models.Bl
 
 // GetBlocks retrieves multiple blocks with pagination
 func (s *BlockService) GetBlocks(ctx context.Context, params models.PaginationParams, sortParams models.SortParams) (*models.BlockSearchResult, error) {
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 
 	// Build sort options
-	sortField := "number"
+	sortField := "block_num"
 	sortOrder := -1
 	if sortParams.SortBy != "" {
 		sortField = sortParams.SortBy
@@ -87,7 +87,7 @@ func (s *BlockService) GetBlocks(ctx context.Context, params models.PaginationPa
 		}
 
 		summary := models.BlockSummary{
-			Number:           block.Number,
+			Number:           block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
@@ -107,10 +107,10 @@ func (s *BlockService) GetBlocks(ctx context.Context, params models.PaginationPa
 
 // GetLatestBlocks retrieves the most recent blocks
 func (s *BlockService) GetLatestBlocks(ctx context.Context, limit int) ([]models.BlockSummary, error) {
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 
 	findOptions := options.Find().
-		SetSort(bson.M{"number": -1}).
+		SetSort(bson.M{"block_num": -1}).
 		SetLimit(int64(limit))
 
 	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
@@ -128,7 +128,7 @@ func (s *BlockService) GetLatestBlocks(ctx context.Context, limit int) ([]models
 		}
 
 		summary := models.BlockSummary{
-			Number:           block.Number,
+			Number:           block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
@@ -143,7 +143,7 @@ func (s *BlockService) GetLatestBlocks(ctx context.Context, limit int) ([]models
 
 // GetBlocksByWitness retrieves blocks produced by a specific witness
 func (s *BlockService) GetBlocksByWitness(ctx context.Context, witness string, params models.PaginationParams) (*models.BlockSearchResult, error) {
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 
 	filter := bson.M{"witness": witness}
 
@@ -156,7 +156,7 @@ func (s *BlockService) GetBlocksByWitness(ctx context.Context, witness string, p
 	// Calculate pagination
 	skip := (params.Page - 1) * params.PageSize
 	findOptions := options.Find().
-		SetSort(bson.M{"number": -1}).
+		SetSort(bson.M{"block_num": -1}).
 		SetSkip(int64(skip)).
 		SetLimit(int64(params.PageSize))
 
@@ -175,7 +175,7 @@ func (s *BlockService) GetBlocksByWitness(ctx context.Context, witness string, p
 		}
 
 		summary := models.BlockSummary{
-			Number:           block.Number,
+			Number:           block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
@@ -195,14 +195,14 @@ func (s *BlockService) GetBlocksByWitness(ctx context.Context, witness string, p
 
 // GetBlockOperations retrieves operations from a specific block
 func (s *BlockService) GetBlockOperations(ctx context.Context, blockNum int64, params models.PaginationParams) ([]models.Operation, error) {
-	collection := s.db.Collection("operation")
+	collection := s.db.Collection("operations")
 
 	filter := bson.M{"block_num": blockNum}
 
 	// Calculate pagination
 	skip := (params.Page - 1) * params.PageSize
 	findOptions := options.Find().
-		SetSort(bson.M{"op_num": 1}).
+		SetSort(bson.D{{Key: "trx_index", Value: 1}, {Key: "op_index", Value: 1}}).
 		SetSkip(int64(skip)).
 		SetLimit(int64(params.PageSize))
 
@@ -227,11 +227,11 @@ func (s *BlockService) GetBlockOperations(ctx context.Context, blockNum int64, p
 
 // GetBlockStats retrieves blockchain statistics
 func (s *BlockService) GetBlockStats(ctx context.Context) (*models.BlockStats, error) {
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 
 	// Get latest block
 	var latestBlock models.Block
-	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"number": -1})).Decode(&latestBlock)
+	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"block_num": -1})).Decode(&latestBlock)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest block: %w", err)
 	}
@@ -241,8 +241,8 @@ func (s *BlockService) GetBlockStats(ctx context.Context) (*models.BlockStats, e
 	totalOperations := int64(0)
 
 	return &models.BlockStats{
-		LatestBlockNum:      latestBlock.Number,
-		LastIrreversibleNum: latestBlock.Number - 20, // Approximate
+		LatestBlockNum:      int64(latestBlock.BlockNum),
+		LastIrreversibleNum: int64(latestBlock.BlockNum) - 20, // Approximate
 		HeadBlockTime:       latestBlock.Timestamp,
 		TotalTransactions:   totalTransactions,
 		TotalOperations:     totalOperations,
