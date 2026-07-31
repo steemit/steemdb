@@ -1,6 +1,9 @@
 package api
 
 import (
+	"net/http"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/steemit/steemdb/web/internal/database"
@@ -90,6 +93,15 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis
 				"status":  "ok",
 				"version": "1.0.0",
 				"service": "steemdb-web",
+			})
+		})
+
+		// Health check (also available at /health at root level)
+		v1.GET("/health", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"status":    "healthy",
+				"timestamp": time.Now().Unix(),
+				"version":   "1.0.0",
 			})
 		})
 	}

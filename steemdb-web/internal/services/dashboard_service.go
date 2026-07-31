@@ -50,13 +50,13 @@ type DashboardStats struct {
 // GetDashboardData gets dashboard data, fetching from upstream if local data is stale
 func (s *DashboardService) GetDashboardData(ctx context.Context) (*DashboardData, error) {
 	// First, try to get latest block from database
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 	var latestBlock struct {
-		Number    int64     `bson:"number"`
+		BlockNum  uint32    `bson:"block_num"`
 		Timestamp time.Time `bson:"timestamp"`
 	}
 
-	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"number": -1})).Decode(&latestBlock)
+	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"block_num": -1})).Decode(&latestBlock)
 
 	// Get current block from upstream to compare
 	upstreamProps, err := s.steemClient.GetDynamicGlobalProperties()
@@ -72,7 +72,7 @@ func (s *DashboardService) GetDashboardData(ctx context.Context) (*DashboardData
 		useUpstream = true
 	} else if upstreamProps != nil {
 		// Check if local data is stale (more than 10 blocks behind)
-		if latestBlock.Number < upstreamProps.HeadBlockNumber-10 {
+		if int64(latestBlock.BlockNum) < upstreamProps.HeadBlockNumber-10 {
 			useUpstream = true
 		}
 	}
@@ -137,7 +137,7 @@ func (s *DashboardService) getDashboardDataFromUpstream(ctx context.Context, pro
 		}
 
 		latestBlocks = append(latestBlocks, models.BlockSummary{
-			Number:           blockNum,
+			Number:           uint32(blockNum),
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: len(block.Transactions),
@@ -181,9 +181,9 @@ func (s *DashboardService) getDashboardDataFromUpstream(ctx context.Context, pro
 // getDashboardDataFromLocal fetches dashboard data from local database
 func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props *steem.DynamicGlobalProperties) (*DashboardData, error) {
 	// Get latest blocks from database
-	collection := s.db.Collection("block")
+	collection := s.db.Collection("blocks")
 	findOptions := options.Find().
-		SetSort(bson.M{"number": -1}).
+		SetSort(bson.M{"block_num": -1}).
 		SetLimit(5)
 
 	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
@@ -195,7 +195,7 @@ func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props 
 	latestBlocks := make([]models.BlockSummary, 0, 5)
 	for cursor.Next(ctx) {
 		var block struct {
-			Number           int64     `bson:"number"`
+			BlockNum         uint32    `bson:"block_num"`
 			Timestamp        time.Time `bson:"timestamp"`
 			Witness          string    `bson:"witness"`
 			TransactionCount int       `bson:"transaction_count"`
@@ -207,7 +207,7 @@ func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props 
 		}
 
 		latestBlocks = append(latestBlocks, models.BlockSummary{
-			Number:           block.Number,
+			Number:           block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,

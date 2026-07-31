@@ -135,8 +135,7 @@ func (m *MongoDB) CreateIndexes(ctx context.Context) error {
 			{Keys: map[string]interface{}{"vesting_shares": -1}},
 			{Keys: map[string]interface{}{"last_update": -1}},
 		},
-		"block": {
-			{Keys: map[string]interface{}{"number": 1}},
+		"blocks": {
 			{Keys: map[string]interface{}{"timestamp": -1}},
 			{Keys: map[string]interface{}{"witness": 1}},
 		},

@@ -72,7 +72,7 @@ func (h *BlockHandler) GetBlocks(c *gin.Context) {
 
 	// Parse sort parameters
 	sortParams := models.SortParams{
-		SortBy:    c.DefaultQuery("sort_by", "number"),
+		SortBy:    c.DefaultQuery("sort_by", "block_num"),
 		SortOrder: c.DefaultQuery("sort_order", "desc"),
 	}
 
