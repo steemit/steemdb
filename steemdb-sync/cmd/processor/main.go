@@ -89,6 +89,15 @@ func main() {
 		log.Fatalf("Failed to create processor: %v", err)
 	}
 
+	// Create account refresher (Batch 3)
+	var refresher *processor.AccountRefresher
+	if cfg.Processor.AccountRefresher.Enabled {
+		refresher, err = processor.NewAccountRefresher(pctx)
+		if err != nil {
+			log.Fatalf("Failed to create account refresher: %v", err)
+		}
+	}
+
 	// Start metrics HTTP server (port 9092)
 	go func() {
 		metricsMux := http.NewServeMux()
@@ -113,6 +122,11 @@ func main() {
 	go func() {
 		errChan <- proc.Run(ctx)
 	}()
+
+	// Run account refresher in goroutine (if enabled)
+	if refresher != nil {
+		go refresher.Run(ctx)
+	}
 
 	// Wait for signal or processor exit
 	select {

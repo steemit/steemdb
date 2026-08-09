@@ -119,3 +119,21 @@ func (c *Client) GetBlockWithOps(ctx context.Context, blockNum uint32) (*protoco
 
 	return block, filteredRegularOps, virtualOps, nil
 }
+
+// GetAccounts retrieves full account data for multiple accounts in a single RPC call.
+// Uses condenser_api.get_accounts with a batch of names (up to 100 per call).
+func (c *Client) GetAccounts(names []string) ([]*protocolapi.ExtendedAccount, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	startTime := time.Now()
+	accounts, err := c.api.GetAccounts(names)
+	duration := time.Since(startTime)
+
+	metrics.RecordRPCCall("get_accounts", duration, err)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get accounts (batch size=%d)", len(names))
+	}
+	return accounts, nil
+}
