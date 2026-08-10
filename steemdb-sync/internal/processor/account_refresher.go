@@ -138,10 +138,10 @@ func (r *AccountRefresher) isCatchingUp(ctx context.Context) bool {
 		return true // fail-safe: skip if we can't read
 	}
 
-	// Get max block from meta. If meta doesn't exist (cold_ingest doesn't write it),
+	// Get max block from meta. If meta is missing or stale (max_block < processorHeight),
 	// fall back to the highest block in the blocks collection.
 	maxBlock, err := r.getMaxBlock(ctx)
-	if err != nil {
+	if err != nil || maxBlock < processorHeight {
 		// Fallback: read the latest block from blocks collection
 		maxBlock, err = r.getLatestBlockNum(ctx)
 		if err != nil {
