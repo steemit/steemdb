@@ -107,10 +107,16 @@ github.com/steemit/steemgosdk v0.0.15 h1:IYwuijvCJS4zUDUufvr7doqAikfz4WY+vv+cQu4
 github.com/steemit/steemgosdk v0.0.15/go.mod h1:Cm5msNmNXGJi8aHjVAOtTsUpg97VEyQl1z8rEOPqM0o=
 github.com/steemit/steemgosdk v0.0.25 h1:0jfS8UcIXTRIJvsZRAvHI/bblqD824TDBK9SvK6veS8=
 github.com/steemit/steemgosdk v0.0.25/go.mod h1:gLpyelOqoEZnmv/hyEanY7olFRK1wz9EnOCSKgRzSl4=
+github.com/steemit/steemgosdk v0.0.26 h1:0mKFr43o24/9xfSCj/E8M4K/lcYtxfLEXwRA30s2HsI=
+github.com/steemit/steemgosdk v0.0.26/go.mod h1:cyJ+1SQHe+LPhYIJqaqYmjkl2OJd0z/iyKx2vTY2eLE=
 github.com/steemit/steemutil v0.0.17 h1:TsL3416RqXIHRAzPhrHgtohvNvQIBVkrqV+0Bk4nlR4=
 github.com/steemit/steemutil v0.0.17/go.mod h1:juhYy3fdFrfG8dXARzQcnTIk0bsDGNAro+9IZJRxa3s=
 github.com/steemit/steemutil v0.0.27 h1:WbRG/UdOGe3ufvNE9diTSAyHSHFNtp150uqqYz5gFhc=
 github.com/steemit/steemutil v0.0.27/go.mod h1:juhYy3fdFrfG8dXARzQcnTIk0bsDGNAro+9IZJRxa3s=
+github.com/steemit/steemutil v0.0.28 h1:AE/v6u0K6QIj/xPgH7FhpaCLslYBcHf8FODGOfPpG4U=
+github.com/steemit/steemutil v0.0.28/go.mod h1:juhYy3fdFrfG8dXARzQcnTIk0bsDGNAro+9IZJRxa3s=
+github.com/steemit/steemutil v0.0.29 h1:nWnW4QP/wecqZeV7ch0ymoNBMWWNcB9k0+OILCQYzEc=
+github.com/steemit/steemutil v0.0.29/go.mod h1:juhYy3fdFrfG8dXARzQcnTIk0bsDGNAro+9IZJRxa3s=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
