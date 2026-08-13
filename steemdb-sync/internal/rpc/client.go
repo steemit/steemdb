@@ -139,17 +139,11 @@ func (c *Client) GetAccounts(names []string) ([]*protocolapi.ExtendedAccount, er
 }
 
 // GetContent retrieves the full content of a post or comment via condenser_api.get_content.
-// Uses CallWithResult to decode into a map[string]interface{} (avoids dependency on
-// a typed Content struct in steemutil — the caller transforms the map directly).
-func (c *Client) GetContent(author, permlink string) (map[string]interface{}, error) {
+// Uses steemgosdk's typed GetContent wrapper (returns *protocolapi.Content).
+func (c *Client) GetContent(author, permlink string) (*protocolapi.Content, error) {
 	startTime := time.Now()
 
-	var result map[string]interface{}
-	err := c.api.CallWithResult(
-		"condenser_api", "get_content",
-		[]interface{}{author, permlink},
-		&result,
-	)
+	content, err := c.api.GetContent(author, permlink)
 
 	duration := time.Since(startTime)
 	metrics.RecordRPCCall("get_content", duration, err)
@@ -157,5 +151,5 @@ func (c *Client) GetContent(author, permlink string) (map[string]interface{}, er
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get content %s/%s", author, permlink)
 	}
-	return result, nil
+	return content, nil
 }

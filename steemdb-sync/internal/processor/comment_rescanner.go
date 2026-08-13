@@ -11,6 +11,7 @@ import (
 
 	"github.com/steemit/steemdb-sync/internal/config"
 	"github.com/steemit/steemdb-sync/internal/rpc"
+	protocolapi "github.com/steemit/steemutil/protocol/api"
 	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -271,31 +272,41 @@ func (r *CommentRescanner) isCatchingUp(ctx context.Context) bool {
 
 // --- Content field transformations (mirrors legacy sync.py update_comment:320-358) ---
 
-// processContent transforms a raw get_content result into a MongoDB document.
-func processContent(content map[string]interface{}) bson.M {
-	// Transform active_votes
-	if votes, ok := content["active_votes"].([]interface{}); ok {
-		transformedVotes := make([]map[string]interface{}, 0, len(votes))
+// processContent transforms a typed get_content result into a MongoDB document.
+// Uses JSON reflection (marshal → unmarshal to map → transform) to stay
+// struct-shape-agnostic, same pattern as processAccount in account_refresher.go.
+func processContent(content *protocolapi.Content) bson.M {
+	// Marshal typed struct → JSON → map for field-level transformation
+	raw, err := json.Marshal(content)
+	if err != nil {
+		log.Printf("[CommentRescanner] Failed to marshal content: %v", err)
+		return bson.M{}
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		log.Printf("[CommentRescanner] Failed to unmarshal content: %v", err)
+		return bson.M{}
+	}
+
+	// Transform active_votes: rshares/weight → float, time → parsed date
+	if votes, ok := m["active_votes"].([]interface{}); ok {
 		for _, v := range votes {
 			if vote, ok := v.(map[string]interface{}); ok {
-				// rshares and weight → float (legacy casts to float)
 				transformRawMsgToFloat(vote, "rshares")
 				transformRawMsgToFloat(vote, "weight")
-				// time → parsed date
 				if t, ok := vote["time"].(string); ok && t != "" {
 					if parsed, err := time.Parse(steemDateFormat, t); err == nil {
 						vote["time"] = parsed
 					}
 				}
-				transformedVotes = append(transformedVotes, vote)
 			}
 		}
-		content["active_votes"] = transformedVotes
 	}
 
-	// Float-cast numeric string fields (legacy float_keys)
+	// Float-cast numeric string/raw fields (legacy float_keys)
 	for _, key := range []string{"author_reputation", "net_rshares", "children_abs_rshares", "abs_rshares", "vote_rshares"} {
-		transformRawMsgToFloat(content, key)
+		transformRawMsgToFloat(m, key)
 	}
 
 	// Parse asset strings → float (legacy split_float_keys)
@@ -303,38 +314,37 @@ func processContent(content map[string]interface{}) bson.M {
 		"total_pending_payout_value", "pending_payout_value",
 		"max_accepted_payout", "total_payout_value", "curator_payout_value",
 	} {
-		transformAssetValue(content, key)
+		transformAssetValue(m, key)
 	}
 
-	// Parse date fields (legacy date_keys)
+	// Derive index fields BEFORE transformDate (created is still a string here)
+	if author, ok := m["author"].(string); ok {
+		m["author_lower"] = strings.ToLower(author)
+	}
+	if category, ok := m["category"].(string); ok {
+		m["category_lower"] = strings.ToLower(category)
+	}
+	if createdStr, ok := m["created"].(string); ok && len(createdStr) >= 10 {
+		m["date_idx"] = createdStr[:10] // "2024-01-08T10:30:00" → "2024-01-08"
+	}
+
+	// Parse date fields (legacy date_keys) — after derive, created becomes time.Time
 	for _, key := range []string{"active", "created", "cashout_time", "last_payout", "last_update", "max_cashout_time"} {
-		transformDate(content, key)
+		transformDate(m, key)
 	}
 
 	// Parse json_metadata
-	if jm, ok := content["json_metadata"].(string); ok && jm != "" {
+	if jm, ok := m["json_metadata"].(string); ok && jm != "" {
 		var parsed interface{}
 		if err := json.Unmarshal([]byte(jm), &parsed); err == nil {
-			content["json_metadata"] = parsed
+			m["json_metadata"] = parsed
 		}
-		// On error: keep raw string (matches legacy behavior)
-	}
-
-	// Derive index fields (web frontend queries depend on these)
-	if author, ok := content["author"].(string); ok {
-		content["author_lower"] = strings.ToLower(author)
-	}
-	if category, ok := content["category"].(string); ok {
-		content["category_lower"] = strings.ToLower(category)
-	}
-	if created, ok := content["created"].(time.Time); ok {
-		content["date_idx"] = created.Format("2006-01-02")
 	}
 
 	// Set scanned timestamp
-	content["scanned"] = time.Now().UTC()
+	m["scanned"] = time.Now().UTC()
 
-	return content
+	return m
 }
 
 // transformRawMsgToFloat converts a numeric string or json.RawMessage to float64 in place.

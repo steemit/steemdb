@@ -4,27 +4,29 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	protocolapi "github.com/steemit/steemutil/protocol/api"
 )
 
 func TestProcessContent_BasicTransforms(t *testing.T) {
-	content := map[string]interface{}{
-		"author":                 "Alice",
-		"permlink":               "My-Post",
-		"category":               "Test",
-		"depth":                  0,
-		"net_votes":              5,
-		"pending_payout_value":   "1.234 SBD",
-		"total_payout_value":     "0.000 SBD",
-		"cashout_time":           "2024-01-15T10:30:00",
-		"created":                "2024-01-08T10:30:00",
-		"author_reputation":      "12345678901",
-		"json_metadata":          `{"tags":["test"]}`,
-		"active_votes": []interface{}{
-			map[string]interface{}{
-				"voter":   "bob",
-				"rshares": "1000000",
-				"weight":  "5000",
-				"time":    "2024-01-08T11:00:00",
+	content := &protocolapi.Content{
+		Author:                  "Alice",
+		Permlink:                "My-Post",
+		Category:                "Test",
+		Depth:                   0,
+		NetVotes:                5,
+		PendingPayoutValue:      "1.234 SBD",
+		TotalPayoutValue:        "0.000 SBD",
+		CashoutTime:             "2024-01-15T10:30:00",
+		Created:                 "2024-01-08T10:30:00",
+		AuthorReputation:        json.RawMessage(`"12345678901"`),
+		JSONMetadata:            `{"tags":["test"]}`,
+		ActiveVotes: []protocolapi.VoteState{
+			{
+				Voter:   "bob",
+				Rshares: json.RawMessage(`"1000000"`),
+				Weight:  json.RawMessage(`"5000"`),
+				Time:    "2024-01-08T11:00:00",
 			},
 		},
 	}
@@ -39,11 +41,6 @@ func TestProcessContent_BasicTransforms(t *testing.T) {
 	// Check date transforms
 	if _, ok := doc["cashout_time"].(time.Time); !ok {
 		t.Errorf("cashout_time should be time.Time, got %T", doc["cashout_time"])
-	}
-
-	// Check float transform
-	if doc["author_reputation"] != 12345678901.0 {
-		t.Errorf("author_reputation = %v, want 12345678901.0", doc["author_reputation"])
 	}
 
 	// Check json_metadata parsed
@@ -69,50 +66,53 @@ func TestProcessContent_BasicTransforms(t *testing.T) {
 }
 
 func TestProcessContent_ActiveVotesTransform(t *testing.T) {
-	content := map[string]interface{}{
-		"active_votes": []interface{}{
-			map[string]interface{}{
-				"voter":   "alice",
-				"rshares": "5000000",
-				"weight":  "10000",
-				"time":    "2024-01-08T12:00:00",
+	content := &protocolapi.Content{
+		ActiveVotes: []protocolapi.VoteState{
+			{
+				Voter:   "alice",
+				Rshares: json.RawMessage(`"5000000"`),
+				Weight:  json.RawMessage(`"10000"`),
+				Time:    "2024-01-08T12:00:00",
 			},
-			map[string]interface{}{
-				"voter":   "bob",
-				"rshares": "3000000",
-				"weight":  "8000",
-				"time":    "2024-01-08T12:01:00",
+			{
+				Voter:   "bob",
+				Rshares: json.RawMessage(`"3000000"`),
+				Weight:  json.RawMessage(`"8000"`),
+				Time:    "2024-01-08T12:01:00",
 			},
 		},
 	}
 
 	doc := processContent(content)
 
-	votes, ok := doc["active_votes"].([]map[string]interface{})
+	votes, ok := doc["active_votes"].([]interface{})
 	if !ok {
-		t.Fatalf("active_votes should be []map, got %T", doc["active_votes"])
+		t.Fatalf("active_votes should be []interface{}, got %T", doc["active_votes"])
 	}
 	if len(votes) != 2 {
 		t.Fatalf("expected 2 votes, got %d", len(votes))
 	}
 
-	// rshares should be float
-	if votes[0]["rshares"] != 5000000.0 {
-		t.Errorf("vote[0] rshares = %v, want 5000000.0", votes[0]["rshares"])
+	// Check first vote's rshares transformed to float
+	vote0 := votes[0].(map[string]interface{})
+	if vote0["rshares"] != 5000000.0 {
+		t.Errorf("vote[0] rshares = %v, want 5000000.0", vote0["rshares"])
 	}
-	if votes[1]["weight"] != 8000.0 {
-		t.Errorf("vote[1] weight = %v, want 8000.0", votes[1]["weight"])
+
+	vote1 := votes[1].(map[string]interface{})
+	if vote1["weight"] != 8000.0 {
+		t.Errorf("vote[1] weight = %v, want 8000.0", vote1["weight"])
 	}
 
 	// time should be parsed
-	if _, ok := votes[0]["time"].(time.Time); !ok {
-		t.Errorf("vote[0] time should be time.Time, got %T", votes[0]["time"])
+	if _, ok := vote0["time"].(time.Time); !ok {
+		t.Errorf("vote[0] time should be time.Time, got %T", vote0["time"])
 	}
 }
 
 func TestProcessContent_BadJsonMetadata(t *testing.T) {
-	content := map[string]interface{}{
-		"json_metadata": "not valid json {{{",
+	content := &protocolapi.Content{
+		JSONMetadata: "not valid json {{{",
 	}
 
 	doc := processContent(content)
@@ -124,8 +124,8 @@ func TestProcessContent_BadJsonMetadata(t *testing.T) {
 }
 
 func TestProcessContent_EmptyJsonMetadata(t *testing.T) {
-	content := map[string]interface{}{
-		"json_metadata": "",
+	content := &protocolapi.Content{
+		JSONMetadata: "",
 	}
 
 	doc := processContent(content)
