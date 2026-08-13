@@ -98,6 +98,15 @@ func main() {
 		}
 	}
 
+	// Create comment rescanner (Batch 5)
+	var rescanner *processor.CommentRescanner
+	if cfg.Processor.CommentRescanner.Enabled {
+		rescanner, err = processor.NewCommentRescanner(pctx)
+		if err != nil {
+			log.Fatalf("Failed to create comment rescanner: %v", err)
+		}
+	}
+
 	// Start metrics HTTP server (port 9092)
 	go func() {
 		metricsMux := http.NewServeMux()
@@ -126,6 +135,11 @@ func main() {
 	// Run account refresher in goroutine (if enabled)
 	if refresher != nil {
 		go refresher.Run(ctx)
+	}
+
+	// Run comment rescanner in goroutine (if enabled)
+	if rescanner != nil {
+		go rescanner.Run(ctx)
 	}
 
 	// Wait for signal or processor exit

@@ -137,3 +137,19 @@ func (c *Client) GetAccounts(names []string) ([]*protocolapi.ExtendedAccount, er
 	}
 	return accounts, nil
 }
+
+// GetContent retrieves the full content of a post or comment via condenser_api.get_content.
+// Uses steemgosdk's typed GetContent wrapper (returns *protocolapi.Content).
+func (c *Client) GetContent(author, permlink string) (*protocolapi.Content, error) {
+	startTime := time.Now()
+
+	content, err := c.api.GetContent(author, permlink)
+
+	duration := time.Since(startTime)
+	metrics.RecordRPCCall("get_content", duration, err)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get content %s/%s", author, permlink)
+	}
+	return content, nil
+}

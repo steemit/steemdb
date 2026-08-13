@@ -24,10 +24,11 @@ type Config struct {
 
 // ProcessorConfig contains operation processor settings
 type ProcessorConfig struct {
-	Enabled          bool                   `yaml:"enabled"`
-	CatchUpSleep     string                 `yaml:"catch_up_sleep"`
-	StartHeight      uint32                 `yaml:"start_height"`
-	AccountRefresher AccountRefresherConfig `yaml:"account_refresher"`
+	Enabled          bool                    `yaml:"enabled"`
+	CatchUpSleep     string                  `yaml:"catch_up_sleep"`
+	StartHeight      uint32                  `yaml:"start_height"`
+	AccountRefresher AccountRefresherConfig  `yaml:"account_refresher"`
+	CommentRescanner CommentRescannerConfig  `yaml:"comment_rescanner"`
 }
 
 // AccountRefresherConfig contains account dirty-refresh settings
@@ -38,6 +39,16 @@ type AccountRefresherConfig struct {
 	RPCBatchSize   int    `yaml:"rpc_batch_size"`
 	Workers        int    `yaml:"workers"`
 	ColdStartPause bool   `yaml:"cold_start_pause"`
+}
+
+// CommentRescannerConfig contains comment rescan settings
+type CommentRescannerConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Interval   string `yaml:"interval"`
+	BatchSize  int    `yaml:"batch_size"`
+	Workers    int    `yaml:"workers"`
+	WindowDays int    `yaml:"window_days"`
+	StaleHours int    `yaml:"stale_hours"`
 }
 
 // MongoConfig contains MongoDB connection settings
@@ -117,6 +128,14 @@ func Load(configPath string) (*Config, error) {
 				RPCBatchSize:   100,
 				Workers:        8,
 				ColdStartPause: true,
+			},
+			CommentRescanner: CommentRescannerConfig{
+				Enabled:    true,
+				Interval:   "60s",
+				BatchSize:  100,
+				Workers:    5,
+				WindowDays: 3,
+				StaleHours: 6,
 			},
 		},
 		Log: LogConfig{
@@ -271,4 +290,9 @@ func (c *Config) ProcessorCatchUpSleep() (time.Duration, error) {
 // AccountRefresherInterval returns the refresher interval duration
 func (c *Config) AccountRefresherInterval() (time.Duration, error) {
 	return time.ParseDuration(c.Processor.AccountRefresher.Interval)
+}
+
+// CommentRescannerInterval returns the comment rescanner interval duration
+func (c *Config) CommentRescannerInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Processor.CommentRescanner.Interval)
 }
