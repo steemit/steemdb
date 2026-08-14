@@ -69,8 +69,8 @@ func (s *StatsService) GetGlobalStats(ctx context.Context) (*GlobalStats, error)
 
 	// Count transactions — blocks.transaction_count is currently hardcoded to 0,
 	// so we approximate by counting distinct trx_id values in the operations
-	// collection. This is a best-effort approximation.
-	txIDs, err := s.db.Collection("operations").Distinct(ctx, "trx_id", bson.M{})
+	// collection. Virtual operations carry an empty trx_id and are excluded.
+	txIDs, err := s.db.Collection("operations").Distinct(ctx, "trx_id", bson.M{"trx_id": bson.M{"$ne": ""}})
 	if err == nil {
 		stats.Transactions = int64(len(txIDs))
 	} else {

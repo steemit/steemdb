@@ -159,9 +159,11 @@ func (s *ChartsService) GetBlockProduction(ctx context.Context, days int) ([]Blo
 }
 
 // GetTransactionVolume returns daily transaction counts for the past N days.
-// NOTE: blocks.transaction_count is currently hardcoded to 0 by the sync
-// batcher, so we aggregate from the operations collection by counting distinct
-// trx_id values per day.
+// The operations collection has no timestamp field, so this runs in two
+// phases: first aggregate per-day block_num boundaries from the blocks
+// collection (blocks are strictly sequential in time), then count distinct
+// non-empty trx_id values per block range. Virtual operations carry an empty
+// trx_id and are excluded.
 func (s *ChartsService) GetTransactionVolume(ctx context.Context, days int) ([]TransactionVolumePoint, error) {
 	if days <= 0 {
 		days = 30
@@ -169,7 +171,8 @@ func (s *ChartsService) GetTransactionVolume(ctx context.Context, days int) ([]T
 
 	cutoff := time.Now().AddDate(0, 0, -days)
 
-	pipeline := []bson.M{
+	// Phase 1: per-day block_num boundaries from blocks
+	blockPipeline := []bson.M{
 		{
 			"$match": bson.M{
 				"timestamp": bson.M{"$gte": cutoff},
@@ -183,13 +186,8 @@ func (s *ChartsService) GetTransactionVolume(ctx context.Context, days int) ([]T
 						"date":   "$timestamp",
 					},
 				},
-				"transactions": bson.M{"$addToSet": "$trx_id"},
-			},
-		},
-		{
-			"$project": bson.M{
-				"_id":          1,
-				"transactions": bson.M{"$size": "$transactions"},
+				"first_block": bson.M{"$min": "$block_num"},
+				"last_block":  bson.M{"$max": "$block_num"},
 			},
 		},
 		{
@@ -197,26 +195,42 @@ func (s *ChartsService) GetTransactionVolume(ctx context.Context, days int) ([]T
 		},
 	}
 
-	cursor, err := s.db.Collection("operations").Aggregate(ctx, pipeline)
+	cursor, err := s.db.Collection("blocks").Aggregate(ctx, blockPipeline)
 	if err != nil {
-		return nil, fmt.Errorf("failed to aggregate transaction volume: %w", err)
+		return nil, fmt.Errorf("failed to aggregate block day ranges: %w", err)
 	}
 	defer cursor.Close(ctx)
 
+	// Phase 2: distinct real transactions per block range
 	results := make([]TransactionVolumePoint, 0)
 	for cursor.Next(ctx) {
-		var row struct {
-			ID           string `bson:"_id"`
-			Transactions int64  `bson:"transactions"`
+		var dayRange struct {
+			ID         string `bson:"_id"`
+			FirstBlock int64  `bson:"first_block"`
+			LastBlock  int64  `bson:"last_block"`
 		}
-		if err := cursor.Decode(&row); err != nil {
-			s.logger.Error("Failed to decode transaction volume row", utils.Error(err))
+		if err := cursor.Decode(&dayRange); err != nil {
+			s.logger.Error("Failed to decode block day range", utils.Error(err))
 			continue
 		}
+
+		filter := bson.M{
+			"block_num": bson.M{"$gte": dayRange.FirstBlock, "$lte": dayRange.LastBlock},
+			"trx_id":    bson.M{"$ne": ""},
+		}
+		trxIDs, err := s.db.Collection("operations").Distinct(ctx, "trx_id", filter)
+		if err != nil {
+			s.logger.Error("Failed to count transactions for day", utils.String("date", dayRange.ID), utils.Error(err))
+			continue
+		}
+
 		results = append(results, TransactionVolumePoint{
-			Date:         row.ID,
-			Transactions: row.Transactions,
+			Date:         dayRange.ID,
+			Transactions: int64(len(trxIDs)),
 		})
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate block day ranges: %w", err)
 	}
 
 	return results, nil
