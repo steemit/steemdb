@@ -20,6 +20,10 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis
 	dashboardService := services.NewDashboardService(db, steemClient, logger)
 	commentService := services.NewCommentService(db, redis, logger)
 	labsService := services.NewLabsService(db, steemClient, logger)
+	witnessService := services.NewWitnessService(db, steemClient, logger)
+	statsService := services.NewStatsService(db, steemClient, logger)
+	searchService := services.NewSearchService(db, steemClient, logger)
+	chartsService := services.NewChartsService(db, logger)
 
 	// Initialize handlers
 	accountHandler := NewAccountHandler(accountService, logger)
@@ -27,6 +31,10 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis
 	dashboardHandler := NewDashboardHandler(dashboardService, logger)
 	commentHandler := NewCommentHandler(commentService, logger)
 	labsHandler := NewLabsHandler(labsService, logger)
+	witnessHandler := NewWitnessHandler(witnessService, logger)
+	statsHandler := NewStatsHandler(statsService, logger)
+	searchHandler := NewSearchHandler(searchService, logger)
+	chartsHandler := NewChartsHandler(chartsService, logger)
 	legacyHandler := NewLegacyHandler(steemClient, logger)
 
 	// API v1 routes - register first to avoid conflicts with legacy routes
@@ -85,6 +93,33 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis
 			labs.GET("/clients", labsHandler.GetClients)
 			labs.GET("/benefactors", labsHandler.GetBenefactors)
 			labs.GET("/pending", labsHandler.GetPending)
+		}
+
+		// Witness routes
+		witnesses := v1.Group("/witnesses")
+		{
+			witnesses.GET("", witnessHandler.GetWitnesses)
+			witnesses.GET("/top", witnessHandler.GetTopWitnesses)
+			witnesses.GET("/:username", witnessHandler.GetWitness)
+		}
+
+		// Stats routes
+		stats := v1.Group("/stats")
+		{
+			stats.GET("/global", statsHandler.GetGlobalStats)
+			stats.GET("/props", statsHandler.GetBlockchainProps)
+		}
+
+		// Search route
+		v1.GET("/search", searchHandler.Search)
+
+		// Charts routes
+		charts := v1.Group("/charts")
+		{
+			charts.GET("/accounts/growth", chartsHandler.GetAccountGrowth)
+			charts.GET("/blocks/production", chartsHandler.GetBlockProduction)
+			charts.GET("/transactions/volume", chartsHandler.GetTransactionVolume)
+			charts.GET("/witnesses/voting", chartsHandler.GetWitnessVoting)
 		}
 
 		// Status endpoint

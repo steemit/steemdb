@@ -212,6 +212,85 @@ func (c *Client) GetWitnessesByVote(from string, limit int) ([]Witness, error) {
 	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
+// GetWitnessByAccount gets a single witness by account name
+func (c *Client) GetWitnessByAccount(account string) (*Witness, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		api := c.getCurrentAPI()
+		var witness Witness
+		err := api.CallWithResult("condenser_api", "get_witness_by_account", []interface{}{account}, &witness)
+		if err == nil {
+			if witness.Owner == "" {
+				return nil, nil
+			}
+			return &witness, nil
+		}
+
+		lastErr = err
+		c.logger.Warn("RPC call failed, retrying",
+			utils.String("method", "get_witness_by_account"),
+			utils.String("account", account),
+			utils.Int("attempt", attempt+1),
+			utils.Error(err),
+		)
+
+		c.switchNode()
+
+		if attempt < maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// GetTransaction gets a transaction by transaction ID
+func (c *Client) GetTransaction(txID string) (map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		api := c.getCurrentAPI()
+		var tx map[string]interface{}
+		err := api.CallWithResult("condenser_api", "get_transaction", []interface{}{txID}, &tx)
+		if err == nil {
+			return tx, nil
+		}
+
+		lastErr = err
+		c.logger.Warn("RPC call failed, retrying",
+			utils.String("method", "get_transaction"),
+			utils.String("tx_id", txID),
+			utils.Int("attempt", attempt+1),
+			utils.Error(err),
+		)
+
+		c.switchNode()
+
+		if attempt < maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
 // GetWitnessSchedule gets the witness schedule
 func (c *Client) GetWitnessSchedule() (map[string]interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
