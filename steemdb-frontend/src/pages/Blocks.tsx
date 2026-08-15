@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, ArrowUpDown } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
 import { getBlocks, getBlock } from '../lib/api';
 import { formatNumber, formatTimeAgo, formatDate } from '../lib/utils';
 
@@ -121,12 +122,12 @@ export function BlocksPage() {
                 <tbody>
                   {blocks.map((block) => (
                     <tr
-                      key={block.number}
+                      key={block.block_num}
                       className="border-b hover:bg-accent/50 cursor-pointer"
-                      onClick={() => navigate(`/blocks/${block.number}`)}
+                      onClick={() => navigate(`/blocks/${block.block_num}`)}
                     >
                       <td className="p-3">
-                        <div className="font-medium">#{formatNumber(block.number)}</div>
+                        <div className="font-medium">#{formatNumber(block.block_num)}</div>
                       </td>
                       <td className="p-3 text-sm text-muted-foreground">
                         {formatTimeAgo(block.timestamp)}
@@ -142,8 +143,8 @@ export function BlocksPage() {
                           @{block.witness}
                         </button>
                       </td>
-                      <td className="p-3 text-right">{formatNumber(block.transactions || 0)}</td>
-                      <td className="p-3 text-right">{formatNumber(block.operations || 0)}</td>
+                      <td className="p-3 text-right">{formatNumber(block.transaction_count || 0)}</td>
+                      <td className="p-3 text-right">{formatNumber(block.operation_count || 0)}</td>
                       <td className="p-3 text-right">
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </td>
@@ -230,7 +231,7 @@ export function BlockDetailPage() {
           <Button variant="ghost" onClick={() => navigate('/blocks')} className="mb-2">
             ← Back to Blocks
           </Button>
-          <h1 className="text-3xl font-bold tracking-tight">Block #{formatNumber(block.number)}</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Block #{formatNumber(block.block_num)}</h1>
           <p className="text-muted-foreground">Block details and transactions</p>
         </div>
       </div>
@@ -243,7 +244,7 @@ export function BlockDetailPage() {
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Block Number</span>
-              <span className="font-medium">#{formatNumber(block.number)}</span>
+              <span className="font-medium">#{formatNumber(block.block_num)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Timestamp</span>
@@ -261,10 +262,10 @@ export function BlockDetailPage() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Previous Block</span>
               <button
-                onClick={() => navigate(`/blocks/${Number(block.number) - 1}`)}
+                onClick={() => navigate(`/blocks/${Number(block.block_num) - 1}`)}
                 className="font-medium text-primary hover:underline"
               >
-                #{formatNumber(Number(block.number) - 1)}
+                #{formatNumber(Number(block.block_num) - 1)}
               </button>
             </div>
           </CardContent>
@@ -277,11 +278,11 @@ export function BlockDetailPage() {
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Transactions</span>
-              <span className="font-medium">{formatNumber(block.transactions || 0)}</span>
+              <span className="font-medium">{formatNumber(block.transaction_count || 0)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Operations</span>
-              <span className="font-medium">{formatNumber(block.operations || 0)}</span>
+              <span className="font-medium">{formatNumber(block.operation_count || 0)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Merkle Root</span>
@@ -290,6 +291,51 @@ export function BlockDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Transactions</CardTitle>
+          <CardDescription>
+            {block.transactions?.length || 0} transactions in this block
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!block.transactions || block.transactions.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No transactions in this block (virtual operations only).
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-3">#</th>
+                    <th className="text-left p-3">Transaction ID</th>
+                    <th className="text-left p-3">Operations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.transactions.map((tx, index) => (
+                    <tr key={tx.transaction_id} className="border-b">
+                      <td className="p-3 text-muted-foreground">{index}</td>
+                      <td className="p-3 font-mono text-xs">{tx.transaction_id}</td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-1">
+                          {tx.operations?.map((op) => (
+                            <Badge key={op.id || `${op.trx_index}-${op.op_index}`} variant="outline">
+                              {op.op_type}
+                            </Badge>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

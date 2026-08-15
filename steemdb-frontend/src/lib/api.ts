@@ -1,7 +1,9 @@
 import type { 
   ApiResponse, 
   Account, 
-  Block, 
+  Block,
+  BlockSummary,
+  AccountOperation,
   Witness, 
   GlobalStats, 
   BlockchainProps,
@@ -24,6 +26,16 @@ import type {
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+
+// SearchResult mirrors the backend /v1/search response item. For transaction
+// results, subtitle carries the containing block number.
+export interface SearchResult {
+  type: 'account' | 'block' | 'transaction';
+  id: string;
+  title: string;
+  subtitle?: string;
+  url: string;
+}
 
 class ApiClient {
   private baseUrl: string;
@@ -74,13 +86,13 @@ class ApiClient {
     return this.request<PaginatedResponse<Account>>(`/v1/accounts?${searchParams}`);
   }
 
-  async getAccountHistory(username: string, params: PaginationParams): Promise<ApiResponse<any[]>> {
+  async getAccountHistory(username: string, params: PaginationParams): Promise<ApiResponse<AccountOperation[]>> {
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
       limit: params.limit.toString(),
     });
 
-    return this.request<any[]>(`/v1/accounts/${username}/history?${searchParams}`);
+    return this.request<AccountOperation[]>(`/v1/accounts/${username}/history?${searchParams}`);
   }
 
   // Block endpoints
@@ -135,7 +147,7 @@ class ApiClient {
   // Dashboard endpoint
   async getDashboard(): Promise<ApiResponse<{
     props: BlockchainProps;
-    latest_blocks: Block[];
+    latest_blocks: BlockSummary[];
     stats: GlobalStats;
     network_performance?: NetworkPerformance;
     reward_pool?: RewardPool;
@@ -145,13 +157,13 @@ class ApiClient {
   }
 
   // Search endpoint
-  async search(query: string, type?: 'account' | 'block' | 'transaction'): Promise<ApiResponse<any[]>> {
+  async search(query: string, type?: 'account' | 'block' | 'transaction'): Promise<ApiResponse<SearchResult[]>> {
     const searchParams = new URLSearchParams({
       q: query,
       ...(type && { type }),
     });
 
-    return this.request<any[]>(`/v1/search?${searchParams}`);
+    return this.request<SearchResult[]>(`/v1/search?${searchParams}`);
   }
 
   // Chart data endpoints

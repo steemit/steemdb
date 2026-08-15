@@ -1,9 +1,60 @@
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, Activity, Users, Blocks } from 'lucide-react';
+import { TrendingUp, Activity, Users, Blocks, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { getGlobalStats, getBlockchainProps, getAccountGrowthData, getBlockProductionData, getTransactionVolumeData } from '../lib/api';
 import { formatNumber, formatCurrency } from '../lib/utils';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+import type { ReactNode } from 'react';
+
+// ChartCard wraps a chart with consistent loading / error / empty states so
+// charts never silently disappear when an endpoint fails.
+function ChartCard({
+  title,
+  description,
+  isLoading,
+  isError,
+  isEmpty,
+  emptyMessage,
+  className,
+  children,
+}: {
+  title: string;
+  description: string;
+  isLoading: boolean;
+  isError: boolean;
+  isEmpty: boolean;
+  emptyMessage: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Loading chart data...
+          </div>
+        ) : isError ? (
+          <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+            Failed to load chart data. Please try again later.
+          </div>
+        ) : isEmpty ? (
+          <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+            {emptyMessage}
+          </div>
+        ) : (
+          children
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function StatisticsPage() {
   const { data: statsData } = useQuery({
@@ -16,17 +67,17 @@ export function StatisticsPage() {
     queryFn: () => getBlockchainProps(),
   });
 
-  const { data: accountGrowthData } = useQuery({
+  const accountGrowth = useQuery({
     queryKey: ['account-growth'],
     queryFn: () => getAccountGrowthData(30),
   });
 
-  const { data: blockProductionData } = useQuery({
+  const blockProduction = useQuery({
     queryKey: ['block-production'],
     queryFn: () => getBlockProductionData(7),
   });
 
-  const { data: transactionVolumeData } = useQuery({
+  const transactionVolume = useQuery({
     queryKey: ['transaction-volume'],
     queryFn: () => getTransactionVolumeData(30),
   });
@@ -62,7 +113,7 @@ export function StatisticsPage() {
             <Blocks className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats ? formatNumber(stats.blocks) : '-'}</div>
+            <div className="text-2xl font-bold">{stats ? formatNumber(stats.blocks ?? 0) : "-"}</div>
             <p className="text-xs text-muted-foreground">Processed blocks</p>
           </CardContent>
         </Card>
@@ -73,7 +124,7 @@ export function StatisticsPage() {
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats ? formatNumber(stats.transactions) : '-'}</div>
+            <div className="text-2xl font-bold">{stats ? formatNumber(stats.transactions ?? 0) : "-"}</div>
             <p className="text-xs text-muted-foreground">All transactions</p>
           </CardContent>
         </Card>
@@ -92,68 +143,66 @@ export function StatisticsPage() {
 
       {/* Charts */}
       <div className="grid gap-4 md:grid-cols-2">
-        {accountGrowthData?.success && accountGrowthData.data && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Account Growth (30 days)</CardTitle>
-              <CardDescription>New accounts over time</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={accountGrowthData.data}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="count" stroke="#8884d8" name="New Accounts" />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        )}
+        <ChartCard
+          title="Account Growth (30 days)"
+          description="New accounts over time"
+          isLoading={accountGrowth.isLoading}
+          isError={accountGrowth.isError || accountGrowth.data?.success === false}
+          isEmpty={(accountGrowth.data?.data?.length ?? 0) === 0}
+          emptyMessage="No new accounts in the last 30 days"
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={accountGrowth.data?.data}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="count" stroke="#8884d8" name="New Accounts" />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
 
-        {blockProductionData?.success && blockProductionData.data && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Block Production (7 days)</CardTitle>
-              <CardDescription>Blocks produced per day</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={blockProductionData.data}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="blocks" fill="#8884d8" name="Blocks" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        )}
+        <ChartCard
+          title="Block Production (7 days)"
+          description="Blocks produced per day"
+          isLoading={blockProduction.isLoading}
+          isError={blockProduction.isError || blockProduction.data?.success === false}
+          isEmpty={(blockProduction.data?.data?.length ?? 0) === 0}
+          emptyMessage="No blocks in the last 7 days"
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={blockProduction.data?.data}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="blocks" fill="#8884d8" name="Blocks" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
 
-        {transactionVolumeData?.success && transactionVolumeData.data && (
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <CardTitle>Transaction Volume (30 days)</CardTitle>
-              <CardDescription>Daily transaction count</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={transactionVolumeData.data}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="transactions" stroke="#82ca9d" name="Transactions" />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        )}
+        <ChartCard
+          className="md:col-span-2"
+          title="Transaction Volume (30 days)"
+          description="Daily transaction count"
+          isLoading={transactionVolume.isLoading}
+          isError={transactionVolume.isError || transactionVolume.data?.success === false}
+          isEmpty={(transactionVolume.data?.data?.length ?? 0) === 0}
+          emptyMessage="No transactions in the last 30 days"
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={transactionVolume.data?.data}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="transactions" stroke="#82ca9d" name="Transactions" />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
       </div>
 
       {/* Additional Stats */}

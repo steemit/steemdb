@@ -1,13 +1,69 @@
-import { Link } from 'react-router-dom';
-import { Menu, Search, Moon, Sun, Monitor } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Menu, Search, Moon, Sun, Monitor, User, Box, ArrowLeftRight, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { useThemeStore, useNavigationStore } from '../../store';
 import { cn } from '../../lib/utils';
+import { apiClient } from '../../lib/api';
+import type { SearchResult } from '../../lib/api';
 
 export function Header() {
   const { theme, setTheme } = useThemeStore();
-  const { searchOpen, searchQuery, toggleSidebar, toggleSearch, setSearchQuery } = useNavigationStore();
+  const { searchOpen, toggleSidebar, toggleSearch } = useNavigationStore();
+  const navigate = useNavigate();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  // Debounced search: fires 300ms after typing stops, minimum 2 characters.
+  // All state updates happen inside the timer callback (never synchronously
+  // in the effect body).
+  useEffect(() => {
+    const q = searchQuery.trim();
+    const timer = setTimeout(async () => {
+      if (q.length < 2) {
+        setResults([]);
+        setSearching(false);
+        setDropdownOpen(false);
+        return;
+      }
+
+      setSearching(true);
+      const response = await apiClient.search(q);
+      setResults(response.success && response.data ? response.data : []);
+      setSearching(false);
+      setDropdownOpen(true);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const handleSelect = (result: SearchResult) => {
+    setDropdownOpen(false);
+    if (result.type === 'account') {
+      navigate(`/accounts/${result.id}`);
+    } else if (result.type === 'block') {
+      navigate(`/blocks/${result.id}`);
+    } else if (result.type === 'transaction' && result.subtitle) {
+      // Transaction detail pages don't exist yet — jump to the containing
+      // block (search returns the block number in subtitle).
+      navigate(`/blocks/${result.subtitle}`);
+    }
+  };
+
+  const resultIcon = (type: string) => {
+    switch (type) {
+      case 'account':
+        return <User className="h-3.5 w-3.5" />;
+      case 'block':
+        return <Box className="h-3.5 w-3.5" />;
+      default:
+        return <ArrowLeftRight className="h-3.5 w-3.5" />;
+    }
+  };
 
   const cycleTheme = () => {
     const themes = ['light', 'dark', 'system'] as const;
@@ -83,19 +139,53 @@ export function Header() {
               )}
             >
               {searchOpen ? (
-                <Input
-                  type="search"
-                  placeholder="Search accounts, blocks..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full"
-                  onBlur={() => {
-                    if (!searchQuery) {
-                      toggleSearch();
-                    }
-                  }}
-                  autoFocus
-                />
+                <>
+                  <Input
+                    type="search"
+                    placeholder="Search accounts, blocks, txs..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setSearchQuery('');
+                        setDropdownOpen(false);
+                        toggleSearch();
+                      }
+                      if (e.key === 'Enter' && results.length > 0) {
+                        handleSelect(results[0]);
+                      }
+                    }}
+                    className="w-full"
+                    autoFocus
+                  />
+                  {dropdownOpen && (searching || results.length > 0 || searchQuery.trim().length >= 2) && (
+                    <div className="absolute top-10 right-0 w-80 max-h-80 overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md">
+                      {searching && (
+                        <div className="flex items-center space-x-2 px-3 py-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>Searching...</span>
+                        </div>
+                      )}
+                      {!searching && results.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          No results found
+                        </div>
+                      )}
+                      {!searching &&
+                        results.map((result) => (
+                          <button
+                            key={`${result.type}:${result.id}`}
+                            className="flex w-full items-center space-x-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                            onClick={() => handleSelect(result)}
+                          >
+                            {resultIcon(result.type)}
+                            <span className="flex-1 truncate">{result.title}</span>
+                            <span className="text-xs text-muted-foreground">{result.type}</span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <Button
                   variant="ghost"

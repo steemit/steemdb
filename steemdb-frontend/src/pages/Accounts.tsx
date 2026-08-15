@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { getAccounts, getAccount } from '../lib/api';
+import { getAccounts, getAccount, getAccountHistory } from '../lib/api';
 import { formatNumber, formatTimeAgo, formatDate, formatCurrency, formatReputation, getAvatarUrl, formatVests } from '../lib/utils';
 import { useFavoritesStore } from '../store';
 
@@ -226,10 +226,17 @@ export function AccountDetailPage() {
   const accountName = searchParams.get('id') || window.location.pathname.split('/').pop() || '';
   const { addAccount, removeAccount, isAccountFavorite } = useFavoritesStore();
   const isFavorite = isAccountFavorite(accountName);
+  const [historyPage, setHistoryPage] = useState(1);
 
   const { data: accountData, isLoading: accountLoading } = useQuery({
     queryKey: ['account', accountName],
     queryFn: () => getAccount(accountName),
+    enabled: !!accountName,
+  });
+
+  const { data: historyData, isLoading: historyLoading } = useQuery({
+    queryKey: ['account-history', accountName, historyPage],
+    queryFn: () => getAccountHistory(accountName, { page: historyPage, limit: 20 }),
     enabled: !!accountName,
   });
 
@@ -397,6 +404,105 @@ export function AccountDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Operation History</CardTitle>
+          <CardDescription>
+            Recent operations involving this account
+            {historyData?.meta?.total !== undefined &&
+              ` (${formatNumber(historyData.meta.total)} total)`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {historyLoading ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Loading operation history...
+            </div>
+          ) : historyData?.success && historyData.data && historyData.data.length > 0 ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left p-3">Block</th>
+                      <th className="text-left p-3">Type</th>
+                      <th className="text-left p-3">Details</th>
+                      <th className="text-left p-3">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyData.data.map((op) => (
+                      <tr
+                        key={op.id}
+                        className="border-b hover:bg-accent/50 cursor-pointer"
+                        onClick={() => navigate(`/blocks/${op.block_num}`)}
+                      >
+                        <td className="p-3 font-medium">#{formatNumber(op.block_num)}</td>
+                        <td className="p-3">
+                          <Badge variant="outline">{op.op_type}</Badge>
+                        </td>
+                        <td className="p-3 text-sm text-muted-foreground">
+                          {formatOpSummary(op.summary)}
+                        </td>
+                        <td className="p-3 text-sm">
+                          {op.block_time ? formatDate(op.block_time) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {(historyData.meta?.total_pages || 1) > 1 && (
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    Page {historyPage} of {historyData.meta?.total_pages}
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                      disabled={historyPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setHistoryPage((p) => p + 1)}
+                      disabled={historyPage >= (historyData.meta?.total_pages || 1)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No operations found for this account.
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+// formatOpSummary renders the backend-generated summary map as readable text
+function formatOpSummary(summary: Record<string, unknown> | null | undefined): string {
+  if (!summary) return '-';
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(summary)) {
+    if (value === null || value === undefined) continue;
+    let rendered: unknown = value;
+    if (typeof value === 'object') {
+      // Asset objects ({amount, precision, nai}) or nested structures
+      rendered = (value as Record<string, unknown>).amount ?? JSON.stringify(value);
+    }
+    parts.push(`${key}: ${rendered}`);
+  }
+  return parts.length > 0 ? parts.slice(0, 3).join(' · ') : '-';
 }
