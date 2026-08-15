@@ -120,19 +120,26 @@ func (s *SearchService) searchBlock(query string) (*SearchResult, error) {
 	}, nil
 }
 
-// searchTransaction looks up a transaction by ID via steem RPC
+// searchTransaction looks up a transaction by ID via steem RPC. The block
+// number is surfaced in Subtitle so the UI can link to the block page.
 func (s *SearchService) searchTransaction(query string) (*SearchResult, error) {
 	tx, err := s.steemClient.GetTransaction(query)
 	if err != nil || tx == nil {
 		return nil, err
 	}
 
-	return &SearchResult{
+	result := &SearchResult{
 		Type:  "transaction",
 		ID:    query,
 		Title: query,
 		URL:   fmt.Sprintf("/tx/%s", query),
-	}, nil
+	}
+	// JSON numbers decode as float64; format without scientific notation.
+	if blockNum, ok := tx["block_num"].(float64); ok {
+		result.Subtitle = strconv.FormatInt(int64(blockNum), 10)
+	}
+
+	return result, nil
 }
 
 // searchAccounts searches the account collection by name prefix
