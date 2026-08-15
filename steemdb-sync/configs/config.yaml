@@ -38,6 +38,32 @@ ingest:
   listen_addr: ":8080"  # HTTP server listen address
   queue_size: 100000    # Maximum queue size for operations
 
+# Refresher process settings (cmd/refresher; replaces legacy history.py + witnesses.py)
+refresher:
+  enabled: true
+  # witness: witness / witness_history / witness_misses collections (30s)
+  witness:
+    enabled: true
+    interval: "30s"
+  # stats: status transactions/operations activity counters (5m)
+  stats:
+    enabled: true
+    interval: "5m"
+  # clients: status.clients-snapshot + clients_history (1h)
+  clients:
+    enabled: true
+    interval: "1h"
+  # funds: funds_history reward fund snapshots (1h)
+  funds:
+    enabled: true
+    interval: "1h"
+  # account_rescan: full-chain account refresh via lookup_accounts (default
+  # off — the dirty-based AccountRefresher covers active accounts)
+  account_rescan:
+    enabled: false
+    interval: "24h"
+    rpc_batch_size: 100
+
 # Logging settings
 log:
   level: "info"   # debug, info, warn, error

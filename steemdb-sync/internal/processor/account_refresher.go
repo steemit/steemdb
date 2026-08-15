@@ -182,6 +182,24 @@ func (r *AccountRefresher) fetchDirtyNames(ctx context.Context) []string {
 	return names
 }
 
+// RefreshNames refreshes a specific set of accounts (used by the refresher
+// process's optional full rescan). The names are processed in rpcBatchSize
+// chunks. Returns (success count, error count).
+func (r *AccountRefresher) RefreshNames(ctx context.Context, names []string) (int, int) {
+	success := 0
+	failed := 0
+	for i := 0; i < len(names); i += r.rpcBatchSize {
+		end := i + r.rpcBatchSize
+		if end > len(names) {
+			end = len(names)
+		}
+		n, errs := r.refreshChunk(ctx, names[i:end])
+		success += n
+		failed += errs
+	}
+	return success, failed
+}
+
 // refreshChunk calls get_accounts for a batch of names, transforms each, and upserts.
 // Returns (success count, error count).
 func (r *AccountRefresher) refreshChunk(ctx context.Context, names []string) (int, int) {

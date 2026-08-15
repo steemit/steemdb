@@ -665,10 +665,29 @@ web 端 dashboard 当前直接走 steemClient RPC，不依赖 `status.props`。�
 - 补 witnesses 路由
 - 补 operation_count
 
-### Batch 7（独立排期，不在 processor 范围）
+### Batch 7（独立排期，不在 processor 范围）→ Batch 9 实施裁决（2026-08-16）
 
-- `history.py` 的 Go 重写（account_history / funds_history / stats / clients）
-- `witnesses.py` 的 Go 重写（witness / witness_history / witness_misses）
+`history.py` / `witnesses.py` 重写为独立进程 `cmd/refresher`（internal/refresher），
+按 web/前端消费矩阵裁剪范围：
+
+**纳入**（有消费或零成本顺手生成）：
+- witness（30s，top-100 upsert + $nin 清理保持语义）/ witness_history（日快照
+  `_id = owner|YYYYMMDD`）/ witness_misses（内存基线检测 total_missed 增长）
+- status 活动计数 transactions/operations-24h/1h（5min）— legacy 基于 block_30d，
+  Go 无此集合，改从 operations 按 block 范围统计（28800 块=24h / 1200 块=1h）
+- status.clients-snapshot + clients_history（1h，照搬 legacy comment 聚合管道）
+- funds_history（1h，legacy 24h 的加密；get_reward_fund insert-only）
+- account 全量重扫（24h，**config 默认关**；复用 AccountRefresher.RefreshNames，
+  平时靠 dirty 机制）
+
+**跳过**（零消费，前端需要时再补）：
+- account_history（28 字段日快照）— web/前端零引用
+- tx_history / op_history — charts 已从 operations 实时聚合
+- block_30d — stats 已改基于 operations
+
+**修复的 legacy 缺陷**：remove({}) 清空窗口改 upsert + $nin 清理；每轮两次
+witness RPC 合并为一次；批量 get_accounts 重复请求 bug 不再存在；HTTP 无超时
+由 rpc client 统一超时/重试。
 
 ### Batch 8：operations.accounts 扇出索引 + account history 端点（A4 改良版）
 
