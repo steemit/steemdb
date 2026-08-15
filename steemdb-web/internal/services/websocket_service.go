@@ -49,6 +49,9 @@ type WebSocketService struct {
 	lastBlockNumber    int64 // Last head block number (for props updates)
 	lastBlockProcessed int64 // Last irreversible block processed (for block processing)
 	lastPropsUpdate    time.Time
+
+	// Connection cap (websocket.max_connections; default 1000)
+	maxConnections int
 }
 
 // Client represents a WebSocket client connection
@@ -58,11 +61,22 @@ type Client struct {
 	service       *WebSocketService
 	subscriptions map[string]bool // subscribed channels
 	userAccount   string          // for @username subscriptions
+	closeOnce     sync.Once       // guards against double-closing send
+}
+
+// evict closes the client's send channel exactly once. Safe to call from both
+// the unregister path and slow-client eviction.
+func (c *Client) evict() {
+	c.closeOnce.Do(func() { close(c.send) })
 }
 
 // NewWebSocketService creates a new WebSocket service
-func NewWebSocketService(steemClient *steem.Client, db *database.MongoDB, logger utils.Logger) *WebSocketService {
+func NewWebSocketService(steemClient *steem.Client, db *database.MongoDB, logger utils.Logger, maxConnections int) *WebSocketService {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	if maxConnections <= 0 {
+		maxConnections = 1000
+	}
 
 	return &WebSocketService{
 		clients:     make(map[*websocket.Conn]*Client),
@@ -78,12 +92,13 @@ func NewWebSocketService(steemClient *steem.Client, db *database.MongoDB, logger
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		broadcast:     make(chan models.WebSocketMessage, 256),
-		register:      make(chan *Client),
-		unregister:    make(chan *Client),
-		ctx:           ctx,
-		cancel:        cancel,
-		mentionsRegex: regexp.MustCompile(`([@])(\w+)\b`), // Aligned with old live.py
+		broadcast:      make(chan models.WebSocketMessage, 1024),
+		register:       make(chan *Client),
+		unregister:     make(chan *Client),
+		ctx:            ctx,
+		cancel:         cancel,
+		maxConnections: maxConnections,
+		mentionsRegex:  regexp.MustCompile(`([@])(\w+)\b`), // Aligned with old live.py
 	}
 }
 
@@ -107,6 +122,15 @@ func (ws *WebSocketService) Stop() {
 
 // HandleWebSocket handles WebSocket connections
 func (ws *WebSocketService) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Enforce the connection cap before upgrading
+	ws.clientsMux.RLock()
+	atCapacity := len(ws.clients) >= ws.maxConnections
+	ws.clientsMux.RUnlock()
+	if atCapacity {
+		http.Error(w, "too many WebSocket connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	conn, err := ws.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		ws.logger.Error("Failed to upgrade WebSocket connection", utils.Error(err))
@@ -145,7 +169,7 @@ func (ws *WebSocketService) run() {
 			ws.clientsMux.Lock()
 			if _, ok := ws.clients[client.conn]; ok {
 				delete(ws.clients, client.conn)
-				close(client.send)
+				client.evict()
 
 				// Remove from all channels
 				ws.channelsMux.Lock()
@@ -409,7 +433,8 @@ func (ws *WebSocketService) fetchAndBroadcastState() {
 	ws.broadcast <- message
 }
 
-// processBlockOperations processes operations for account notifications
+// processBlockOperations processes operations for account notifications and
+// the global operation feed channel
 func (ws *WebSocketService) processBlockOperations(block *steem.Block, blockNum int64) {
 	for _, tx := range block.Transactions {
 		for _, op := range tx.Operations {
@@ -423,6 +448,15 @@ func (ws *WebSocketService) processBlockOperations(block *steem.Block, blockNum 
 			// Extract affected accounts based on operation type
 			accounts := ws.extractAccountsFromOperation(op)
 			opData.Accounts = accounts
+
+			// Broadcast to the global operation feed channel (consumed by the
+			// live feed page)
+			ws.broadcast <- models.WebSocketMessage{
+				Type:      "operation",
+				Channel:   "operation",
+				Data:      opData,
+				Timestamp: time.Now(),
+			}
 
 			// Broadcast to account-specific channels
 			for _, account := range accounts {
@@ -530,20 +564,32 @@ func (ws *WebSocketService) broadcastToChannel(channel string, message models.We
 	}
 	ws.channelsMux.RUnlock()
 
-	// Send message to all clients in this channel
+	// Send message to all clients in this channel; collect slow clients so the
+	// eviction (map delete + channel close) happens under a write lock, never
+	// inside the read lock.
 	ws.clientsMux.RLock()
+	slow := make([]*Client, 0)
 	for conn := range clientsCopy {
 		if client, exists := ws.clients[conn]; exists {
 			select {
 			case client.send <- message:
 			default:
-				// Client's send channel is full, close it
-				close(client.send)
-				delete(ws.clients, conn)
+				slow = append(slow, client)
 			}
 		}
 	}
 	ws.clientsMux.RUnlock()
+
+	if len(slow) > 0 {
+		ws.clientsMux.Lock()
+		for _, client := range slow {
+			if _, exists := ws.clients[client.conn]; exists {
+				delete(ws.clients, client.conn)
+				client.evict()
+			}
+		}
+		ws.clientsMux.Unlock()
+	}
 }
 
 // subscribeClientToDefaults subscribes a new client to default channels (aligned with old live.py)

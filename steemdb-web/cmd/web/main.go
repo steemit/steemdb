@@ -84,11 +84,13 @@ func main() {
 	// Initialize WebSocket service
 	var wsService *services.WebSocketService
 	if config.WebSocket.Enabled {
-		wsService = services.NewWebSocketService(steemClient, mongodb, logger)
+		wsService = services.NewWebSocketService(steemClient, mongodb, logger, config.WebSocket.MaxConnections)
 		wsService.Start()
 		defer wsService.Stop()
 
-		logger.Info("WebSocket service started", utils.String("path", config.WebSocket.Path))
+		logger.Info("WebSocket service started",
+			utils.String("path", config.WebSocket.Path),
+			utils.Int("max_connections", config.WebSocket.MaxConnections))
 	}
 
 	// Set Gin mode

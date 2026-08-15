@@ -16,7 +16,7 @@ import (
 func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis, steemClient *steem.Client, logger utils.Logger) {
 	// Initialize services
 	accountService := services.NewAccountService(db, redis, logger)
-	blockService := services.NewBlockService(db, redis, logger)
+	blockService := services.NewBlockService(db, redis, steemClient, logger)
 	dashboardService := services.NewDashboardService(db, steemClient, logger)
 	commentService := services.NewCommentService(db, redis, logger)
 	labsService := services.NewLabsService(db, steemClient, logger)

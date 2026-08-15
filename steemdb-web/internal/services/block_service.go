@@ -10,26 +10,32 @@ import (
 
 	"github.com/steemit/steemdb/web/internal/database"
 	"github.com/steemit/steemdb/web/internal/models"
+	"github.com/steemit/steemdb/web/pkg/steem"
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // BlockService handles block-related operations
 type BlockService struct {
-	db     *database.MongoDB
-	redis  *database.Redis
-	logger utils.Logger
+	db          *database.MongoDB
+	redis       *database.Redis
+	steemClient *steem.Client
+	logger      utils.Logger
 }
 
 // NewBlockService creates a new block service
-func NewBlockService(db *database.MongoDB, redis *database.Redis, logger utils.Logger) *BlockService {
+func NewBlockService(db *database.MongoDB, redis *database.Redis, steemClient *steem.Client, logger utils.Logger) *BlockService {
 	return &BlockService{
-		db:     db,
-		redis:  redis,
-		logger: logger,
+		db:          db,
+		redis:       redis,
+		steemClient: steemClient,
+		logger:      logger,
 	}
 }
 
-// GetBlock retrieves a block by number
+// GetBlock retrieves a block by number. The local blocks collection does not
+// store transaction details (the sync batcher only keeps block headers), so
+// after a local hit the transaction list is enriched from the steem RPC.
+// When the RPC call fails the block is still returned with local fields only.
 func (s *BlockService) GetBlock(ctx context.Context, blockNum int64) (*models.Block, error) {
 	collection := s.db.Collection("blocks")
 	var block models.Block
@@ -42,7 +48,64 @@ func (s *BlockService) GetBlock(ctx context.Context, blockNum int64) (*models.Bl
 		return nil, fmt.Errorf("failed to get block: %w", err)
 	}
 
+	s.enrichTransactions(&block, blockNum)
+
 	return &block, nil
+}
+
+// enrichTransactions fills Transactions (and TransactionCount when missing)
+// from the steem RPC block. Failures are logged and ignored — the block is
+// still useful without the transaction list.
+func (s *BlockService) enrichTransactions(block *models.Block, blockNum int64) {
+	if len(block.Transactions) > 0 {
+		return
+	}
+
+	rpcBlock, err := s.steemClient.GetBlock(blockNum)
+	if err != nil || rpcBlock == nil {
+		s.logger.Warn("Failed to enrich block transactions from RPC",
+			utils.Int64("block_num", blockNum), utils.Error(err))
+		return
+	}
+
+	block.Transactions = make([]models.Transaction, 0, len(rpcBlock.Transactions))
+	for i := range rpcBlock.Transactions {
+		tx := &rpcBlock.Transactions[i]
+		ops := make([]models.Operation, 0, len(tx.Operations))
+		for j := range tx.Operations {
+			opValue, _ := tx.Operations[j].Value.(map[string]interface{})
+			ops = append(ops, models.Operation{
+				ID:       fmt.Sprintf("%d:%d:%d", blockNum, i, j),
+				BlockNum: uint32(blockNum),
+				TrxID:    tx.TransactionID,
+				TrxIndex: int32(i),
+				OpIndex:  int32(j),
+				OpType:   tx.Operations[j].Type,
+				OpValue:  opValue,
+			})
+		}
+		block.Transactions = append(block.Transactions, models.Transaction{
+			ID:             tx.TransactionID,
+			RefBlockNum:    tx.RefBlockNum,
+			RefBlockPrefix: tx.RefBlockPrefix,
+			Expiration:     tx.Expiration,
+			Operations:     ops,
+			Extensions:     tx.Extensions,
+			Signatures:     tx.Signatures,
+			TransactionID:  tx.TransactionID,
+		})
+	}
+
+	if block.TransactionCount == 0 {
+		block.TransactionCount = len(block.Transactions)
+	}
+	if block.OperationCount == 0 {
+		opCount := 0
+		for _, tx := range block.Transactions {
+			opCount += len(tx.Operations)
+		}
+		block.OperationCount = opCount
+	}
 }
 
 // GetBlocks retrieves multiple blocks with pagination
