@@ -153,3 +153,55 @@ func (c *Client) GetContent(author, permlink string) (*protocolapi.Content, erro
 	}
 	return content, nil
 }
+
+// GetWitnessesByVote retrieves witnesses ordered by vote count starting after
+// `from` (empty string = from the top). Returns raw condenser_api maps so the
+// caller controls field conversion.
+func (c *Client) GetWitnessesByVote(ctx context.Context, from string, limit int) ([]map[string]interface{}, error) {
+	startTime := time.Now()
+
+	var witnesses []map[string]interface{}
+	err := c.api.CallWithResult("condenser_api", "get_witnesses_by_vote", []interface{}{from, limit}, &witnesses)
+
+	duration := time.Since(startTime)
+	metrics.RecordRPCCall("get_witnesses_by_vote", duration, err)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get witnesses by vote (from=%q, limit=%d)", from, limit)
+	}
+	return witnesses, nil
+}
+
+// GetRewardFund retrieves a reward fund object (e.g. "post") as a raw map.
+func (c *Client) GetRewardFund(ctx context.Context, name string) (map[string]interface{}, error) {
+	startTime := time.Now()
+
+	var fund map[string]interface{}
+	err := c.api.CallWithResult("condenser_api", "get_reward_fund", []interface{}{name}, &fund)
+
+	duration := time.Since(startTime)
+	metrics.RecordRPCCall("get_reward_fund", duration, err)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get reward fund %q", name)
+	}
+	return fund, nil
+}
+
+// LookupAccounts retrieves up to `limit` account names lexicographically
+// greater than `after` (condenser_api.lookup_accounts). Used for full rescan
+// paging; -1 as after returns from the start.
+func (c *Client) LookupAccounts(ctx context.Context, after string, limit int) ([]string, error) {
+	startTime := time.Now()
+
+	var names []string
+	err := c.api.CallWithResult("condenser_api", "lookup_accounts", []interface{}{after, limit}, &names)
+
+	duration := time.Since(startTime)
+	metrics.RecordRPCCall("lookup_accounts", duration, err)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to lookup accounts (after=%q, limit=%d)", after, limit)
+	}
+	return names, nil
+}

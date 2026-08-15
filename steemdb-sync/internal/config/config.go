@@ -19,7 +19,34 @@ type Config struct {
 	Batch      BatchConfig      `yaml:"batch"`
 	Ingest     IngestConfig     `yaml:"ingest"`
 	Processor  ProcessorConfig  `yaml:"processor"`
+	Refresher  RefresherConfig  `yaml:"refresher"`
 	Log        LogConfig        `yaml:"log"`
+}
+
+// RefresherConfig contains refresher-process settings (witness/stats/clients/
+// funds tickers, optional full account rescan). Replaces legacy history.py +
+// witnesses.py (PROCESSOR_PLAN.md Batch 7/9).
+type RefresherConfig struct {
+	Enabled       bool                `yaml:"enabled"`
+	Witness       RefresherTickConfig `yaml:"witness"`
+	Stats         RefresherTickConfig `yaml:"stats"`
+	Clients       RefresherTickConfig `yaml:"clients"`
+	Funds         RefresherTickConfig `yaml:"funds"`
+	AccountRescan AccountRescanConfig `yaml:"account_rescan"`
+}
+
+// RefresherTickConfig is the common enabled/interval pair for a refresher ticker
+type RefresherTickConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Interval string `yaml:"interval"`
+}
+
+// AccountRescanConfig contains full account rescan settings (default off —
+// the dirty-based AccountRefresher covers active accounts)
+type AccountRescanConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Interval     string `yaml:"interval"`
+	RPCBatchSize int    `yaml:"rpc_batch_size"` // accounts per get_accounts call
 }
 
 // ProcessorConfig contains operation processor settings
@@ -136,6 +163,18 @@ func Load(configPath string) (*Config, error) {
 				Workers:    5,
 				WindowDays: 3,
 				StaleHours: 6,
+			},
+		},
+		Refresher: RefresherConfig{
+			Enabled: true,
+			Witness: RefresherTickConfig{Enabled: true, Interval: "30s"},
+			Stats:   RefresherTickConfig{Enabled: true, Interval: "5m"},
+			Clients: RefresherTickConfig{Enabled: true, Interval: "1h"},
+			Funds:   RefresherTickConfig{Enabled: true, Interval: "1h"},
+			AccountRescan: AccountRescanConfig{
+				Enabled:      false,
+				Interval:     "24h",
+				RPCBatchSize: 100,
 			},
 		},
 		Log: LogConfig{
@@ -295,4 +334,29 @@ func (c *Config) AccountRefresherInterval() (time.Duration, error) {
 // CommentRescannerInterval returns the comment rescanner interval duration
 func (c *Config) CommentRescannerInterval() (time.Duration, error) {
 	return time.ParseDuration(c.Processor.CommentRescanner.Interval)
+}
+
+// RefresherWitnessInterval returns the witness ticker interval duration
+func (c *Config) RefresherWitnessInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Refresher.Witness.Interval)
+}
+
+// RefresherStatsInterval returns the stats ticker interval duration
+func (c *Config) RefresherStatsInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Refresher.Stats.Interval)
+}
+
+// RefresherClientsInterval returns the clients ticker interval duration
+func (c *Config) RefresherClientsInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Refresher.Clients.Interval)
+}
+
+// RefresherFundsInterval returns the funds ticker interval duration
+func (c *Config) RefresherFundsInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Refresher.Funds.Interval)
+}
+
+// RefresherAccountRescanInterval returns the account rescan interval duration
+func (c *Config) RefresherAccountRescanInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Refresher.AccountRescan.Interval)
 }
