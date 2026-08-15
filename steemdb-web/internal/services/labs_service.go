@@ -859,13 +859,17 @@ func (s *LabsService) GetFlags(ctx context.Context) ([]models.Flags, error) {
 	return flags, nil
 }
 
-// GetClients retrieves client statistics
+// GetClients retrieves client statistics from the clients-snapshot maintained
+// by steemdb-sync's refresher (legacy history.py update_clients pipeline).
+// Snapshot shape: [{_id: {doy, year, month, day, dow}, clients: [{client,
+// count, reward}], reward, total}, ...] — one entry per day with apps seen in
+// comment json_metadata.app over the last 90 days.
 func (s *LabsService) GetClients(ctx context.Context) (*models.Clients, error) {
 	statusCollection := s.db.Collection("status")
 
 	var status struct {
-		ID   string      `bson:"_id"`
-		Data interface{} `bson:"data"`
+		ID   string          `bson:"_id"`
+		Data []clientDayData `bson:"data"`
 	}
 
 	err := statusCollection.FindOne(ctx, bson.M{"_id": "clients-snapshot"}).Decode(&status)
@@ -873,18 +877,48 @@ func (s *LabsService) GetClients(ctx context.Context) (*models.Clients, error) {
 		return nil, fmt.Errorf("failed to get clients snapshot: %w", err)
 	}
 
-	// Parse the data structure (this is complex, simplified here)
-	// The actual structure from legacy is nested, we'll return a simplified version
 	clients := &models.Clients{
-		Dates:   []models.ClientDate{},
+		Dates:   make([]models.ClientDate, 0, len(status.Data)),
 		Posts:   make(map[string]int),
 		Rewards: make(map[string]float64),
 	}
 
-	// TODO: Parse the complex nested structure from status.data
-	// For now, return empty structure
+	for _, day := range status.Data {
+		entries := make([]models.ClientEntry, 0, len(day.Clients))
+		for _, c := range day.Clients {
+			entries = append(entries, models.ClientEntry{
+				Client: c.Client,
+				Count:  c.Count,
+				Reward: c.Reward,
+			})
+			clients.Posts[c.Client] += c.Count
+			clients.Rewards[c.Client] += c.Reward
+		}
+		clients.Dates = append(clients.Dates, models.ClientDate{
+			Date:    time.Date(day.ID.Year, time.Month(day.ID.Month), day.ID.Day, 0, 0, 0, 0, time.UTC),
+			Clients: entries,
+		})
+	}
 
 	return clients, nil
+}
+
+// clientDayData mirrors one clients-snapshot aggregation entry.
+type clientDayData struct {
+	ID struct {
+		Doy   int `bson:"doy"`
+		Year  int `bson:"year"`
+		Month int `bson:"month"`
+		Day   int `bson:"day"`
+		Dow   int `bson:"dow"`
+	} `bson:"_id"`
+	Clients []struct {
+		Client string  `bson:"client"`
+		Count  int     `bson:"count"`
+		Reward float64 `bson:"reward"`
+	} `bson:"clients"`
+	Reward float64 `bson:"reward"`
+	Total  int     `bson:"total"`
 }
 
 // GetBenefactors retrieves benefactor reward statistics

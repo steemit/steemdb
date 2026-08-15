@@ -237,10 +237,10 @@ func (s *ChartsService) GetTransactionVolume(ctx context.Context, days int) ([]T
 }
 
 // GetWitnessVoting returns witness voting distribution data.
-// TODO: The blocks collection does not store witness information (the sync
-// batcher does not populate the witness field), so witness voting aggregation
-// is not currently possible. This returns an empty array until a witness
-// refresher is added to steemdb-sync.
+// The data source is now available: steemdb-sync's refresher process writes
+// daily witness_history snapshots (_id = owner|YYYYMMDD). Implementation is
+// deferred until the frontend wires up the chart (no page currently calls
+// this endpoint).
 func (s *ChartsService) GetWitnessVoting(ctx context.Context) ([]interface{}, error) {
 	return []interface{}{}, nil
 }
