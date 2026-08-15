@@ -84,7 +84,9 @@ type AccountSearchResult struct {
 	PageSize int              `json:"page_size"`
 }
 
-// AccountOperation represents an account operation from account_operations collection
+// AccountOperation represents an operations-collection document projected
+// into a per-account history entry (backed by the accounts array + multikey
+// index written by steemdb-sync)
 type AccountOperation struct {
 	ID        string                 `json:"id" bson:"_id"`
 	Account   string                 `json:"account" bson:"account"`

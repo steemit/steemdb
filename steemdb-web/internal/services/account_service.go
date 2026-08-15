@@ -166,13 +166,17 @@ func (s *AccountService) SearchAccounts(ctx context.Context, query string, limit
 	}, nil
 }
 
-// GetAccountHistory retrieves account operation history from account_operations collection
+// GetAccountHistory retrieves account operation history by querying the
+// operations collection on the denormalized accounts array (populated by
+// steemdb-sync at ingest time). block_num is used for sorting because it is
+// strictly monotonic in time and the operations collection has no timestamp
+// field; block_time is enriched afterwards from the blocks collection.
 func (s *AccountService) GetAccountHistory(ctx context.Context, name string, params models.PaginationParams) (*models.AccountHistoryResult, error) {
-	collection := s.db.Collection("account_operations")
+	collection := s.db.Collection("operations")
 
 	// Build filter
 	filter := bson.M{
-		"account": name,
+		"accounts": name,
 	}
 
 	// Count total documents
@@ -187,29 +191,54 @@ func (s *AccountService) GetAccountHistory(ctx context.Context, name string, par
 
 	// Build find options
 	findOptions := options.Find().
-		SetSort(bson.M{"block_time": -1}). // Sort by block time descending (newest first)
+		SetSort(bson.M{"block_num": -1}). // Monotonic in time; operations has no timestamp
 		SetSkip(int64(skip)).
 		SetLimit(int64(params.PageSize))
 
-	// Query account_operations
+	// Query operations
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find account operations: %w", err)
 	}
 	defer cursor.Close(ctx)
 
+	type opDoc struct {
+		ID       string                 `bson:"_id"`
+		BlockNum int64                  `bson:"block_num"`
+		TrxID    string                 `bson:"trx_id"`
+		OpType   string                 `bson:"op_type"`
+		OpValue  map[string]interface{} `bson:"op_value"`
+	}
+
 	var operations []models.AccountOperation
+	blockNums := make(map[int64]bool)
 	for cursor.Next(ctx) {
-		var op models.AccountOperation
-		if err := cursor.Decode(&op); err != nil {
-			s.logger.Error("Failed to decode account operation", utils.Error(err))
+		var doc opDoc
+		if err := cursor.Decode(&doc); err != nil {
+			s.logger.Error("Failed to decode operation", utils.Error(err))
 			continue
 		}
-		operations = append(operations, op)
+		operations = append(operations, models.AccountOperation{
+			ID:       doc.ID,
+			Account:  name,
+			BlockNum: doc.BlockNum,
+			OpType:   doc.OpType,
+			TrxID:    doc.TrxID,
+			Summary:  buildOpSummary(doc.OpType, doc.OpValue),
+		})
+		blockNums[doc.BlockNum] = true
 	}
 
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("cursor error: %w", err)
+	}
+
+	// Enrich block_time from the blocks collection (page-sized lookup)
+	blockTimes := s.fetchBlockTimes(ctx, blockNums)
+	for i := range operations {
+		if ts, ok := blockTimes[operations[i].BlockNum]; ok {
+			operations[i].BlockTime = ts
+		}
 	}
 
 	return &models.AccountHistoryResult{
@@ -219,6 +248,42 @@ func (s *AccountService) GetAccountHistory(ctx context.Context, name string, par
 		PageSize:   params.PageSize,
 		TotalPages: totalPages,
 	}, nil
+}
+
+// fetchBlockTimes loads timestamps for the given block numbers in one query.
+func (s *AccountService) fetchBlockTimes(ctx context.Context, blockNums map[int64]bool) map[int64]time.Time {
+	result := make(map[int64]time.Time, len(blockNums))
+	if len(blockNums) == 0 {
+		return result
+	}
+
+	nums := make([]int64, 0, len(blockNums))
+	for n := range blockNums {
+		nums = append(nums, n)
+	}
+
+	cursor, err := s.db.Collection("blocks").Find(ctx,
+		bson.M{"block_num": bson.M{"$in": nums}},
+		options.Find().SetProjection(bson.M{"block_num": 1, "timestamp": 1}),
+	)
+	if err != nil {
+		s.logger.Warn("Failed to fetch block times", utils.Error(err))
+		return result
+	}
+	defer cursor.Close(ctx)
+
+	for cursor.Next(ctx) {
+		var block struct {
+			BlockNum  int64     `bson:"block_num"`
+			Timestamp time.Time `bson:"timestamp"`
+		}
+		if err := cursor.Decode(&block); err != nil {
+			continue
+		}
+		result[block.BlockNum] = block.Timestamp
+	}
+
+	return result
 }
 
 // GetAccountStats retrieves account statistics

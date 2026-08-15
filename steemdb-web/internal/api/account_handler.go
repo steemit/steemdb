@@ -151,7 +151,8 @@ func (h *AccountHandler) GetAccountHistory(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters
+	// Parse pagination parameters. The frontend sends `limit`; page_size is
+	// accepted as a legacy alias.
 	params := models.PaginationParams{
 		Page:     1,
 		PageSize: 20,
@@ -163,8 +164,12 @@ func (h *AccountHandler) GetAccountHistory(c *gin.Context) {
 		}
 	}
 
-	if pageSize := c.Query("page_size"); pageSize != "" {
-		if ps, err := strconv.Atoi(pageSize); err == nil && ps > 0 && ps <= 100 {
+	limit := c.Query("limit")
+	if limit == "" {
+		limit = c.Query("page_size")
+	}
+	if limit != "" {
+		if ps, err := strconv.Atoi(limit); err == nil && ps > 0 && ps <= 100 {
 			params.PageSize = ps
 		}
 	}

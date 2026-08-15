@@ -16,11 +16,13 @@ import (
 func main() {
 	var (
 		configPath string
+		mode       string
 		startBlock uint64
 		endBlock   uint64
 		dryRun     bool
 	)
 	flag.StringVar(&configPath, "config", "configs/config.yaml", "Path to configuration file")
+	flag.StringVar(&mode, "mode", "blocks", "Repair mode: blocks (missing block repair) or backfill-accounts (populate operations.accounts)")
 	flag.Uint64Var(&startBlock, "start", 0, "Start block number (0 = from block 1)")
 	flag.Uint64Var(&endBlock, "end", 0, "End block number (0 = use max_block from meta)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run mode (scan only, don't repair)")
@@ -40,6 +42,21 @@ func main() {
 	defer mongoClient.Close(context.Background())
 
 	ctx := context.Background()
+
+	// Backfill mode: one-time migration that populates operations.accounts
+	// for data ingested before the field existed.
+	if mode == "backfill-accounts" {
+		log.Printf("Backfilling operations.accounts...")
+		updated, err := mongoClient.BackfillOperationAccounts(ctx, 1000)
+		if err != nil {
+			log.Fatalf("Backfill failed after %d updates: %v", updated, err)
+		}
+		log.Printf("Backfill complete: %d operations updated", updated)
+		return
+	}
+	if mode != "blocks" {
+		log.Fatalf("Unknown mode: %s (supported: blocks, backfill-accounts)", mode)
+	}
 
 	// Determine scan range
 	var scanStart, scanEnd uint32
