@@ -576,6 +576,38 @@ web 端 dashboard 当前直接走 steemClient RPC，不依赖 `status.props`。�
 - `routes.go` 补 `witnesses` 路由组（前端调 `/witnesses`、`/witnesses/top`、`/witnesses/:name`）
 - `GetClients`（labs_service.go:863）TODO 空壳 → 解析 `status.clients-snapshot`（依赖独立 history 进程）
 
+### 9.3 account history 数据链路（A4 改良版裁决，2026-08-14）
+
+原 A4 裁决（processor 扇出写 `account_operations` 集合）存在文档级存储放大
+（1 op × N 账户 → N 条文档），改良为 **operations 内嵌 `accounts` 数组 + 多键索引**
+（"tag + time" 模式），放大从文档级降为索引级（约一个数量级）。
+
+**sync 端（ingest 路径）**：
+
+- `model.Operation` 新增 `Accounts []string`（bson `accounts,omitempty`）
+- 提取函数 `model.ExtractAccounts(opValue)`：按账户字段白名单扫描 op_value，
+  仅接受 string / []string 值（`account_update.owner` 这类 authority 对象自然被跳过），
+  去重保序。白名单覆盖全部 op_type，无需 per-type switch：
+  `account, owner, from, to, author, voter, curator, publisher, worker_account,
+  creator, new_account_name, benefactor, from_account, to_account, producer,
+  witness, comment_author, parent_author, recovering_account,
+  required_posting_auths, required_auths`
+- 写入口收敛在 `mongo.BulkUpsertOperations`（batcher / repair / live_sync 全部经此），
+  写前填充 `Accounts`
+- 索引：`{accounts: 1, block_num: -1}`（多键），等值 + 降序排序由 IXSCAN 直接满足
+- 存量数据：`repair -mode backfill-accounts` 一次性回填
+  （扫描 `accounts` 不存在的文档 → 提取 → 批量 `$set`，回填后不再命中过滤条件，循环自然终止）
+- 新数据经 ingest 自动携带；全量 replay 天然重建，无需额外迁移
+
+**web 端（`GetAccountHistory`）**：
+
+- 查询 `operations`，filter `{accounts: <name>}`，排序 `block_num: -1`
+  （单调递增等价时间序，且 operations 无 timestamp 字段）
+- `block_time` 由本页 block_num 集合批量查 `blocks` 补齐（页大小级别的查询）
+- `summary` 读取时由 per-op_type 字段映射生成（`op_summary.go`），不做持久化，
+  避免 schema 演进迁移
+- 分页参数读 `limit`（`page_size` 作为兼容别名保留）
+
 ---
 
 ## 10. 实施批次
@@ -638,6 +670,19 @@ web 端 dashboard 当前直接走 steemClient RPC，不依赖 `status.props`。�
 - `history.py` 的 Go 重写（account_history / funds_history / stats / clients）
 - `witnesses.py` 的 Go 重写（witness / witness_history / witness_misses）
 
+### Batch 8：operations.accounts 扇出索引 + account history 端点（A4 改良版）
+
+- sync：`model.ExtractAccounts` 白名单提取 + `model.Operation.Accounts` 字段 +
+  `BulkUpsertOperations` 写入填充 + 多键索引 `{accounts: 1, block_num: -1}` +
+  单元测试
+- sync：`repair -mode backfill-accounts` 存量回填
+- web：`GetAccountHistory` 改查 `operations`（accounts 过滤 + block_num 排序 +
+  blocks 批量补齐 block_time + 读取时生成 summary）
+- web：分页参数 `limit`（`page_size` 兼容别名）
+
+**验收**：`repair -mode backfill-accounts` 后，`GET /accounts/:name/history`
+返回真实操作历史（分页、summary、block_time 正确），结果与 mongo 直查一致。
+
 ---
 
 ## 11. 审计与 Open Questions
@@ -658,9 +703,13 @@ web 端 dashboard 当前直接走 steemClient RPC，不依赖 `status.props`。�
 - **[A3]** ✅ 裁决：web 端 `op_num` → `op_index`（对齐 sync `model.Operation.OpIndex`）。
   涉及：`block_service.go:205`、`models/block.go:45`。
 
-- **[A4]** ✅ 裁决：processor 为每个涉及账户的 op 写一条精简记录到 `account_operations`。
-  理由：web 端已有查询逻辑（`account_service.go:171`），processor 生成数据比改 web 端聚合更简单。
-  schema 见 §5 各 handler（每个涉及账户的 op 额外写 account_operations）。
+- **[A4]** ✅ 裁决（2026-08-14 改良版，取代原"扇出写 account_operations"方案）：
+  在 `operations` 文档内嵌 `accounts` 数组（ingest 时由 `model.ExtractAccounts`
+  白名单扫描生成），配多键索引 `{accounts: 1, block_num: -1}`，
+  web 端 account history 直接查 `operations`。理由：文档级扇出有 N 倍存储放大，
+  内嵌数组把放大压到索引级（约一个数量级差距）；且扇出逻辑收敛在
+  `BulkUpsertOperations` 单点，batcher / repair / live_sync 全覆盖。
+  规格详见 §9.3。
 
 ### B. 数据一致性类
 

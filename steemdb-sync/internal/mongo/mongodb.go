@@ -92,6 +92,11 @@ func (c *Client) createIndexes(ctx context.Context) error {
 		{
 			Keys: bson.D{{Key: "virtual", Value: 1}},
 		},
+		{
+			// Serves per-account history queries: equality on the accounts
+			// multikey field + descending sort on block_num (monotonic in time).
+			Keys: bson.D{{Key: "accounts", Value: 1}, {Key: "block_num", Value: -1}},
+		},
 	}
 
 	if _, err := c.blocks.Indexes().CreateMany(ctx, blocksIndexes); err != nil {
@@ -123,6 +128,9 @@ func (c *Client) BulkUpsertOperations(ctx context.Context, ops []*model.Operatio
 	startTime := time.Now()
 	models := make([]mongo.WriteModel, 0, len(ops))
 	for _, op := range ops {
+		// Derive involved accounts at the single write choke point so every
+		// source (batcher, repair, live_sync) populates the field.
+		op.Accounts = model.ExtractAccounts(op.OpValue)
 		filter := bson.M{"_id": op.ID}
 		update := bson.M{"$set": op}
 		models = append(models, mongo.NewUpdateOneModel().
@@ -134,7 +142,7 @@ func (c *Client) BulkUpsertOperations(ctx context.Context, ops []*model.Operatio
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := c.operations.BulkWrite(ctx, models, opts)
 	duration := time.Since(startTime)
-	
+
 	// Record metrics
 	metrics.RecordMongoWrite("operations", "bulk_upsert", duration, err)
 
@@ -143,6 +151,63 @@ func (c *Client) BulkUpsertOperations(ctx context.Context, ops []*model.Operatio
 	}
 
 	return nil
+}
+
+// BackfillOperationAccounts scans operations that lack the accounts field,
+// derives involved accounts, and writes them back in batches. It is the
+// one-time migration path for data ingested before the field existed; newly
+// ingested operations are populated automatically by BulkUpsertOperations.
+// Already-backfilled documents no longer match the scan filter, so the loop
+// terminates without a separate cursor bookmark.
+func (c *Client) BackfillOperationAccounts(ctx context.Context, batchSize int) (int64, error) {
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+
+	var total int64
+	for {
+		findOptions := options.Find().
+			SetLimit(int64(batchSize)).
+			SetProjection(bson.M{"op_type": 1, "op_value": 1})
+
+		cursor, err := c.operations.Find(ctx, bson.M{"accounts": bson.M{"$exists": false}}, findOptions)
+		if err != nil {
+			return total, errors.Wrap(err, "failed to find operations without accounts")
+		}
+
+		type opRef struct {
+			ID      string                 `bson:"_id"`
+			OpValue map[string]interface{} `bson:"op_value"`
+		}
+		var batch []opRef
+		if err := cursor.All(ctx, &batch); err != nil {
+			cursor.Close(ctx)
+			return total, errors.Wrap(err, "failed to decode operations without accounts")
+		}
+		cursor.Close(ctx)
+
+		if len(batch) == 0 {
+			return total, nil
+		}
+
+		models := make([]mongo.WriteModel, 0, len(batch))
+		for _, op := range batch {
+			models = append(models, mongo.NewUpdateOneModel().
+				SetFilter(bson.M{"_id": op.ID}).
+				SetUpdate(bson.M{"$set": bson.M{"accounts": model.ExtractAccounts(op.OpValue)}}))
+		}
+
+		opts := options.BulkWrite().SetOrdered(false)
+		res, err := c.operations.BulkWrite(ctx, models, opts)
+		if err != nil {
+			return total, errors.Wrap(err, "failed to backfill accounts")
+		}
+		total += res.ModifiedCount
+
+		if len(batch) < batchSize {
+			return total, nil
+		}
+	}
 }
 
 // BulkUpsertBlocks performs bulk upsert of blocks
@@ -165,7 +230,7 @@ func (c *Client) BulkUpsertBlocks(ctx context.Context, blocks []*model.Block) er
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := c.blocks.BulkWrite(ctx, models, opts)
 	duration := time.Since(startTime)
-	
+
 	// Record metrics
 	metrics.RecordMongoWrite("blocks", "bulk_upsert", duration, err)
 
@@ -196,7 +261,7 @@ func (c *Client) BulkUpsertTransactions(ctx context.Context, txs []*model.Transa
 	opts := options.BulkWrite().SetOrdered(false)
 	_, err := c.transactions.BulkWrite(ctx, models, opts)
 	duration := time.Since(startTime)
-	
+
 	// Record metrics
 	metrics.RecordMongoWrite("transactions", "bulk_upsert", duration, err)
 
@@ -230,7 +295,7 @@ func (c *Client) UpdateMaxBlock(ctx context.Context, blockNum uint32) error {
 			"updated_at": time.Now(),
 		},
 		"$setOnInsert": bson.M{
-			"_id":            "sync_state",
+			"_id":             "sync_state",
 			"cold_start_done": false,
 		},
 	}

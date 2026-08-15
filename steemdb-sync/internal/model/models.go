@@ -18,23 +18,24 @@ type Block struct {
 
 // Transaction represents a Steem transaction
 type Transaction struct {
-	ID          string    `bson:"_id" json:"id"`
-	BlockNum    uint32    `bson:"block_num" json:"block_num"`
-	TrxIndex    int32     `bson:"trx_index" json:"trx_index"`
-	Expiration  time.Time `bson:"expiration" json:"expiration"`
+	ID         string    `bson:"_id" json:"id"`
+	BlockNum   uint32    `bson:"block_num" json:"block_num"`
+	TrxIndex   int32     `bson:"trx_index" json:"trx_index"`
+	Expiration time.Time `bson:"expiration" json:"expiration"`
 }
 
 // Operation represents a Steem operation (real or virtual)
 type Operation struct {
-	ID        string                 `bson:"_id" json:"id"`
-	BlockNum  uint32                 `bson:"block_num" json:"block_num"`
-	TrxID     string                 `bson:"trx_id" json:"trx_id"`
-	TrxIndex  int32                  `bson:"trx_index" json:"trx_index"`
-	OpIndex   int32                  `bson:"op_index" json:"op_index"`
-	OpType    string                 `bson:"op_type" json:"op_type"`
-	OpValue   map[string]interface{} `bson:"op_value" json:"op_value"`
-	Virtual   bool                   `bson:"virtual" json:"virtual"`
-	Source    string                 `bson:"source" json:"source"` // "plugin" or "rpc"
+	ID       string                 `bson:"_id" json:"id"`
+	BlockNum uint32                 `bson:"block_num" json:"block_num"`
+	TrxID    string                 `bson:"trx_id" json:"trx_id"`
+	TrxIndex int32                  `bson:"trx_index" json:"trx_index"`
+	OpIndex  int32                  `bson:"op_index" json:"op_index"`
+	OpType   string                 `bson:"op_type" json:"op_type"`
+	OpValue  map[string]interface{} `bson:"op_value" json:"op_value"`
+	Virtual  bool                   `bson:"virtual" json:"virtual"`
+	Source   string                 `bson:"source" json:"source"` // "plugin" or "rpc"
+	Accounts []string               `bson:"accounts,omitempty" json:"accounts,omitempty"`
 }
 
 // Meta represents synchronization metadata
