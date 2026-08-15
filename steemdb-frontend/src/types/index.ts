@@ -4,18 +4,83 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
   message?: string;
+  // Present on paginated list endpoints
+  meta?: ResponseMeta;
+}
+
+export interface ResponseMeta {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+// AccountOperation is one /v1/accounts/:name/history entry (projected from
+// the operations collection)
+export interface AccountOperation {
+  id: string;
+  account: string;
+  block_num: number;
+  block_time: string;
+  op_type: string;
+  trx_id: string;
+  summary?: Record<string, unknown>;
 }
 
 // Blockchain types
+
+// Block is the /v1/blocks document shape (steemdb-web models.Block):
+// header fields from the local blocks collection plus a transactions list
+// enriched from the steem RPC.
 export interface Block {
-  number: number;
+  id: number;
+  block_num: number;
+  block_id: string;
   timestamp: string;
   witness: string;
-  transactions: number;
-  operations: number;
   previous: string;
   transaction_merkle_root: string;
   witness_signature: string;
+  transactions: BlockTransaction[];
+  transaction_count: number;
+  operation_count: number;
+}
+
+// BlockTransaction is one enriched transaction inside a Block document
+export interface BlockTransaction {
+  id: string;
+  ref_block_num: number;
+  ref_block_prefix: number;
+  expiration: string;
+  operations: BlockOperation[];
+  extensions: unknown[];
+  signatures: string[];
+  transaction_id: string;
+}
+
+// BlockOperation is an operations-collection document nested in a transaction
+export interface BlockOperation {
+  id: string;
+  block_num: number;
+  trx_id: string;
+  trx_index: number;
+  op_index: number;
+  op_type: string;
+  op_value: Record<string, unknown>;
+  virtual: boolean;
+}
+
+// BlockSummary is the compact block shape shared by the /v1/dashboard
+// latest_blocks array (transaction_count/operation_count) and the WebSocket
+// blocks channel (transactions/operations counts).
+export interface BlockSummary {
+  number: number;
+  timestamp: string;
+  witness: string;
+  transactions?: number;
+  operations?: number;
+  transaction_count?: number;
+  operation_count?: number;
 }
 
 export interface Transaction {
@@ -23,7 +88,7 @@ export interface Transaction {
   ref_block_prefix: number;
   expiration: string;
   operations: Operation[];
-  extensions: any[];
+  extensions: unknown[];
   signatures: string[];
   transaction_id: string;
   block_num: number;
@@ -103,12 +168,13 @@ export interface ExchangeRate {
 // Statistics types
 export interface GlobalStats {
   accounts: number;
-  blocks: number;
-  transactions: number;
-  operations: number;
-  witnesses: number;
-  last_block: number;
-  last_update: string;
+  blocks?: number;
+  transactions?: number;
+  operations?: number;
+  comments?: number;
+  witnesses?: number;
+  last_block?: number;
+  last_update?: string;
 }
 
 export interface NetworkPerformance {

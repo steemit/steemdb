@@ -6,6 +6,7 @@ import { NetworkPerformance } from '../components/dashboard/NetworkPerformance';
 import { RewardPool } from '../components/dashboard/RewardPool';
 import { GlobalProperties } from '../components/dashboard/GlobalProperties';
 import { useBlockchainStore, useWebSocketStore } from '../store';
+import type { BlockSummary } from '../types';
 import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
 import { wsClient } from '../lib/websocket';
 import { getDashboard } from '../lib/api';
@@ -47,13 +48,7 @@ function StatCard({ title, value, description, icon, trend }: StatCardProps) {
 }
 
 interface RecentBlockProps {
-  block: {
-    number: number;
-    timestamp: string;
-    witness: string;
-    transactions: number;
-    operations: number;
-  };
+  block: BlockSummary;
 }
 
 function RecentBlock({ block }: RecentBlockProps) {
@@ -72,7 +67,8 @@ function RecentBlock({ block }: RecentBlockProps) {
       </div>
       <div className="text-right">
         <div className="text-sm font-medium">
-          {block.transactions} txs, {block.operations} ops
+          {block.transactions ?? block.transaction_count ?? 0} txs,{' '}
+          {block.operations ?? block.operation_count ?? 0} ops
         </div>
         <div className="text-xs text-muted-foreground">
           {formatTimeAgo(block.timestamp)}
@@ -131,7 +127,17 @@ export function Dashboard() {
     });
 
     const unsubscribeState = wsClient.on('state', (message) => {
-      setStats(message.data);
+      // Map the WS state payload (accounts/comments/witnesses/last_block) onto
+      // the GlobalStats shape used by the store.
+      const d = message.data;
+      setStats({
+        accounts: d.accounts,
+        comments: d.comments,
+        witnesses: d.witnesses,
+        blocks: d.last_block,
+        last_block: d.last_block,
+        last_update: d.last_update,
+      });
     });
 
     // Subscribe to channels

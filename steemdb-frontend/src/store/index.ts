@@ -5,7 +5,7 @@ import type {
   WebSocketState, 
   BlockchainProps, 
   GlobalStats, 
-  Block,
+  BlockSummary,
   WebSocketMessage,
   NetworkPerformance,
   RewardPool
@@ -65,14 +65,14 @@ export const useWebSocketStore = create<WebSocketStore>()(
 interface BlockchainStore {
   props: BlockchainProps | null;
   stats: GlobalStats | null;
-  latestBlocks: Block[];
+  latestBlocks: BlockSummary[];
   currentBlock: number;
   networkPerformance: NetworkPerformance | null;
   rewardPool: RewardPool | null;
   setProps: (props: BlockchainProps) => void;
   setStats: (stats: GlobalStats) => void;
-  setLatestBlocks: (blocks: Block[]) => void;
-  addBlock: (block: Block) => void;
+  setLatestBlocks: (blocks: BlockSummary[]) => void;
+  addBlock: (block: BlockSummary) => void;
   setCurrentBlock: (blockNumber: number) => void;
   setNetworkPerformance: (perf: NetworkPerformance | null) => void;
   setRewardPool: (pool: RewardPool | null) => void;

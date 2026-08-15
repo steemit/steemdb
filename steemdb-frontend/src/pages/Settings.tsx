@@ -64,7 +64,7 @@ export function SettingsPage() {
         <CardContent className="space-y-3">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Version</span>
-            <span className="font-medium">1.0.0</span>
+            <span className="font-medium">{import.meta.env.VITE_APP_VERSION || 'dev'}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Service</span>
