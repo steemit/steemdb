@@ -33,6 +33,26 @@ ingest:
   listen_addr: ":8080"  # HTTP server listen address
   queue_size: 100000    # Maximum queue size for operations
 
+# Refresher settings (cmd/refresher; witness/funds/stats/clients tickers)
+refresher:
+  enabled: true
+  witness:
+    enabled: true
+    interval: "30s"
+  stats:
+    enabled: true
+    interval: "5m"
+  clients:
+    enabled: true
+    interval: "1h"
+  funds:
+    enabled: true
+    interval: "1h"
+  account_rescan:
+    enabled: false
+    interval: "24h"
+    rpc_batch_size: 100
+
 # Logging settings
 log:
   level: "info"   # debug, info, warn, error
