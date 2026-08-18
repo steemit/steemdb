@@ -5,12 +5,13 @@ import { Badge } from '../components/ui/Badge';
 import { useBlockchainStore, useWebSocketStore } from '../store';
 import { wsClient } from '../lib/websocket';
 import { formatNumber, formatTimeAgo } from '../lib/utils';
+import type { BlockData, OperationData } from '../types';
 
 interface FeedItem {
   id: string;
   type: 'block' | 'operation';
   timestamp: Date;
-  data: any;
+  data: BlockData | OperationData;
 }
 
 export function LiveFeedPage() {
@@ -21,24 +22,26 @@ export function LiveFeedPage() {
   useEffect(() => {
     // Subscribe to real-time updates
     const unsubscribeBlocks = wsClient.on('blocks', (message) => {
+      const block = message.data as BlockData;
       setFeedItems((prev) => [
         {
-          id: `block-${message.data.number}`,
+          id: `block-${block.number}`,
           type: 'block',
           timestamp: new Date(),
-          data: message.data,
+          data: block,
         },
         ...prev.slice(0, 99), // Keep last 100 items
       ]);
     });
 
     const unsubscribeOps = wsClient.on('operation', (message) => {
+      const op = message.data as OperationData;
       setFeedItems((prev) => [
         {
           id: `op-${Date.now()}-${Math.random()}`,
           type: 'operation',
           timestamp: new Date(),
-          data: message.data,
+          data: op,
         },
         ...prev.slice(0, 99),
       ]);
@@ -71,6 +74,7 @@ export function LiveFeedPage() {
 
   const renderFeedItem = (item: FeedItem) => {
     if (item.type === 'block') {
+      const block = item.data as BlockData;
       return (
         <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/50">
           <div className="flex-shrink-0">
@@ -81,9 +85,9 @@ export function LiveFeedPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-medium">Block #{formatNumber(item.data.number)}</div>
+                <div className="font-medium">Block #{formatNumber(block.number)}</div>
                 <div className="text-sm text-muted-foreground">
-                  by @{item.data.witness}
+                  by @{block.witness}
                 </div>
               </div>
               <div className="text-xs text-muted-foreground">
@@ -91,13 +95,14 @@ export function LiveFeedPage() {
               </div>
             </div>
             <div className="mt-2 flex items-center space-x-4 text-sm text-muted-foreground">
-              <span>{item.data.transactions || 0} transactions</span>
-              <span>{item.data.operations || 0} operations</span>
+              <span>{block.transactions || 0} transactions</span>
+              <span>{block.operations || 0} operations</span>
             </div>
           </div>
         </div>
       );
     } else {
+      const op = item.data as OperationData;
       return (
         <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/50">
           <div className="flex-shrink-0">
@@ -108,10 +113,10 @@ export function LiveFeedPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-medium capitalize">{item.data.type || 'Operation'}</div>
-                {item.data.accounts && item.data.accounts.length > 0 && (
+                <div className="font-medium capitalize">{op.type || 'Operation'}</div>
+                {op.accounts && op.accounts.length > 0 && (
                   <div className="text-sm text-muted-foreground">
-                    {item.data.accounts.map((acc: string) => `@${acc}`).join(', ')}
+                    {op.accounts.map((acc: string) => `@${acc}`).join(', ')}
                   </div>
                 )}
               </div>
@@ -119,9 +124,9 @@ export function LiveFeedPage() {
                 {formatTimeAgo(item.timestamp)}
               </div>
             </div>
-            {item.data.block && (
+            {op.block && (
               <div className="mt-2 text-sm text-muted-foreground">
-                Block #{formatNumber(item.data.block)}
+                Block #{formatNumber(op.block)}
               </div>
             )}
           </div>
@@ -199,7 +204,8 @@ export function LiveFeedPage() {
                     </div>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    {block.transactions} txs, {block.operations} ops
+                    {block.transactions ?? block.transaction_count ?? 0} txs,{' '}
+                    {block.operations ?? block.operation_count ?? 0} ops
                   </div>
                 </div>
               ))}

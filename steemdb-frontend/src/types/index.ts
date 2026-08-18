@@ -27,6 +27,22 @@ export interface AccountOperation {
   summary?: Record<string, unknown>;
 }
 
+// Chart data points (mirror the backend /v1/charts response items)
+export interface AccountGrowthPoint {
+  date: string;
+  count: number;
+}
+
+export interface BlockProductionPoint {
+  date: string;
+  blocks: number;
+}
+
+export interface TransactionVolumePoint {
+  date: string;
+  transactions: number;
+}
+
 // Blockchain types
 
 // Block is the /v1/blocks document shape (steemdb-web models.Block):
@@ -97,7 +113,7 @@ export interface Transaction {
 
 export interface Operation {
   type: string;
-  value: any;
+  value: unknown;
   block: number;
   timestamp: string;
   transaction_id: string;
@@ -189,7 +205,8 @@ export interface NetworkPerformance {
 }
 
 export interface RewardPool {
-  [key: string]: any; // Dynamic fields
+  // Dynamic key-value passthrough (reward fund snapshot fields)
+  [key: string]: unknown;
 }
 
 // Post/Comment types
@@ -199,7 +216,7 @@ export interface Post {
   permlink: string;
   title: string;
   body: string;
-  json_metadata?: Record<string, any>;
+  json_metadata?: Record<string, unknown>;
   parent_author: string;
   parent_permlink: string;
   category: string;
@@ -406,7 +423,7 @@ export interface BlockchainProps {
 export interface WebSocketMessage {
   type: 'block' | 'props' | 'state' | 'operation';
   channel: string;
-  data: any;
+  data: unknown;
   timestamp: string;
 }
 
@@ -423,7 +440,7 @@ export interface BlockData {
   operations: number;
 }
 
-export interface PropsData extends BlockchainProps {}
+export type PropsData = BlockchainProps;
 
 export interface StateData {
   accounts: number;
@@ -437,7 +454,7 @@ export interface OperationData {
   type: string;
   block: number;
   timestamp: string;
-  data: any;
+  data: unknown;
   accounts?: string[];
 }
 

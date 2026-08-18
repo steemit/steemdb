@@ -4,6 +4,9 @@ import type {
   Block,
   BlockSummary,
   AccountOperation,
+  AccountGrowthPoint,
+  BlockProductionPoint,
+  TransactionVolumePoint,
   Witness, 
   GlobalStats, 
   BlockchainProps,
@@ -167,20 +170,21 @@ class ApiClient {
   }
 
   // Chart data endpoints
-  async getAccountGrowthData(days: number = 30): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>(`/v1/charts/accounts/growth?days=${days}`);
+  async getAccountGrowthData(days: number = 30): Promise<ApiResponse<AccountGrowthPoint[]>> {
+    return this.request<AccountGrowthPoint[]>(`/v1/charts/accounts/growth?days=${days}`);
   }
 
-  async getBlockProductionData(days: number = 7): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>(`/v1/charts/blocks/production?days=${days}`);
+  async getBlockProductionData(days: number = 7): Promise<ApiResponse<BlockProductionPoint[]>> {
+    return this.request<BlockProductionPoint[]>(`/v1/charts/blocks/production?days=${days}`);
   }
 
-  async getTransactionVolumeData(days: number = 30): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>(`/v1/charts/transactions/volume?days=${days}`);
+  async getTransactionVolumeData(days: number = 30): Promise<ApiResponse<TransactionVolumePoint[]>> {
+    return this.request<TransactionVolumePoint[]>(`/v1/charts/transactions/volume?days=${days}`);
   }
 
-  async getWitnessVotingData(): Promise<ApiResponse<any[]>> {
-    return this.request<any[]>('/v1/charts/witnesses/voting');
+  async getWitnessVotingData(): Promise<ApiResponse<unknown[]>> {
+    // Backend stub: returns [] until the witness voting chart is implemented
+    return this.request<unknown[]>('/v1/charts/witnesses/voting');
   }
 
   // Health check

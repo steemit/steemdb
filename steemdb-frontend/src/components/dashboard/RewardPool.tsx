@@ -28,7 +28,7 @@ export function RewardPool({ data }: RewardPoolProps) {
   }
 
   // Filter out internal fields and format values
-  const formatValue = (key: string, value: any): string => {
+  const formatValue = (key: string, value: unknown): string => {
     // Handle timestamps
     if (key.includes('update') || key.includes('time') || key.includes('timestamp')) {
       if (typeof value === 'number' || typeof value === 'string') {
