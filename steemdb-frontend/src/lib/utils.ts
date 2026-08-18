@@ -104,7 +104,7 @@ export function getAvatarUrl(username: string): string {
 
 // Validate Steem username
 export function isValidSteemUsername(username: string): boolean {
-  const regex = /^[a-z][a-z0-9\-\.]{2,15}$/;
+  const regex = /^[a-z][a-z0-9.-]{2,15}$/;
   return regex.test(username);
 }
 
@@ -131,7 +131,7 @@ export function calculateVotingPower(lastVoteTime: Date, currentTime: Date = new
 }
 
 // Debounce function
-export function debounce<T extends (...args: any[]) => any>(
+export function debounce<T extends (...args: unknown[]) => unknown>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
@@ -147,7 +147,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
-  } catch (err) {
+  } catch {
     // Fallback for older browsers
     const textArea = document.createElement('textarea');
     textArea.value = text;
@@ -157,7 +157,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
       document.execCommand('copy');
       document.body.removeChild(textArea);
       return true;
-    } catch (fallbackErr) {
+    } catch {
       document.body.removeChild(textArea);
       return false;
     }

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Activity, Blocks, Users, Shield, TrendingUp, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -6,7 +6,7 @@ import { NetworkPerformance } from '../components/dashboard/NetworkPerformance';
 import { RewardPool } from '../components/dashboard/RewardPool';
 import { GlobalProperties } from '../components/dashboard/GlobalProperties';
 import { useBlockchainStore, useWebSocketStore } from '../store';
-import type { BlockSummary } from '../types';
+import type { BlockSummary, BlockchainProps, StateData } from '../types';
 import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
 import { wsClient } from '../lib/websocket';
 import { getDashboard } from '../lib/api';
@@ -94,7 +94,7 @@ export function Dashboard() {
   const { state: wsState } = useWebSocketStore();
 
   // Fetch dashboard data from REST API as fallback
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       const response = await getDashboard();
       if (response.success && response.data) {
@@ -111,7 +111,7 @@ export function Dashboard() {
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
     }
-  };
+  }, [setProps, setStats, setLatestBlocks, setNetworkPerformance, setRewardPool]);
 
   useEffect(() => {
     // Initial fetch from REST API
@@ -119,17 +119,17 @@ export function Dashboard() {
 
     // Subscribe to real-time data via WebSocket
     const unsubscribeProps = wsClient.on('props', (message) => {
-      setProps(message.data);
+      setProps(message.data as BlockchainProps);
     });
 
     const unsubscribeBlocks = wsClient.on('blocks', (message) => {
-      useBlockchainStore.getState().addBlock(message.data);
+      useBlockchainStore.getState().addBlock(message.data as BlockSummary);
     });
 
     const unsubscribeState = wsClient.on('state', (message) => {
       // Map the WS state payload (accounts/comments/witnesses/last_block) onto
       // the GlobalStats shape used by the store.
-      const d = message.data;
+      const d = message.data as StateData;
       setStats({
         accounts: d.accounts,
         comments: d.comments,
@@ -145,9 +145,12 @@ export function Dashboard() {
     wsClient.subscribe('blocks');
     wsClient.subscribe('state');
 
-    // Fallback: If WebSocket is disconnected and no data, fetch from REST API every 10 seconds
+    // Fallback: If WebSocket is disconnected and no data, fetch from REST API
+    // every 10 seconds. Reads the live store state to avoid stale closures.
     const fallbackInterval = setInterval(() => {
-      if (wsState === 'disconnected' && (!props || !stats || latestBlocks.length === 0)) {
+      const { state } = useWebSocketStore.getState();
+      const { props: p, stats: s, latestBlocks: blocks } = useBlockchainStore.getState();
+      if (state === 'disconnected' && (!p || !s || blocks.length === 0)) {
         fetchDashboardData();
       }
     }, 10000);
@@ -161,7 +164,7 @@ export function Dashboard() {
       wsClient.unsubscribe('state');
       clearInterval(fallbackInterval);
     };
-  }, [wsState]);
+  }, [wsState, fetchDashboardData, setProps, setStats]);
 
   const getConnectionStatus = () => {
     switch (wsState) {

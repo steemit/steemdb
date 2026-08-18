@@ -36,7 +36,7 @@ export function GlobalProperties({ data }: GlobalPropertiesProps) {
     );
   }
 
-  const formatValue = (key: string, value: any): string => {
+  const formatValue = (key: string, value: unknown): string => {
     // Handle VESTS fields (vesting_shares) - 6 decimal places
     if (key.includes('vesting_shares') || key.includes('shares') && !key.includes('fund')) {
       if (typeof value === 'string') {
