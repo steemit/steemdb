@@ -1,0 +1,40 @@
+# Dockerfile for the refresher service (cmd/refresher).
+# Maintains witness / witness_history / witness_misses / funds_history /
+# status counters / clients snapshots (replaces legacy history.py + witnesses.py).
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY configs/ ./configs/
+
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o refresher ./cmd/refresher
+
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates wget && \
+    addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
+
+WORKDIR /app
+
+COPY --from=builder /build/refresher /app/refresher
+COPY --from=builder /build/configs /app/configs
+
+RUN mkdir -p /app/logs && chown -R appuser:appuser /app
+
+USER appuser
+
+# Metrics endpoint
+EXPOSE 9093
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
+  CMD wget --quiet --tries=1 --spider http://localhost:9093/metrics || exit 1
+
+CMD ["/app/refresher", "-config", "/app/configs/config.yaml"]

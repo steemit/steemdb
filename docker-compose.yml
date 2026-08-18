@@ -110,6 +110,23 @@ services:
     depends_on:
       - prometheus
 
+  # SteemDB Refresher (witness/funds/stats/clients snapshots; keeps the
+  # dashboard and labs endpoints fed — replaces legacy history.py + witnesses.py)
+  steemdb-refresher:
+    build:
+      context: ./steemdb-sync
+      dockerfile: Dockerfile.refresher
+    environment:
+      # Overrides the URI baked into configs/config.yaml (no auth on this mongo)
+      - MONGO_URI=mongodb://mongo:27017/steemdb
+      - RPC_ENDPOINT=${RPC_ENDPOINT:-https://api.steemit.com}
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+
   # Note: Nginx is now integrated into steemdb-web container
 
 volumes:
