@@ -48,6 +48,14 @@ type TransactionVolumePoint struct {
 	Transactions int64  `json:"transactions"`
 }
 
+// WitnessVotingPoint represents the daily total voting weight across all
+// snapshotted witnesses (from witness_history)
+type WitnessVotingPoint struct {
+	Date      string  `json:"date"`
+	Votes     float64 `json:"votes"`
+	Witnesses int     `json:"witnesses"`
+}
+
 // GetAccountGrowth returns daily new account creation counts for the past N days
 func (s *ChartsService) GetAccountGrowth(ctx context.Context, days int) ([]AccountGrowthPoint, error) {
 	if days <= 0 {
@@ -236,11 +244,73 @@ func (s *ChartsService) GetTransactionVolume(ctx context.Context, days int) ([]T
 	return results, nil
 }
 
-// GetWitnessVoting returns witness voting distribution data.
-// The data source is now available: steemdb-sync's refresher process writes
-// daily witness_history snapshots (_id = owner|YYYYMMDD). Implementation is
-// deferred until the frontend wires up the chart (no page currently calls
-// this endpoint).
-func (s *ChartsService) GetWitnessVoting(ctx context.Context) ([]interface{}, error) {
-	return []interface{}{}, nil
+// GetWitnessVoting returns the daily total witness voting weight from the
+// witness_history snapshots maintained by steemdb-sync's refresher process.
+// Snapshot ids are "owner|YYYYMMDD", so the day bucket is extracted by
+// splitting on "|" — the YYYYMMDD strings sort lexicographically.
+func (s *ChartsService) GetWitnessVoting(ctx context.Context, days int) ([]WitnessVotingPoint, error) {
+	if days <= 0 {
+		days = 30
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("20060102")
+
+	pipeline := []bson.M{
+		{
+			"$project": bson.M{
+				"parts": bson.M{"$split": []interface{}{"$_id", "|"}},
+				"votes": 1,
+			},
+		},
+		{
+			"$project": bson.M{
+				"date":  bson.M{"$arrayElemAt": []interface{}{"$parts", 1}},
+				"votes": 1,
+			},
+		},
+		{
+			"$match": bson.M{
+				"date": bson.M{"$gte": cutoff},
+			},
+		},
+		{
+			"$group": bson.M{
+				"_id":       "$date",
+				"votes":     bson.M{"$sum": "$votes"},
+				"witnesses": bson.M{"$sum": 1},
+			},
+		},
+		{
+			"$sort": bson.M{"_id": 1},
+		},
+	}
+
+	cursor, err := s.db.Collection("witness_history").Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate witness voting: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	results := make([]WitnessVotingPoint, 0)
+	for cursor.Next(ctx) {
+		var row struct {
+			ID        string  `bson:"_id"`
+			Votes     float64 `bson:"votes"`
+			Witnesses int     `bson:"witnesses"`
+		}
+		if err := cursor.Decode(&row); err != nil {
+			s.logger.Error("Failed to decode witness voting row", utils.Error(err))
+			continue
+		}
+		results = append(results, WitnessVotingPoint{
+			Date:      row.ID,
+			Votes:     row.Votes,
+			Witnesses: row.Witnesses,
+		})
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate witness voting rows: %w", err)
+	}
+
+	return results, nil
 }
