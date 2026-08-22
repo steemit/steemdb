@@ -85,7 +85,14 @@ func (h *ChartsHandler) GetTransactionVolume(c *gin.Context) {
 
 // GetWitnessVoting handles GET /api/v1/charts/witnesses/voting
 func (h *ChartsHandler) GetWitnessVoting(c *gin.Context) {
-	data, err := h.chartsService.GetWitnessVoting(c.Request.Context())
+	days := 30
+	if d := c.Query("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 && parsed <= 365 {
+			days = parsed
+		}
+	}
+
+	data, err := h.chartsService.GetWitnessVoting(c.Request.Context(), days)
 	if err != nil {
 		h.logger.Error("Failed to get witness voting chart", utils.Error(err))
 		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve witness voting data")

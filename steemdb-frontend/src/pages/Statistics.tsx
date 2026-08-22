@@ -1,11 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, Activity, Users, Blocks, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { getGlobalStats, getBlockchainProps, getAccountGrowthData, getBlockProductionData, getTransactionVolumeData } from '../lib/api';
+import { getGlobalStats, getBlockchainProps, getAccountGrowthData, getBlockProductionData, getTransactionVolumeData, getWitnessVotingData } from '../lib/api';
 import { formatNumber, formatCurrency } from '../lib/utils';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 import type { ReactNode } from 'react';
+
+// compactVotes renders huge vest-based vote totals (1e18+) readably
+function compactVotes(value: number): string {
+  return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(value);
+}
 
 // ChartCard wraps a chart with consistent loading / error / empty states so
 // charts never silently disappear when an endpoint fails.
@@ -80,6 +85,11 @@ export function StatisticsPage() {
   const transactionVolume = useQuery({
     queryKey: ['transaction-volume'],
     queryFn: () => getTransactionVolumeData(30),
+  });
+
+  const witnessVoting = useQuery({
+    queryKey: ['witness-voting'],
+    queryFn: () => getWitnessVotingData(30),
   });
 
   const stats = statsData?.data;
@@ -200,6 +210,27 @@ export function StatisticsPage() {
               <Tooltip />
               <Legend />
               <Line type="monotone" dataKey="transactions" stroke="#82ca9d" name="Transactions" />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard
+          className="md:col-span-2"
+          title="Witness Voting (30 days)"
+          description="Total voting weight across snapshotted witnesses per day"
+          isLoading={witnessVoting.isLoading}
+          isError={witnessVoting.isError || witnessVoting.data?.success === false}
+          isEmpty={(witnessVoting.data?.data?.length ?? 0) === 0}
+          emptyMessage="No witness voting snapshots in the last 30 days"
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={witnessVoting.data?.data}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis tickFormatter={compactVotes} />
+              <Tooltip formatter={(value: number) => compactVotes(value)} />
+              <Legend />
+              <Line type="monotone" dataKey="votes" stroke="#ffc658" name="Total Votes" />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>

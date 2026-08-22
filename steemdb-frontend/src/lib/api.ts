@@ -7,6 +7,7 @@ import type {
   AccountGrowthPoint,
   BlockProductionPoint,
   TransactionVolumePoint,
+  WitnessVotingPoint,
   Witness, 
   GlobalStats, 
   BlockchainProps,
@@ -182,9 +183,8 @@ class ApiClient {
     return this.request<TransactionVolumePoint[]>(`/v1/charts/transactions/volume?days=${days}`);
   }
 
-  async getWitnessVotingData(): Promise<ApiResponse<unknown[]>> {
-    // Backend stub: returns [] until the witness voting chart is implemented
-    return this.request<unknown[]>('/v1/charts/witnesses/voting');
+  async getWitnessVotingData(days: number = 30): Promise<ApiResponse<WitnessVotingPoint[]>> {
+    return this.request<WitnessVotingPoint[]>(`/v1/charts/witnesses/voting?days=${days}`);
   }
 
   // Health check

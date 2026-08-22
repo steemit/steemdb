@@ -43,6 +43,12 @@ export interface TransactionVolumePoint {
   transactions: number;
 }
 
+export interface WitnessVotingPoint {
+  date: string; // YYYYMMDD
+  votes: number;
+  witnesses: number;
+}
+
 // Blockchain types
 
 // Block is the /v1/blocks document shape (steemdb-web models.Block):
