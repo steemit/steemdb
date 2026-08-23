@@ -72,8 +72,8 @@ export function WitnessesPage() {
     );
   }
 
-  const witnesses = data.data?.data || [];
-  const totalPages = data.data?.totalPages || 1;
+  const witnesses = data.data || [];
+  const totalPages = data.meta?.total_pages || 1;
 
   return (
     <div className="space-y-6">

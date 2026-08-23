@@ -72,9 +72,9 @@ export function PostsPage() {
     );
   }
 
-  const posts = data.data?.data || [];
-  const totalPages = data.data?.totalPages || 1;
-  const total = data.data?.total || 0;
+  const posts = data.data || [];
+  const totalPages = data.meta?.total_pages || 1;
+  const total = data.meta?.total || 0;
 
   return (
     <div className="space-y-6">

@@ -80,8 +80,8 @@ export function AccountsPage() {
     );
   }
 
-  const accounts = data.data?.data || [];
-  const totalPages = data.data?.totalPages || 1;
+  const accounts = data.data || [];
+  const totalPages = data.meta?.total_pages || 1;
 
   return (
     <div className="space-y-6">

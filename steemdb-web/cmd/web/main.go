@@ -104,6 +104,9 @@ func main() {
 	// Add middleware
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	if config.API.CORS.Enabled {
+		router.Use(api.CORSMiddleware(config.API.CORS))
+	}
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
