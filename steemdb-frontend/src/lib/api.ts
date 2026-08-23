@@ -25,7 +25,6 @@ import type {
   Clients,
   Benefactors,
   PendingPost,
-  PaginatedResponse,
   PaginationParams 
 } from '../types';
 
@@ -78,7 +77,7 @@ class ApiClient {
     return this.request<Account>(`/v1/accounts/${username}`);
   }
 
-  async getAccounts(params: PaginationParams & { search?: string }): Promise<ApiResponse<PaginatedResponse<Account>>> {
+  async getAccounts(params: PaginationParams & { search?: string }): Promise<ApiResponse<Account[]>> {
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
       limit: params.limit.toString(),
@@ -87,7 +86,7 @@ class ApiClient {
       ...(params.search && { search: params.search }),
     });
 
-    return this.request<PaginatedResponse<Account>>(`/v1/accounts?${searchParams}`);
+    return this.request<Account[]>(`/v1/accounts?${searchParams}`);
   }
 
   async getAccountHistory(username: string, params: PaginationParams): Promise<ApiResponse<AccountOperation[]>> {
@@ -104,7 +103,7 @@ class ApiClient {
     return this.request<Block>(`/v1/blocks/${blockNumber}`);
   }
 
-  async getBlocks(params: PaginationParams): Promise<ApiResponse<PaginatedResponse<Block>>> {
+  async getBlocks(params: PaginationParams): Promise<ApiResponse<Block[]>> {
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
       limit: params.limit.toString(),
@@ -112,7 +111,7 @@ class ApiClient {
       ...(params.order && { order: params.order }),
     });
 
-    return this.request<PaginatedResponse<Block>>(`/v1/blocks?${searchParams}`);
+    return this.request<Block[]>(`/v1/blocks?${searchParams}`);
   }
 
   async getLatestBlocks(limit: number = 10): Promise<ApiResponse<Block[]>> {
@@ -120,7 +119,7 @@ class ApiClient {
   }
 
   // Witness endpoints
-  async getWitnesses(params: PaginationParams): Promise<ApiResponse<PaginatedResponse<Witness>>> {
+  async getWitnesses(params: PaginationParams): Promise<ApiResponse<Witness[]>> {
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
       limit: params.limit.toString(),
@@ -128,7 +127,7 @@ class ApiClient {
       ...(params.order && { order: params.order }),
     });
 
-    return this.request<PaginatedResponse<Witness>>(`/v1/witnesses?${searchParams}`);
+    return this.request<Witness[]>(`/v1/witnesses?${searchParams}`);
   }
 
   async getWitness(username: string): Promise<ApiResponse<Witness>> {
@@ -193,7 +192,7 @@ class ApiClient {
   }
 
   // Post/Comment endpoints
-  async getPosts(params: PaginationParams & { sort_by?: string; sort_order?: 'asc' | 'desc' }): Promise<ApiResponse<PaginatedResponse<Post>>> {
+  async getPosts(params: PaginationParams & { sort_by?: string; sort_order?: 'asc' | 'desc' }): Promise<ApiResponse<Post[]>> {
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
       limit: params.limit.toString(),
@@ -201,7 +200,7 @@ class ApiClient {
       ...(params.sort_order && { sort_order: params.sort_order }),
     });
 
-    return this.request<PaginatedResponse<Post>>(`/v1/posts?${searchParams}`);
+    return this.request<Post[]>(`/v1/posts?${searchParams}`);
   }
 
   async getPost(author: string, permlink: string): Promise<ApiResponse<Post>> {
@@ -297,6 +296,17 @@ class ApiClient {
 // Create and export API client instance
 export const apiClient = new ApiClient();
 
+// Proxy that binds every method on property access, so destructured exports
+// (export const { getAccount } = ...) keep their `this` binding. Without this,
+// destructured methods throw "Cannot read properties of undefined (reading
+// 'request')" because `this` is undefined at call time.
+const boundClient: ApiClient = new Proxy(apiClient, {
+  get(target, prop) {
+    const value = Reflect.get(target, prop, target);
+    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+  },
+});
+
 // Export individual methods for easier use
 export const {
   getAccount,
@@ -333,4 +343,4 @@ export const {
   getClients,
   getBenefactors,
   getPending,
-} = apiClient;
+} = boundClient;

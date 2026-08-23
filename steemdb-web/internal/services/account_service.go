@@ -30,10 +30,13 @@ func NewAccountService(db *database.MongoDB, redis *database.Redis, logger utils
 	}
 }
 
-// GetAccount retrieves an account by name
-func (s *AccountService) GetAccount(ctx context.Context, name string) (*models.Account, error) {
+// GetAccount retrieves an account by name. Decoded into a generic map: the
+// account documents are written by steemdb-sync from raw RPC values (e.g.
+// proxied_vsf_votes mixes strings and numbers), which a rigid struct cannot
+// decode — the passthrough shape matches what the frontend consumes anyway.
+func (s *AccountService) GetAccount(ctx context.Context, name string) (map[string]interface{}, error) {
 	collection := s.db.Collection("account")
-	var account models.Account
+	var account bson.M
 
 	err := collection.FindOne(ctx, bson.M{"name": name}).Decode(&account)
 	if err != nil {
@@ -43,7 +46,7 @@ func (s *AccountService) GetAccount(ctx context.Context, name string) (*models.A
 		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
 
-	return &account, nil
+	return account, nil
 }
 
 // GetAccounts retrieves multiple accounts with pagination
@@ -81,23 +84,12 @@ func (s *AccountService) GetAccounts(ctx context.Context, params models.Paginati
 
 	var accounts []models.AccountSummary
 	for cursor.Next(ctx) {
-		var account models.Account
-		if err := cursor.Decode(&account); err != nil {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
 			s.logger.Error("Failed to decode account", utils.Error(err))
 			continue
 		}
-
-		summary := models.AccountSummary{
-			Name:          account.Name,
-			Reputation:    account.Reputation,
-			VestingShares: account.VestingShares,
-			Balance:       account.Balance,
-			SBDBalance:    account.SBDBalance,
-			PostCount:     account.PostCount,
-			LastPost:      account.LastPost,
-			Created:       account.Created,
-		}
-		accounts = append(accounts, summary)
+		accounts = append(accounts, accountSummaryFromMap(doc))
 	}
 
 	return &models.AccountSearchResult{
@@ -139,23 +131,12 @@ func (s *AccountService) SearchAccounts(ctx context.Context, query string, limit
 
 	var accounts []models.AccountSummary
 	for cursor.Next(ctx) {
-		var account models.Account
-		if err := cursor.Decode(&account); err != nil {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
 			s.logger.Error("Failed to decode account", utils.Error(err))
 			continue
 		}
-
-		summary := models.AccountSummary{
-			Name:          account.Name,
-			Reputation:    account.Reputation,
-			VestingShares: account.VestingShares,
-			Balance:       account.Balance,
-			SBDBalance:    account.SBDBalance,
-			PostCount:     account.PostCount,
-			LastPost:      account.LastPost,
-			Created:       account.Created,
-		}
-		accounts = append(accounts, summary)
+		accounts = append(accounts, accountSummaryFromMap(doc))
 	}
 
 	return &models.AccountSearchResult{
@@ -354,24 +335,64 @@ func (s *AccountService) GetTopAccounts(ctx context.Context, criteria string, li
 
 	var accounts []models.AccountSummary
 	for cursor.Next(ctx) {
-		var account models.Account
-		if err := cursor.Decode(&account); err != nil {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
 			s.logger.Error("Failed to decode account", utils.Error(err))
 			continue
 		}
-
-		summary := models.AccountSummary{
-			Name:          account.Name,
-			Reputation:    account.Reputation,
-			VestingShares: account.VestingShares,
-			Balance:       account.Balance,
-			SBDBalance:    account.SBDBalance,
-			PostCount:     account.PostCount,
-			LastPost:      account.LastPost,
-			Created:       account.Created,
-		}
-		accounts = append(accounts, summary)
+		accounts = append(accounts, accountSummaryFromMap(doc))
 	}
 
 	return accounts, nil
+}
+
+// accountSummaryFromMap projects a raw account document (decoded as a generic
+// map — sync writes raw RPC values that a rigid struct cannot decode) into an
+// AccountSummary with tolerant type coercion.
+func accountSummaryFromMap(m bson.M) models.AccountSummary {
+	return models.AccountSummary{
+		Name:          mapString(m, "name"),
+		Reputation:    int64(mapFloat(m, "reputation")),
+		VestingShares: mapFloat(m, "vesting_shares"),
+		Balance:       mapFloat(m, "balance"),
+		SBDBalance:    mapFloat(m, "sbd_balance"),
+		PostCount:     int(mapFloat(m, "post_count")),
+		LastPost:      mapTime(m, "last_post"),
+		Created:       mapTime(m, "created"),
+	}
+}
+
+// mapString extracts a string field from a raw document
+func mapString(m bson.M, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// mapFloat coerces a numeric field (BSON int32/int64/float64 or numeric string)
+// to float64
+func mapFloat(m bson.M, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case int32:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case string:
+		var f float64
+		if _, err := fmt.Sscanf(v, "%g", &f); err == nil {
+			return f
+		}
+	}
+	return 0
+}
+
+// mapTime extracts a datetime field, falling back to the zero time
+func mapTime(m bson.M, key string) time.Time {
+	if t, ok := m[key].(time.Time); ok {
+		return t
+	}
+	return time.Time{}
 }

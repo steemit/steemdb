@@ -91,10 +91,17 @@ export const useBlockchainStore = create<BlockchainStore>()(
       setStats: (stats) => set({ stats }),
       setLatestBlocks: (blocks) => set({ latestBlocks: blocks }),
       addBlock: (block) =>
-        set((state) => ({
-          latestBlocks: [block, ...state.latestBlocks.slice(0, 9)], // Keep only 10 latest
-          currentBlock: Math.max(state.currentBlock, block.number),
-        })),
+        set((state) => {
+          // Skip duplicates: the REST latest_blocks preload and the WS
+          // historical replay can deliver the same block number twice.
+          if (state.latestBlocks.some((b) => b.number === block.number)) {
+            return state;
+          }
+          return {
+            latestBlocks: [block, ...state.latestBlocks.slice(0, 9)], // Keep only 10 latest
+            currentBlock: Math.max(state.currentBlock, block.number),
+          };
+        }),
       setCurrentBlock: (blockNumber) => set({ currentBlock: blockNumber }),
       setNetworkPerformance: (perf) => set({ networkPerformance: perf }),
       setRewardPool: (pool) => set({ rewardPool: pool }),
