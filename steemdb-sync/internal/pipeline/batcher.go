@@ -26,12 +26,10 @@ type Batcher struct {
 	stopOnce      sync.Once
 	maxBlockSeen  uint32
 	maxBlockMu    sync.RWMutex
-	// Track block information for each block number
+	// Pending block information: entries are deleted once the block has been
+	// written to MongoDB, so the map only holds in-flight and block-only blocks.
 	blocks   map[uint32]*blockInfo
 	blocksMu sync.RWMutex
-	// Track which blocks have been written to MongoDB
-	blocksWritten   map[uint32]bool
-	blocksWrittenMu sync.RWMutex
 }
 
 // blockInfo stores block information temporarily
@@ -59,7 +57,6 @@ func NewBatcher(cfg *config.Config, mongoClient *mongo.Client) (*Batcher, error)
 		ctx:           ctx,
 		cancel:        cancel,
 		blocks:        make(map[uint32]*blockInfo),
-		blocksWritten: make(map[uint32]bool),
 	}
 
 	return b, nil
@@ -75,9 +72,9 @@ func (b *Batcher) Start() {
 func (b *Batcher) Stop() error {
 	b.stopOnce.Do(func() {
 		// Close the channel to let run() drain buffered operations and flush remaining batch.
-	close(b.ops)
+		close(b.ops)
 		// Cancel context to prevent new AddOperation calls from blocking/panicking on a closed channel.
-	b.cancel()
+		b.cancel()
 	})
 	b.wg.Wait()
 	return nil
@@ -234,12 +231,14 @@ func (b *Batcher) flushBatch(ctx context.Context, batch []*model.Operation) erro
 			return errors.Wrap(err, "failed to flush blocks batch")
 		}
 
-		// Mark blocks as written
-		b.blocksWrittenMu.Lock()
+		// Delete flushed entries so the pending map stays bounded; a concurrent
+		// re-add of the same block is harmless (the write is an idempotent
+		// upsert of identical content).
+		b.blocksMu.Lock()
 		for _, block := range blocksToWrite {
-			b.blocksWritten[block.BlockNum] = true
+			delete(b.blocks, block.BlockNum)
 		}
-		b.blocksWrittenMu.Unlock()
+		b.blocksMu.Unlock()
 	}
 
 	duration := time.Since(startTime)
@@ -332,15 +331,15 @@ func (b *Batcher) FlushOperationsAndBlocks(ctx context.Context, ops []*model.Ope
 			log.Printf("[Batcher] [DEBUG] Blocks written successfully")
 		}
 
-		// Mark blocks as written
-		b.blocksWrittenMu.Lock()
+		// Delete flushed entries so the pending map stays bounded
+		b.blocksMu.Lock()
 		for _, block := range blocksToWrite {
-			b.blocksWritten[block.BlockNum] = true
+			delete(b.blocks, block.BlockNum)
 			if block.BlockNum < 1000 {
 				log.Printf("[Batcher] [DEBUG] Marked block=%d as written", block.BlockNum)
 			}
 		}
-		b.blocksWrittenMu.Unlock()
+		b.blocksMu.Unlock()
 	}
 
 	// Also flush any other unwritten blocks (block-only blocks)
@@ -348,30 +347,28 @@ func (b *Batcher) FlushOperationsAndBlocks(ctx context.Context, ops []*model.Ope
 }
 
 // flushUnwrittenBlocks writes all blocks that haven't been written yet to MongoDB
-// This includes block-only blocks (blocks without operations)
+// This includes block-only blocks (blocks without operations). Entries present
+// in the pending map are unwritten by definition; failed writes leave entries
+// behind so the next sweep retries them.
 func (b *Batcher) flushUnwrittenBlocks(ctx context.Context) error {
 	b.blocksMu.RLock()
-	b.blocksWrittenMu.RLock()
 
 	blocksToWrite := make([]*model.Block, 0)
 	hasLowBlocks := false
 	for blockNum, blockInfo := range b.blocks {
-		if !b.blocksWritten[blockNum] {
-			blocksToWrite = append(blocksToWrite, &model.Block{
-				ID:               blockNum,
-				BlockNum:         blockNum,
-				BlockID:          blockInfo.BlockID,
-				Timestamp:        blockInfo.Timestamp,
-				TransactionCount: 0, // Will be updated by aggregation if needed
-			})
-			if blockNum < 1000 {
-				hasLowBlocks = true
-				log.Printf("[Batcher] [DEBUG] Found unwritten block=%d, block_id=%s", blockNum, blockInfo.BlockID)
-			}
+		blocksToWrite = append(blocksToWrite, &model.Block{
+			ID:               blockNum,
+			BlockNum:         blockNum,
+			BlockID:          blockInfo.BlockID,
+			Timestamp:        blockInfo.Timestamp,
+			TransactionCount: 0, // Will be updated by aggregation if needed
+		})
+		if blockNum < 1000 {
+			hasLowBlocks = true
+			log.Printf("[Batcher] [DEBUG] Found unwritten block=%d, block_id=%s", blockNum, blockInfo.BlockID)
 		}
 	}
 
-	b.blocksWrittenMu.RUnlock()
 	b.blocksMu.RUnlock()
 
 	if len(blocksToWrite) == 0 {
@@ -394,15 +391,15 @@ func (b *Batcher) flushUnwrittenBlocks(ctx context.Context) error {
 		log.Printf("[Batcher] [DEBUG] Unwritten blocks flushed successfully")
 	}
 
-	// Mark blocks as written
-	b.blocksWrittenMu.Lock()
+	// Delete flushed entries so the pending map stays bounded
+	b.blocksMu.Lock()
 	for _, block := range blocksToWrite {
-		b.blocksWritten[block.BlockNum] = true
+		delete(b.blocks, block.BlockNum)
 		if block.BlockNum < 1000 {
 			log.Printf("[Batcher] [DEBUG] Marked unwritten block=%d as written", block.BlockNum)
 		}
 	}
-	b.blocksWrittenMu.Unlock()
+	b.blocksMu.Unlock()
 
 	return nil
 }
