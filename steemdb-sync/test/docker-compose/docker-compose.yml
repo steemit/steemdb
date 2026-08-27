@@ -103,6 +103,12 @@ services:
   steemd:
     image: ${STEEMD_IMAGE:-steemd:with-ingest}
     container_name: cold-ingest-steemd
+    # RocksDB opens one fd per .sst file; at deep replay heights (>18M blocks)
+    # the inherited soft limit (1024 on this host) causes EMFILE crashes.
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
     environment:
       - INGEST_ENDPOINT=${INGEST_ENDPOINT:-http://cold-ingest:8080/ingest/applied_ops}
       - INGEST_HTTP_TIMEOUT=${INGEST_HTTP_TIMEOUT:-5000}
