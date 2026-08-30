@@ -112,18 +112,25 @@ func (s *BlockService) enrichTransactions(block *models.Block, blockNum int64) {
 func (s *BlockService) GetBlocks(ctx context.Context, params models.PaginationParams, sortParams models.SortParams) (*models.BlockSearchResult, error) {
 	collection := s.db.Collection("blocks")
 
-	// Build sort options
-	sortField := "block_num"
+	// Build sort options. Blocks store the block number as _id, so sorting by
+	// _id uses the index; block_num has no index and forces an in-memory sort
+	// over the whole collection.
+	sortField := "_id"
 	sortOrder := -1
 	if sortParams.SortBy != "" {
 		sortField = sortParams.SortBy
+	}
+	if sortField == "block_num" {
+		sortField = "_id"
 	}
 	if sortParams.SortOrder == "asc" {
 		sortOrder = 1
 	}
 
-	// Count total documents
-	total, err := collection.CountDocuments(ctx, bson.M{})
+	// Count total documents. An exact count scans the whole _id index of a
+	// 20M-block collection (~10s); the explorer list page only needs an
+	// approximate total for pagination, so use the collection metadata count.
+	total, err := collection.EstimatedDocumentCount(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count blocks: %w", err)
 	}
@@ -173,7 +180,7 @@ func (s *BlockService) GetLatestBlocks(ctx context.Context, limit int) ([]models
 	collection := s.db.Collection("blocks")
 
 	findOptions := options.Find().
-		SetSort(bson.M{"block_num": -1}).
+		SetSort(bson.M{"_id": -1}).
 		SetLimit(int64(limit))
 
 	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
@@ -219,7 +226,7 @@ func (s *BlockService) GetBlocksByWitness(ctx context.Context, witness string, p
 	// Calculate pagination
 	skip := (params.Page - 1) * params.PageSize
 	findOptions := options.Find().
-		SetSort(bson.M{"block_num": -1}).
+		SetSort(bson.M{"_id": -1}).
 		SetSkip(int64(skip)).
 		SetLimit(int64(params.PageSize))
 
@@ -294,7 +301,7 @@ func (s *BlockService) GetBlockStats(ctx context.Context) (*models.BlockStats, e
 
 	// Get latest block
 	var latestBlock models.Block
-	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"block_num": -1})).Decode(&latestBlock)
+	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"_id": -1})).Decode(&latestBlock)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest block: %w", err)
 	}
