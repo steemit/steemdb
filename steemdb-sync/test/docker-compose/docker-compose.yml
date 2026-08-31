@@ -75,6 +75,12 @@ services:
       mongo:
         condition: service_healthy
     command: ["/app/processor", "-config", "/app/configs/config.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9092/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # Refresher Service (witness/funds/stats/clients snapshots; legacy history.py + witnesses.py)
@@ -97,6 +103,12 @@ services:
       mongo:
         condition: service_healthy
     command: ["/app/refresher", "-config", "/app/configs/config.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # Steemd Node with Ingest Plugin

@@ -57,14 +57,16 @@ func (s *statsRefresher) tick(ctx context.Context) {
 		var value int64
 		var err error
 		if c.id[:1] == "t" {
-			// Real transactions: distinct non-empty trx_id in the window.
-			// Virtual operations carry trx_id "" and are excluded.
-			var ids []interface{}
-			ids, err = s.opsCol.Distinct(ctx, "trx_id", bson.M{
+			// Real transactions: every transaction has exactly one op with
+			// op_index 0, so counting those equals counting distinct non-empty
+			// trx_id values (verified against distinct on chain data) — and,
+			// unlike the distinct command, it does not hit the 16MB BSON
+			// response cap at scale (Location17217 on ~1M-op windows).
+			value, err = s.opsCol.CountDocuments(ctx, bson.M{
 				"block_num": bson.M{"$gt": c.window},
 				"trx_id":    bson.M{"$ne": ""},
+				"op_index":  0,
 			})
-			value = int64(len(ids))
 		} else {
 			value, err = s.opsCol.CountDocuments(ctx, bson.M{
 				"block_num": bson.M{"$gt": c.window},

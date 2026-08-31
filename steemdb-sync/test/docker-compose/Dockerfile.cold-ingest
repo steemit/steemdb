@@ -53,9 +53,9 @@ USER appuser
 # Expose ports
 EXPOSE 8080 9090
 
-# Health check
-HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=10s \
-  CMD wget --quiet --tries=1 --spider http://localhost:8080/metrics || exit 1
+# Health checks are defined per service in docker-compose.yml: this image runs
+# four binaries (cold_ingest:8080, processor:9092, refresher:9093) with metrics
+# on different ports.
 
 # Run the service
 CMD ["/app/cold_ingest", "-config", "/app/configs/config.yaml"]
