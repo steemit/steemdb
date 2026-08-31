@@ -11,6 +11,7 @@ require (
 	github.com/steemit/steemutil v0.0.17
 	go.mongodb.org/mongo-driver v1.12.1
 	go.uber.org/zap v1.26.0
+	golang.org/x/sync v0.16.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -69,7 +70,6 @@ require (
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/mod v0.25.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	golang.org/x/tools v0.34.0 // indirect

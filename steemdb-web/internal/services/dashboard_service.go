@@ -3,10 +3,12 @@ package services
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/steemit/steemdb/web/internal/database"
 	"github.com/steemit/steemdb/web/internal/models"
@@ -47,123 +49,235 @@ type DashboardStats struct {
 	Witnesses int64 `json:"witnesses"`
 }
 
-// GetDashboardData gets dashboard data, fetching from upstream if local data is stale
+// GetDashboardData gets dashboard data, fetching from upstream if local data is stale.
+// The local probe, the upstream props RPC, network performance and reward pool lookups
+// are independent and run concurrently; block/witness/count fetches inside the chosen
+// branch run concurrently as well.
+//
+// Degradation policy: no single component fails the whole request. Every probe
+// (props, network performance, reward pool, individual blocks, counts) logs a
+// warning and contributes a zero value on failure. A props failure selects the
+// local branch; a block fetch failure drops that block from the window. This
+// is deliberate — the dashboard should render with whatever data is available.
+//
+// Schema assumption: the blocks collection is written by steemdb-sync with
+// _id = block number (see steemdb-sync internal/mongo BulkUpsertBlocks), which
+// is what makes the _id sorts index-backed. Verify that invariant if the sync
+// schema changes.
+
 func (s *DashboardService) GetDashboardData(ctx context.Context) (*DashboardData, error) {
-	// First, try to get latest block from database
-	collection := s.db.Collection("blocks")
-	var latestBlock struct {
-		BlockNum  uint32    `bson:"block_num"`
-		Timestamp time.Time `bson:"timestamp"`
-	}
+	var (
+		latestBlockNum int64
+		upstreamProps  *steem.DynamicGlobalProperties
+		networkPerf    *models.NetworkPerformance
+		rewardPool     map[string]interface{}
+	)
 
-	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"block_num": -1})).Decode(&latestBlock)
+	// gctx is canceled when the group's work ends; downstream calls must use
+	// the original request ctx, which stays live.
+	g, gctx := errgroup.WithContext(ctx)
 
-	// Get current block from upstream to compare
-	upstreamProps, err := s.steemClient.GetDynamicGlobalProperties()
-	if err != nil {
-		s.logger.Error("Failed to get upstream properties", utils.Error(err))
-		// Continue with local data if available
-	}
-
-	// Determine if we should use upstream data
-	useUpstream := false
-	if err != nil || upstreamProps == nil {
-		// No local data, use upstream
-		useUpstream = true
-	} else if upstreamProps != nil {
-		// Check if local data is stale (more than 10 blocks behind)
-		if int64(latestBlock.BlockNum) < upstreamProps.HeadBlockNumber-10 {
-			useUpstream = true
+	// Local latest block. _id is the block number; sorting on block_num has no
+	// index and degenerates to an in-memory sort over the whole collection.
+	g.Go(func() error {
+		var latestBlock struct {
+			BlockNum uint32 `bson:"block_num"`
 		}
+		if err := s.db.Collection("blocks").FindOne(gctx, bson.M{}, options.FindOne().SetSort(bson.M{"_id": -1})).Decode(&latestBlock); err == nil {
+			latestBlockNum = int64(latestBlock.BlockNum)
+		}
+		// A failed lookup leaves latestBlockNum 0, which counts as stale below.
+		return nil
+	})
+
+	g.Go(func() error {
+		props, err := rpcCall(gctx, func() (*steem.DynamicGlobalProperties, error) {
+			return s.steemClient.GetDynamicGlobalProperties()
+		})
+		if err != nil {
+			s.logger.Error("Failed to get upstream properties", utils.Error(err))
+			return nil // nil props selects the local branch (see degradation policy)
+		}
+		upstreamProps = props
+		return nil
+	})
+
+	g.Go(func() error {
+		np, err := s.GetNetworkPerformance(gctx)
+		if err != nil {
+			s.logger.Warn("Failed to get network performance", utils.Error(err))
+			return nil
+		}
+		networkPerf = np
+		return nil
+	})
+
+	g.Go(func() error {
+		rp, err := s.GetRewardPool(gctx)
+		if err != nil {
+			s.logger.Warn("Failed to get reward pool", utils.Error(err))
+			return nil
+		}
+		rewardPool = rp
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	var dashboardData *DashboardData
-	if useUpstream {
+	var (
+		dashboardData *DashboardData
+		err           error
+	)
+	if shouldUseUpstream(latestBlockNum, upstreamProps) {
 		dashboardData, err = s.getDashboardDataFromUpstream(ctx, upstreamProps)
 	} else {
 		dashboardData, err = s.getDashboardDataFromLocal(ctx, upstreamProps)
 	}
-
 	if err != nil {
 		return nil, err
 	}
 
-	// Get Network Performance data (always from local database)
-	networkPerf, err := s.GetNetworkPerformance(ctx)
-	if err != nil {
-		s.logger.Warn("Failed to get network performance", utils.Error(err))
-	} else {
-		dashboardData.NetworkPerformance = networkPerf
-	}
-
-	// Get Reward Pool data (always from local database)
-	rewardPool, err := s.GetRewardPool(ctx)
-	if err != nil {
-		s.logger.Warn("Failed to get reward pool", utils.Error(err))
-	} else {
-		dashboardData.RewardPool = rewardPool
-	}
+	dashboardData.NetworkPerformance = networkPerf
+	dashboardData.RewardPool = rewardPool
 
 	return dashboardData, nil
+}
+
+// stalenessMargin is how far behind the chain head local data may be before the
+// dashboard switches to the upstream branch.
+const stalenessMargin = 10
+
+// shouldUseUpstream decides the data branch: upstream when the local database
+// is missing (0) or stale beyond stalenessMargin; local otherwise. Nil props
+// (upstream unavailable) always degrades to local.
+func shouldUseUpstream(localHead int64, props *steem.DynamicGlobalProperties) bool {
+	if props == nil {
+		return false
+	}
+	return localHead == 0 || localHead < props.HeadBlockNumber-stalenessMargin
+}
+
+// rpcTimeout bounds a single upstream RPC call from the dashboard's perspective.
+// The steemgosdk client is not context-aware and has no HTTP timeout of its own,
+// so without this a slow node can hold a request indefinitely. An abandoned SDK
+// call keeps running to its own retry limit in the background; the timeout only
+// frees the caller.
+const rpcTimeout = 5 * time.Second
+
+// rpcCall runs fn and abandons it on caller cancellation or after rpcTimeout.
+func rpcCall[T any](ctx context.Context, fn func() (T, error)) (T, error) {
+	type rpcResult struct {
+		value T
+		err   error
+	}
+	ch := make(chan rpcResult, 1)
+	go func() {
+		v, err := fn()
+		ch <- rpcResult{value: v, err: err}
+	}()
+
+	select {
+	case r := <-ch:
+		return r.value, r.err
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	case <-time.After(rpcTimeout):
+		var zero T
+		return zero, fmt.Errorf("rpc timed out after %s", rpcTimeout)
+	}
 }
 
 // getDashboardDataFromUpstream fetches dashboard data from upstream API
 func (s *DashboardService) getDashboardDataFromUpstream(ctx context.Context, props *steem.DynamicGlobalProperties) (*DashboardData, error) {
 	if props == nil {
 		var err error
-		props, err = s.steemClient.GetDynamicGlobalProperties()
+		props, err = rpcCall(ctx, func() (*steem.DynamicGlobalProperties, error) {
+			return s.steemClient.GetDynamicGlobalProperties()
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get dynamic global properties: %w", err)
 		}
 	}
 
-	// Get latest blocks from upstream
+	// Latest blocks from upstream: the head window is fetched concurrently,
+	// one goroutine per block, alongside the witness and count lookups.
 	latestBlocks := make([]models.BlockSummary, 0, 5)
 	startBlock := props.HeadBlockNumber
 	if startBlock > 5 {
 		startBlock = startBlock - 4
 	}
+	blockCount := int(props.HeadBlockNumber-startBlock) + 1
+	blocks := make([]models.BlockSummary, blockCount)
 
-	for blockNum := startBlock; blockNum <= props.HeadBlockNumber; blockNum++ {
-		block, err := s.steemClient.GetBlock(blockNum)
-		if err != nil {
-			s.logger.Warn("Failed to fetch block from upstream", utils.Int64("block_num", blockNum), utils.Error(err))
-			continue
-		}
+	var (
+		witnessCount int64
+		accountCount int64
+		commentCount int64
+	)
 
-		opsCount := 0
-		for _, tx := range block.Transactions {
-			opsCount += len(tx.Operations)
-		}
+	g, gctx := errgroup.WithContext(ctx)
+	for i := 0; i < blockCount; i++ {
+		i := i
+		blockNum := startBlock + int64(i)
+		g.Go(func() error {
+			// Each goroutine writes a distinct index of blocks — safe by
+			// design; there is no cross-goroutine sharing.
+			block, err := rpcCall(gctx, func() (*steem.Block, error) {
+				return s.steemClient.GetBlock(blockNum)
+			})
+			if err != nil {
+				s.logger.Warn("Failed to fetch block from upstream", utils.Int64("block_num", blockNum), utils.Error(err))
+				return nil // leaves a zero entry that is dropped below
+			}
 
-		latestBlocks = append(latestBlocks, models.BlockSummary{
-			Number:           uint32(blockNum),
-			Timestamp:        block.Timestamp,
-			Witness:          block.Witness,
-			TransactionCount: len(block.Transactions),
-			OperationCount:   opsCount,
+			opsCount := 0
+			for _, tx := range block.Transactions {
+				opsCount += len(tx.Operations)
+			}
+
+			blocks[i] = models.BlockSummary{
+				Number:           uint32(blockNum),
+				Timestamp:        block.Timestamp,
+				Witness:          block.Witness,
+				TransactionCount: len(block.Transactions),
+				OperationCount:   opsCount,
+			}
+			return nil
 		})
 	}
-
-	// Get active witnesses count
-	activeWitnesses, err := s.steemClient.GetActiveWitnesses()
-	witnessCount := int64(0)
-	if err == nil {
-		witnessCount = int64(len(activeWitnesses))
+	g.Go(func() error {
+		activeWitnesses, err := rpcCall(gctx, func() ([]string, error) {
+			return s.steemClient.GetActiveWitnesses()
+		})
+		if err == nil {
+			witnessCount = int64(len(activeWitnesses))
+		}
+		return nil
+	})
+	g.Go(func() error {
+		// Display totals: metadata counts, no need for exact scans
+		if count, err := s.db.Collection("account").EstimatedDocumentCount(gctx); err == nil {
+			accountCount = count
+		}
+		return nil
+	})
+	g.Go(func() error {
+		if count, err := s.db.Collection("comment").EstimatedDocumentCount(gctx); err == nil {
+			commentCount = count
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	// Try to get account count from database (this is usually accurate even if blocks are behind)
-	accountCount := int64(0)
-	accountCollection := s.db.Collection("account")
-	if count, err := accountCollection.CountDocuments(ctx, bson.M{}); err == nil {
-		accountCount = count
-	}
-
-	// Try to get comment count from database
-	commentCount := int64(0)
-	commentCollection := s.db.Collection("comment")
-	if count, err := commentCollection.CountDocuments(ctx, bson.M{}); err == nil {
-		commentCount = count
+	for _, b := range blocks {
+		if b.Number != 0 {
+			latestBlocks = append(latestBlocks, b)
+		}
 	}
 
 	return &DashboardData{
@@ -180,10 +294,11 @@ func (s *DashboardService) getDashboardDataFromUpstream(ctx context.Context, pro
 
 // getDashboardDataFromLocal fetches dashboard data from local database
 func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props *steem.DynamicGlobalProperties) (*DashboardData, error) {
-	// Get latest blocks from database
+	// Get latest blocks from database. _id is the block number (indexed);
+	// sorting on block_num has no index.
 	collection := s.db.Collection("blocks")
 	findOptions := options.Find().
-		SetSort(bson.M{"block_num": -1}).
+		SetSort(bson.M{"_id": -1}).
 		SetLimit(5)
 
 	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
@@ -215,29 +330,33 @@ func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props 
 		})
 	}
 
-	// Get stats from database
-	accountCount := int64(0)
-	accountCollection := s.db.Collection("account")
-	if count, err := accountCollection.CountDocuments(ctx, bson.M{}); err == nil {
-		accountCount = count
+	// Stats totals in parallel (display totals: metadata counts)
+	var (
+		accountCount int64
+		commentCount int64
+		witnessCount int64
+	)
+	var wg sync.WaitGroup
+	startEstimatedCount := func(dst *int64, coll string) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if n, err := s.db.Collection(coll).EstimatedDocumentCount(ctx); err == nil {
+				*dst = n
+			}
+		}()
 	}
-
-	commentCount := int64(0)
-	commentCollection := s.db.Collection("comment")
-	if count, err := commentCollection.CountDocuments(ctx, bson.M{}); err == nil {
-		commentCount = count
-	}
-
-	witnessCount := int64(0)
-	witnessCollection := s.db.Collection("witness")
-	if count, err := witnessCollection.CountDocuments(ctx, bson.M{}); err == nil {
-		witnessCount = count
-	}
+	startEstimatedCount(&accountCount, "account")
+	startEstimatedCount(&commentCount, "comment")
+	startEstimatedCount(&witnessCount, "witness")
+	wg.Wait()
 
 	// If props not provided, get from upstream (we still need current witness info)
 	if props == nil {
 		var err error
-		props, err = s.steemClient.GetDynamicGlobalProperties()
+		props, err = rpcCall(ctx, func() (*steem.DynamicGlobalProperties, error) {
+			return s.steemClient.GetDynamicGlobalProperties()
+		})
 		if err != nil {
 			s.logger.Warn("Failed to get upstream properties for local data", utils.Error(err))
 		}
