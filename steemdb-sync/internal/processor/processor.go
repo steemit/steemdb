@@ -7,10 +7,11 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/steemit/steemdb-sync/internal/config"
+	"github.com/steemit/steemdb-sync/internal/metrics"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"github.com/steemit/steemdb-sync/internal/mongo"
-	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/bson"
+	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -50,7 +51,30 @@ func NewProcessor(ctx *Context, dispatcher *Dispatcher) (*Processor, error) {
 	}, nil
 }
 
+// Default window tuning (see docs/rules/processor-write-ordering.md and the
+// batching design): window = number of blocks fetched/dispatched per loop
+// iteration; buffer limit is enforced by the inserter (P3).
+const (
+	defaultWindowSize  = 64
+	defaultBufferLimit = 5000
+)
+
+// windowSize resolves the effective window size from config.
+func (p *Processor) windowSize() int {
+	if p.cfg.Processor.WindowSize > 0 {
+		return p.cfg.Processor.WindowSize
+	}
+	return defaultWindowSize
+}
+
 // Run starts the main processing loop. It blocks until ctx is cancelled.
+//
+// Blocks are processed in windows: one query fetches the window's block
+// metadata (existence + timestamps), one query fetches all its operations,
+// handlers run op by op in (block, trx, op) order, and the cursor advances
+// once per window after all handler writes complete. A crash before the
+// cursor advance replays the whole window — handler writes must therefore be
+// idempotent (see docs/rules/processor-write-ordering.md).
 func (p *Processor) Run(ctx context.Context) error {
 	// Determine starting height
 	height, err := p.cursor.Get(ctx)
@@ -64,7 +88,10 @@ func (p *Processor) Run(ctx context.Context) error {
 		height = p.cfg.Processor.StartHeight - 1 // cursor = last processed, so -1
 	}
 
-	log.Printf("[Processor] Starting from block %d", height+1)
+	windowSize := p.windowSize()
+	log.Printf("[Processor] Starting from block %d (window=%d)", height+1, windowSize)
+
+	var lastLogged uint32 = height
 
 	for {
 		select {
@@ -74,67 +101,150 @@ func (p *Processor) Run(ctx context.Context) error {
 		default:
 		}
 
-		nextBlock := height + 1
+		start := height + 1
+		end := start + uint32(windowSize) - 1
 
-		// Fetch operations for nextBlock, ordered by _id to preserve op sequence.
-		// _id format is "block:trx:op", so lexicographic order = chronological order within a block.
-		ops, err := p.fetchOpsForBlock(ctx, nextBlock)
+		// Window block metadata: existence and timestamps in one query.
+		windowBlocks, err := p.fetchWindowBlocks(ctx, start, end)
 		if err != nil {
-			log.Printf("[Processor] Error fetching ops for block %d: %v", nextBlock, err)
+			log.Printf("[Processor] Error fetching window blocks %d-%d: %v", start, end, err)
+			time.Sleep(p.catchUpSleep)
+			continue
+		}
+		if len(windowBlocks) == 0 {
+			// Nothing ingested in the window yet — wait for live_sync / cold_ingest.
 			time.Sleep(p.catchUpSleep)
 			continue
 		}
 
-		// No ops for this block — either not ingested yet, or genuinely empty block.
-		if len(ops) == 0 {
-			// Check if the block itself exists. If it does, it's an empty block — advance.
-			// If it doesn't, we haven't caught up with live_sync yet — wait.
-			exists, err := p.blockExists(ctx, nextBlock)
-			if err != nil {
-				log.Printf("[Processor] Error checking block %d existence: %v", nextBlock, err)
-				time.Sleep(p.catchUpSleep)
-				continue
+		// Effective window end: the last contiguously existing block. A gap
+		// inside the window means ingest has not reached this range yet.
+		effectiveEnd := start
+		expect := start
+		for _, m := range windowBlocks {
+			if m.BlockNum != expect {
+				break
 			}
-			if !exists {
-				// Block not yet ingested — wait for live_sync / cold_ingest to catch up
-				time.Sleep(p.catchUpSleep)
-				continue
-			}
-			// Block exists but has no ops — advance cursor without dispatching.
-			// (The block itself was already written by live_sync/cold_ingest.)
-			if err := p.cursor.Advance(ctx, nextBlock); err != nil {
-				log.Printf("[Processor] Error advancing cursor for empty block %d: %v", nextBlock, err)
-				continue
-			}
-			height = nextBlock
-			continue
+			effectiveEnd = m.BlockNum
+			expect++
+		}
+		windowTS := make(map[uint32]time.Time, len(windowBlocks))
+		for _, m := range windowBlocks {
+			windowTS[m.BlockNum] = m.Timestamp
 		}
 
-		// Get block timestamp for the handlers.
-		blockTS, err := p.getBlockTimestamp(ctx, nextBlock)
+		windowStart := time.Now()
+
+		// All operations of the window in one query, ordered by (block, trx, op).
+		ops, err := p.fetchOpsForWindow(ctx, start, effectiveEnd)
 		if err != nil {
-			log.Printf("[Processor] Error getting timestamp for block %d: %v", nextBlock, err)
-			// Fall back to a zero time — handlers should handle this gracefully
-			blockTS = time.Time{}
-		}
-
-		// Dispatch all ops in this block sequentially.
-		errCount := p.dispatcher.DispatchBlock(ctx, ops, blockTS)
-
-		// Advance cursor — this is the commit point.
-		if err := p.cursor.Advance(ctx, nextBlock); err != nil {
-			log.Printf("[Processor] Error advancing cursor to %d: %v", nextBlock, err)
+			log.Printf("[Processor] Error fetching ops for window %d-%d: %v", start, effectiveEnd, err)
 			time.Sleep(p.catchUpSleep)
 			continue
 		}
 
-		height = nextBlock
+		// Dispatch grouped by block to preserve the per-block error accounting
+		// and intra-block ordering semantics of DispatchBlock.
+		errCount := 0
+		var (
+			currentBlock uint32
+			blockOps     []*model.Operation
+			blockTS      time.Time
+		)
+		dispatchGroup := func() {
+			if len(blockOps) > 0 {
+				errCount += p.dispatcher.DispatchBlock(ctx, blockOps, blockTS)
+			}
+		}
+		for _, op := range ops {
+			if op.BlockNum != currentBlock {
+				dispatchGroup()
+				currentBlock = op.BlockNum
+				blockOps = nil
+				blockTS = windowTS[op.BlockNum] // zero time if missing — handlers tolerate it
+			}
+			blockOps = append(blockOps, op)
+		}
+		dispatchGroup()
 
-		// Periodic progress logging
-		if nextBlock%10000 == 0 || errCount > 0 {
-			log.Printf("[Processor] Processed block %d (%d ops, %d errors)", nextBlock, len(ops), errCount)
+		// Advance the cursor — the window's commit point. A crash before this
+		// replays the whole window; handler idempotency makes that safe.
+		if err := p.cursor.Advance(ctx, effectiveEnd); err != nil {
+			log.Printf("[Processor] Error advancing cursor to %d: %v", effectiveEnd, err)
+			time.Sleep(p.catchUpSleep)
+			continue
+		}
+		height = effectiveEnd
+
+		metrics.RecordWindow(int(effectiveEnd-start+1), len(ops), time.Since(windowStart))
+
+		// Periodic progress logging (every ~10k blocks)
+		if height-lastLogged >= 10000 {
+			log.Printf("[Processor] Processed through block %d (window=%d blocks, %d ops, %d errors)",
+				height, effectiveEnd-start+1, len(ops), errCount)
+			lastLogged = height
+		}
+		if errCount > 0 {
+			log.Printf("[Processor] Window %d-%d completed with %d handler errors", start, effectiveEnd, errCount)
 		}
 	}
+}
+
+// windowBlockMeta is the existence/timestamp record for one block in a window.
+type windowBlockMeta struct {
+	BlockNum  uint32    `bson:"_id"`
+	Timestamp time.Time `bson:"timestamp"`
+}
+
+// fetchWindowBlocks returns the metadata of existing blocks in [start, end],
+// ordered by block number.
+func (p *Processor) fetchWindowBlocks(ctx context.Context, start, end uint32) ([]windowBlockMeta, error) {
+	cursor, err := p.blocksCol.Find(ctx,
+		bson.M{"_id": bson.M{"$gte": start, "$lte": end}},
+		options.Find().
+			SetProjection(bson.M{"_id": 1, "timestamp": 1}).
+			SetSort(bson.D{{Key: "_id", Value: 1}}),
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to query window blocks %d-%d", start, end)
+	}
+	defer cursor.Close(ctx)
+
+	metas := make([]windowBlockMeta, 0, end-start+1)
+	for cursor.Next(ctx) {
+		var m windowBlockMeta
+		if err := cursor.Decode(&m); err != nil {
+			return nil, errors.Wrap(err, "failed to decode window block meta")
+		}
+		metas = append(metas, m)
+	}
+	return metas, cursor.Err()
+}
+
+// fetchOpsForWindow retrieves all operations for blocks in [start, end],
+// ordered by block, transaction, and op index.
+// Sort by the numeric trx_index and op_index fields (NOT by _id string), because the
+// _id format "{block}:{trx}:{op}" sorts lexicographically and would misorder indexes ≥ 10
+// (e.g. "100:10:0" sorts before "100:2:0" as strings).
+func (p *Processor) fetchOpsForWindow(ctx context.Context, start, end uint32) ([]*model.Operation, error) {
+	opts := options.Find().SetSort(bson.D{
+		{Key: "block_num", Value: 1},
+		{Key: "trx_index", Value: 1},
+		{Key: "op_index", Value: 1},
+	})
+	cursor, err := p.opsCol.Find(ctx, bson.M{
+		"block_num": bson.M{"$gte": start, "$lte": end},
+	}, opts)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to fetch ops for window %d-%d", start, end)
+	}
+	defer cursor.Close(ctx)
+
+	var ops []*model.Operation
+	if err := cursor.All(ctx, &ops); err != nil {
+		return nil, errors.Wrap(err, "failed to decode window ops")
+	}
+	return ops, nil
 }
 
 // fetchOpsForBlock retrieves all operations for a given block, ordered by tx/op index.

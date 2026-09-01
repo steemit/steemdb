@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,14 +14,14 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Mongo      MongoConfig      `yaml:"mongo"`
-	RPC        RPCConfig        `yaml:"rpc"`
-	ColdStart  ColdStartConfig  `yaml:"cold_start"`
-	Batch      BatchConfig      `yaml:"batch"`
-	Ingest     IngestConfig     `yaml:"ingest"`
-	Processor  ProcessorConfig  `yaml:"processor"`
-	Refresher  RefresherConfig  `yaml:"refresher"`
-	Log        LogConfig        `yaml:"log"`
+	Mongo     MongoConfig     `yaml:"mongo"`
+	RPC       RPCConfig       `yaml:"rpc"`
+	ColdStart ColdStartConfig `yaml:"cold_start"`
+	Batch     BatchConfig     `yaml:"batch"`
+	Ingest    IngestConfig    `yaml:"ingest"`
+	Processor ProcessorConfig `yaml:"processor"`
+	Refresher RefresherConfig `yaml:"refresher"`
+	Log       LogConfig       `yaml:"log"`
 }
 
 // RefresherConfig contains refresher-process settings (witness/stats/clients/
@@ -51,11 +52,17 @@ type AccountRescanConfig struct {
 
 // ProcessorConfig contains operation processor settings
 type ProcessorConfig struct {
-	Enabled          bool                    `yaml:"enabled"`
-	CatchUpSleep     string                  `yaml:"catch_up_sleep"`
-	StartHeight      uint32                  `yaml:"start_height"`
-	AccountRefresher AccountRefresherConfig  `yaml:"account_refresher"`
-	CommentRescanner CommentRescannerConfig  `yaml:"comment_rescanner"`
+	Enabled      bool   `yaml:"enabled"`
+	CatchUpSleep string `yaml:"catch_up_sleep"`
+	StartHeight  uint32 `yaml:"start_height"`
+	// WindowSize is the number of blocks fetched/dispatched per loop
+	// iteration (window-level cursor commit). 0 = default (64).
+	WindowSize int `yaml:"window_size"`
+	// BufferLimit caps the per-collection write buffer size (enforced by the
+	// inserter). 0 = default (5000).
+	BufferLimit      int                    `yaml:"buffer_limit"`
+	AccountRefresher AccountRefresherConfig `yaml:"account_refresher"`
+	CommentRescanner CommentRescannerConfig `yaml:"comment_rescanner"`
 }
 
 // AccountRefresherConfig contains account dirty-refresh settings
@@ -80,17 +87,17 @@ type CommentRescannerConfig struct {
 
 // MongoConfig contains MongoDB connection settings
 type MongoConfig struct {
-	URI        string `yaml:"uri" env:"MONGO_URI"`
-	Database   string `yaml:"database" env:"MONGO_DATABASE"`
-	MinPoolSize int   `yaml:"min_pool_size" env:"MONGO_MIN_POOL_SIZE"`
-	MaxPoolSize int   `yaml:"max_pool_size" env:"MONGO_MAX_POOL_SIZE"`
+	URI         string `yaml:"uri" env:"MONGO_URI"`
+	Database    string `yaml:"database" env:"MONGO_DATABASE"`
+	MinPoolSize int    `yaml:"min_pool_size" env:"MONGO_MIN_POOL_SIZE"`
+	MaxPoolSize int    `yaml:"max_pool_size" env:"MONGO_MAX_POOL_SIZE"`
 }
 
 // RPCConfig contains Steem RPC node settings
 type RPCConfig struct {
-	Endpoint   string `yaml:"endpoint" env:"RPC_ENDPOINT"`
-	MaxRetry   int    `yaml:"max_retry" env:"RPC_MAX_RETRY"`
-	Timeout    string `yaml:"timeout" env:"RPC_TIMEOUT"`
+	Endpoint string `yaml:"endpoint" env:"RPC_ENDPOINT"`
+	MaxRetry int    `yaml:"max_retry" env:"RPC_MAX_RETRY"`
+	Timeout  string `yaml:"timeout" env:"RPC_TIMEOUT"`
 }
 
 // ColdStartConfig contains cold start phase settings
@@ -101,7 +108,7 @@ type ColdStartConfig struct {
 
 // BatchConfig contains batch processing settings
 type BatchConfig struct {
-	Size         int    `yaml:"size" env:"BATCH_SIZE"`
+	Size          int    `yaml:"size" env:"BATCH_SIZE"`
 	FlushInterval string `yaml:"flush_interval" env:"BATCH_FLUSH_INTERVAL"`
 }
 
@@ -122,8 +129,8 @@ func Load(configPath string) (*Config, error) {
 	cfg := &Config{
 		// Default values
 		Mongo: MongoConfig{
-			URI:        "mongodb://localhost:27017",
-			Database:   "steemdb",
+			URI:         "mongodb://localhost:27017",
+			Database:    "steemdb",
 			MinPoolSize: 10,
 			MaxPoolSize: 100,
 		},
@@ -137,7 +144,7 @@ func Load(configPath string) (*Config, error) {
 			SafetyMargin: 5,
 		},
 		Batch: BatchConfig{
-			Size:         1000,
+			Size:          1000,
 			FlushInterval: "1s",
 		},
 		Ingest: IngestConfig{
@@ -282,6 +289,16 @@ func loadFromEnv(cfg *Config) {
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		cfg.Log.Level = v
 	}
+	if v := os.Getenv("PROCESSOR_WINDOW_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Processor.WindowSize = n
+		}
+	}
+	if v := os.Getenv("PROCESSOR_BUFFER_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Processor.BufferLimit = n
+		}
+	}
 }
 
 // Validate validates the configuration
@@ -289,7 +306,7 @@ func (c *Config) Validate() error {
 	if c.Mongo.URI == "" {
 		return errors.New("mongo.uri is required")
 	}
-	
+
 	// Ensure database is set: use database field if set, otherwise parse from URI, otherwise use default
 	if c.Mongo.Database == "" {
 		if dbName := parseDatabaseFromURI(c.Mongo.URI); dbName != "" {
