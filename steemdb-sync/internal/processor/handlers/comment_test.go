@@ -98,3 +98,23 @@ func TestParseJsonMetadata_logic(t *testing.T) {
 		})
 	}
 }
+
+func TestAlreadyApplied(t *testing.T) {
+	tests := []struct {
+		name        string
+		opID        string
+		lastApplied string
+		want        bool
+	}{
+		{"exact match skips replay", "9306617:0:0", "9306617:0:0", true},
+		{"different op applies", "9306617:0:0", "9306616:4:0", false},
+		{"no marker (legacy doc) applies", "9306617:0:0", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := alreadyApplied(tt.opID, tt.lastApplied); got != tt.want {
+				t.Errorf("alreadyApplied(%q, %q) = %v, want %v", tt.opID, tt.lastApplied, got, tt.want)
+			}
+		})
+	}
+}
