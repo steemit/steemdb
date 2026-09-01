@@ -53,8 +53,16 @@ func (h *CommentHandler) Handle(ctx context.Context, op *model.Operation, blockT
 	// and store the resulting full body.
 	finalBody := body
 	if isDiff {
-		currentBody := h.getCurrentBody(ctx, id)
-		patched, ok := ApplySteemDiff(currentBody, body)
+		current := h.getCurrentState(ctx, id)
+		if alreadyApplied(op.ID, current.LastAppliedOp) {
+			// The processor replays the last block/window after a crash that
+			// lands between this write and the cursor advance. Re-applying a
+			// diff would double-patch the body, so an applied diff is a no-op.
+			// Non-diff upserts need no such guard: they $set the full body from
+			// the op itself, making replay byte-identical.
+			return nil
+		}
+		patched, ok := ApplySteemDiff(current.Body, body)
 		if ok {
 			finalBody = patched
 		} else {
@@ -87,6 +95,7 @@ func (h *CommentHandler) Handle(ctx context.Context, op *model.Operation, blockT
 		"last_update":     blockTS,
 		"_ts":             blockTS,
 		"_block":          op.BlockNum,
+		"last_applied_op": op.ID, // idempotency marker, written atomically with the body
 		"scanned":         time.Now(),
 	}
 
@@ -102,18 +111,28 @@ func (h *CommentHandler) Handle(ctx context.Context, op *model.Operation, blockT
 	return h.inserter.UpsertOneComplex(ctx, "comment", id, setFields, setOnInsertFields)
 }
 
-// getCurrentBody reads the current body field of a comment document.
-// Returns "" if the document doesn't exist (first post or orphan diff).
-func (h *CommentHandler) getCurrentBody(ctx context.Context, id string) string {
-	var doc struct {
-		Body string `bson:"body"`
-	}
+// commentState is the persisted state the diff path depends on.
+type commentState struct {
+	Body          string `bson:"body"`
+	LastAppliedOp string `bson:"last_applied_op"`
+}
+
+// alreadyApplied reports whether a diff op was already persisted for this
+// comment — i.e. the document's idempotency marker matches the op id exactly.
+func alreadyApplied(opID, lastAppliedOp string) bool {
+	return lastAppliedOp != "" && lastAppliedOp == opID
+}
+
+// getCurrentState reads the current body and idempotency marker of a comment
+// document. Returns zero values if the document doesn't exist (first post or
+// orphan diff).
+func (h *CommentHandler) getCurrentState(ctx context.Context, id string) commentState {
+	var state commentState
 	col := h.inserter.db.Collection("comment")
-	err := col.FindOne(ctx, bson.M{"_id": id}).Decode(&doc)
-	if err != nil {
-		return ""
+	if err := col.FindOne(ctx, bson.M{"_id": id}).Decode(&state); err != nil {
+		return commentState{}
 	}
-	return doc.Body
+	return state
 }
 
 // UpsertOneComplex performs an upsert with separate $set and $setOnInsert stages.
