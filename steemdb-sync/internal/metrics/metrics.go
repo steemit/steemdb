@@ -94,10 +94,36 @@ var (
 			Help: "Current block number being processed",
 		},
 	)
+
+	// Processor window metrics
+	ProcessorWindowDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "steemdb_sync_processor_window_duration_seconds",
+			Help:    "Processor window processing duration (fetch + dispatch + commit)",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
+		},
+	)
+	ProcessorWindowBlocks = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "steemdb_sync_processor_window_blocks",
+			Help:    "Blocks covered per processor window",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 10),
+		},
+	)
+	ProcessorWindowOps = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "steemdb_sync_processor_window_ops",
+			Help:    "Operations dispatched per processor window",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 16),
+		},
+	)
 )
 
 func init() {
 	// Register all metrics
+	prometheus.MustRegister(ProcessorWindowDuration)
+	prometheus.MustRegister(ProcessorWindowBlocks)
+	prometheus.MustRegister(ProcessorWindowOps)
 	prometheus.MustRegister(IngestOpsTotal)
 	prometheus.MustRegister(IngestOpsTPS)
 	prometheus.MustRegister(MongoWriteDuration)
@@ -108,6 +134,14 @@ func init() {
 	prometheus.MustRegister(BatchFlushDuration)
 	prometheus.MustRegister(QueueSize)
 	prometheus.MustRegister(CurrentBlock)
+}
+
+// RecordWindow records one processor window iteration: how many blocks and
+// ops it covered and how long the whole window took (fetch + dispatch + commit).
+func RecordWindow(blocks, ops int, duration time.Duration) {
+	ProcessorWindowDuration.Observe(duration.Seconds())
+	ProcessorWindowBlocks.Observe(float64(blocks))
+	ProcessorWindowOps.Observe(float64(ops))
 }
 
 // RecordIngestOp records an ingested operation
@@ -204,7 +238,7 @@ func StartTPSCalculator(updateInterval time.Duration) {
 			currentCount := tpsCalculator.opCount
 			now := time.Now()
 			elapsed := now.Sub(lastTime).Seconds()
-			
+
 			if elapsed > 0 {
 				tps := float64(currentCount-lastCount) / elapsed
 				UpdateIngestTPS(tps)
