@@ -111,6 +111,25 @@ func (c *Client) createIndexes(ctx context.Context) error {
 		return errors.Wrap(err, "failed to create operations indexes")
 	}
 
+	// Processor Pattern-B collections are written by multi-field filter upserts
+	// (legacy sync.py Pattern B: dedup by business fields). Without an index on
+	// the filter fields every upsert is a collection scan — the processor
+	// ground at minutes-per-thousand-blocks until these were added.
+	patternBIndexes := []struct {
+		collection string
+		keys       bson.D
+	}{
+		{"follow", bson.D{{Key: "_block", Value: 1}, {Key: "follower", Value: 1}, {Key: "following", Value: 1}}},
+		{"reblog", bson.D{{Key: "_block", Value: 1}, {Key: "permlink", Value: 1}, {Key: "account", Value: 1}}},
+		{"witness_vote", bson.D{{Key: "_ts", Value: 1}, {Key: "account", Value: 1}, {Key: "witness", Value: 1}}},
+		{"benefactor_reward", bson.D{{Key: "_ts", Value: 1}, {Key: "benefactor", Value: 1}, {Key: "permlink", Value: 1}, {Key: "author", Value: 1}}},
+	}
+	for _, p := range patternBIndexes {
+		if _, err := c.db.Collection(p.collection).Indexes().CreateOne(ctx, mongo.IndexModel{Keys: p.keys}); err != nil {
+			return errors.Wrapf(err, "failed to create %s indexes", p.collection)
+		}
+	}
+
 	return nil
 }
 
