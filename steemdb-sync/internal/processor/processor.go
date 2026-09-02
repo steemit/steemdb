@@ -108,6 +108,14 @@ func (p *Processor) Run(ctx context.Context) error {
 
 	var lastLogged uint32 = height
 
+	// Window-phase timing breakdown, logged every 50 windows to locate
+	// where wall time goes when throughput regresses.
+	var (
+		nWin                int
+		fetchMs, dispatchMs time.Duration
+		flushMs, cursorMs   time.Duration
+	)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -149,6 +157,7 @@ func (p *Processor) Run(ctx context.Context) error {
 		}
 
 		windowStart := time.Now()
+		tFetch := time.Now()
 
 		// All operations of the window in one query, ordered by (block, trx, op).
 		ops, err := p.fetchOpsForWindow(ctx, start, effectiveEnd)
@@ -160,6 +169,8 @@ func (p *Processor) Run(ctx context.Context) error {
 
 		// Dispatch grouped by block to preserve the per-block error accounting
 		// and intra-block ordering semantics of DispatchBlock.
+		tDispatch := time.Now()
+		fetchMs += tDispatch.Sub(tFetch)
 		errCount := 0
 		var (
 			currentBlock uint32
@@ -182,6 +193,9 @@ func (p *Processor) Run(ctx context.Context) error {
 		}
 		dispatchGroup()
 
+		tFlush := time.Now()
+		dispatchMs += tFlush.Sub(tDispatch)
+
 		// Flush all buffered writes. The cursor must not advance unless every
 		// bucket landed: on error the window replays (idempotent writes).
 		if p.inserter != nil {
@@ -192,6 +206,9 @@ func (p *Processor) Run(ctx context.Context) error {
 			}
 		}
 
+		tCursor := time.Now()
+		flushMs += tCursor.Sub(tFlush)
+
 		// Advance the cursor — the window's commit point. A crash before this
 		// replays the whole window; handler idempotency makes that safe.
 		if err := p.cursor.Advance(ctx, effectiveEnd); err != nil {
@@ -200,8 +217,17 @@ func (p *Processor) Run(ctx context.Context) error {
 			continue
 		}
 		height = effectiveEnd
+		cursorMs += time.Since(tCursor)
 
 		metrics.RecordWindow(int(effectiveEnd-start+1), len(ops), time.Since(windowStart))
+
+		nWin++
+		if nWin%50 == 0 {
+			log.Printf("[Processor] Window breakdown (50w avg): fetch=%dms dispatch=%dms flush=%dms cursor=%dms",
+				fetchMs.Milliseconds()/int64(50), dispatchMs.Milliseconds()/int64(50),
+				flushMs.Milliseconds()/int64(50), cursorMs.Milliseconds()/int64(50))
+			fetchMs, dispatchMs, flushMs, cursorMs = 0, 0, 0, 0
+		}
 
 		// Periodic progress logging (every ~10k blocks)
 		if height-lastLogged >= 10000 {
