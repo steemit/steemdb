@@ -50,15 +50,17 @@ func main() {
 	rpcClient := rpc.NewClient(cfg.RPC.Endpoint, cfg.RPC.MaxRetry, rpcTimeout)
 
 	// Build shared processor context
+	inserter := handlers.NewMongoInserter(mongoClient.Database())
+
 	pctx := &processor.Context{
 		Cfg:         cfg,
 		MongoClient: mongoClient,
 		RPCClient:   rpcClient,
+		Inserter:    inserter,
 	}
 
 	// Create dispatcher and register handlers
 	dispatcher := processor.NewDispatcher(pctx)
-	inserter := handlers.NewMongoInserter(mongoClient.Database())
 
 	// Batch 1 handlers
 	dispatcher.Register("vote", handlers.NewVoteHandler(inserter))
