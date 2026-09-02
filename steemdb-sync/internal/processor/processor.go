@@ -10,6 +10,7 @@ import (
 	"github.com/steemit/steemdb-sync/internal/metrics"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"github.com/steemit/steemdb-sync/internal/mongo"
+	"github.com/steemit/steemdb-sync/internal/processor/handlers"
 	"go.mongodb.org/mongo-driver/bson"
 	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -23,6 +24,7 @@ type Processor struct {
 	mongoClient *mongo.Client
 	dispatcher  *Dispatcher
 	cursor      *Cursor
+	inserter    *handlers.MongoInserter
 
 	// Collections from the operations/blocks sets
 	opsCol    *drivermongo.Collection
@@ -45,6 +47,7 @@ func NewProcessor(ctx *Context, dispatcher *Dispatcher) (*Processor, error) {
 		mongoClient:  ctx.MongoClient,
 		dispatcher:   dispatcher,
 		cursor:       NewCursor(db),
+		inserter:     ctx.Inserter,
 		opsCol:       db.Collection("operations"),
 		blocksCol:    db.Collection("blocks"),
 		catchUpSleep: catchUpSleep,
@@ -65,6 +68,14 @@ func (p *Processor) windowSize() int {
 		return p.cfg.Processor.WindowSize
 	}
 	return defaultWindowSize
+}
+
+// bufferLimit resolves the effective per-collection buffer cap from config.
+func (p *Processor) bufferLimit() int {
+	if p.cfg.Processor.BufferLimit > 0 {
+		return p.cfg.Processor.BufferLimit
+	}
+	return defaultBufferLimit
 }
 
 // Run starts the main processing loop. It blocks until ctx is cancelled.
@@ -89,6 +100,10 @@ func (p *Processor) Run(ctx context.Context) error {
 	}
 
 	windowSize := p.windowSize()
+	if p.inserter != nil {
+		p.inserter.BeginBatch(p.bufferLimit())
+		defer p.inserter.EndBatch()
+	}
 	log.Printf("[Processor] Starting from block %d (window=%d)", height+1, windowSize)
 
 	var lastLogged uint32 = height
@@ -166,6 +181,16 @@ func (p *Processor) Run(ctx context.Context) error {
 			blockOps = append(blockOps, op)
 		}
 		dispatchGroup()
+
+		// Flush all buffered writes. The cursor must not advance unless every
+		// bucket landed: on error the window replays (idempotent writes).
+		if p.inserter != nil {
+			if err := p.inserter.FlushAll(ctx); err != nil {
+				log.Printf("[Processor] Error flushing window %d-%d buffers: %v", start, effectiveEnd, err)
+				time.Sleep(p.catchUpSleep)
+				continue
+			}
+		}
 
 		// Advance the cursor — the window's commit point. A crash before this
 		// replays the whole window; handler idempotency makes that safe.

@@ -3,6 +3,7 @@ package processor
 import (
 	"github.com/steemit/steemdb-sync/internal/config"
 	"github.com/steemit/steemdb-sync/internal/mongo"
+	"github.com/steemit/steemdb-sync/internal/processor/handlers"
 	"github.com/steemit/steemdb-sync/internal/rpc"
 )
 
@@ -12,4 +13,6 @@ type Context struct {
 	Cfg         *config.Config
 	MongoClient *mongo.Client
 	RPCClient   *rpc.Client
+	// Inserter is nil for tests that don't exercise batch writes.
+	Inserter *handlers.MongoInserter
 }

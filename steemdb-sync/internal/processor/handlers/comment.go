@@ -9,7 +9,6 @@ import (
 
 	"github.com/steemit/steemdb-sync/internal/model"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // CommentHandler processes "comment" operations → writes to the "comment" collection.
@@ -137,14 +136,14 @@ func (h *CommentHandler) getCurrentState(ctx context.Context, id string) comment
 
 // UpsertOneComplex performs an upsert with separate $set and $setOnInsert stages.
 // This allows "created" to be set only on first insert while "last_update" updates every time.
+// It routes through appendModel: the "comment" collection is unbuffered by
+// design (diff reads and reward writebacks must see committed state), so this
+// still executes immediately in batch mode.
 func (m *MongoInserter) UpsertOneComplex(ctx context.Context, collection string, id interface{}, setFields bson.M, setOnInsertFields bson.M) error {
-	col := m.db.Collection(collection)
 	filter := bson.M{"_id": id}
 	update := bson.M{
 		"$set":         setFields,
 		"$setOnInsert": setOnInsertFields,
 	}
-	opts := options.Update().SetUpsert(true)
-	_, err := col.UpdateOne(ctx, filter, update, opts)
-	return err
+	return m.appendModel(ctx, collection, filter, update)
 }
