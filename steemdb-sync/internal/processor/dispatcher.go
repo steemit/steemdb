@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -46,11 +47,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, op *model.Operation, blockTS 
 		return nil
 	}
 
-	if err := handler.Handle(ctx, op, blockTS); err != nil {
+	err := safeHandle(ctx, handler, op, blockTS)
+	if err != nil {
 		return errors.Wrapf(err, "handler error for op_type=%s id=%s", op.OpType, op.ID)
 	}
 
 	return nil
+}
+
+// safeHandle invokes a handler and converts panics into errors. A panicking
+// handler must degrade to that op's failure — DispatchBlock's contract that
+// one bad op never stops the block (or the process) would otherwise be void.
+func safeHandle(ctx context.Context, handler OpHandler, op *model.Operation, blockTS time.Time) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("handler panicked: %v", r)
+		}
+	}()
+	return handler.Handle(ctx, op, blockTS)
 }
 
 // DispatchBlock sends all operations in a block to their handlers in order.

@@ -15,7 +15,17 @@ import (
 //
 // Returns the patched text and true on success, or (baseText, false) if the patch
 // could not be applied (e.g. orphan diff with no base text, or patch mismatch).
-func ApplySteemDiff(baseText, diffBody string) (string, bool) {
+func ApplySteemDiff(baseText, diffBody string) (result string, ok bool) {
+	// PatchApply panics on pathological patches (index out of range inside
+	// go-diff) — observed live on a 2017-era edit. Treat a panic exactly like
+	// an unappliable patch so the caller stores the raw diff instead of
+	// taking down the process.
+	defer func() {
+		if r := recover(); r != nil {
+			result, ok = baseText, false
+		}
+	}()
+
 	// Parse the diff body into Patches using diff-match-patch.
 	// No URL decode needed — DMP PatchFromText handles %XX encoding natively.
 	dmp := diffmatchpatch.New()
