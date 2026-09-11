@@ -21,7 +21,23 @@ type Config struct {
 	Ingest    IngestConfig    `yaml:"ingest"`
 	Processor ProcessorConfig `yaml:"processor"`
 	Refresher RefresherConfig `yaml:"refresher"`
+	LiveSync  LiveSyncConfig  `yaml:"live_sync"`
 	Log       LogConfig       `yaml:"log"`
+}
+
+// LiveSyncConfig contains live_sync settings. Catch-up (gap larger than
+// follow_threshold) fetches in parallel chunks; near the chain head the loop
+// degrades to single-block following.
+type LiveSyncConfig struct {
+	// ChunkSize is the block count of one batch-fetch unit during catch-up.
+	// Env: LIVE_SYNC_CHUNK_SIZE
+	ChunkSize int `yaml:"chunk_size"`
+	// FollowThreshold: gaps up to this size are handled by the follow loop.
+	// Env: LIVE_SYNC_FOLLOW_THRESHOLD
+	FollowThreshold int `yaml:"follow_threshold"`
+	// RPCConcurrency bounds the SDK v2 worker pool (per range call).
+	// Env: LIVE_SYNC_RPC_CONCURRENCY
+	RPCConcurrency int `yaml:"rpc_concurrency"`
 }
 
 // RefresherConfig contains refresher-process settings (witness/stats/clients/
@@ -297,6 +313,21 @@ func loadFromEnv(cfg *Config) {
 	if v := os.Getenv("PROCESSOR_BUFFER_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Processor.BufferLimit = n
+		}
+	}
+	if v := os.Getenv("LIVE_SYNC_CHUNK_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.LiveSync.ChunkSize = n
+		}
+	}
+	if v := os.Getenv("LIVE_SYNC_FOLLOW_THRESHOLD"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.LiveSync.FollowThreshold = n
+		}
+	}
+	if v := os.Getenv("LIVE_SYNC_RPC_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.LiveSync.RPCConcurrency = n
 		}
 	}
 }
