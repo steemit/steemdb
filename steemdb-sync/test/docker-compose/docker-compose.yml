@@ -111,6 +111,37 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Live Sync (catch-up to chain head after replay, then follow).
+  # Start manually after the replay completes: the cold-start monitor in
+  # cold-ingest is paused during replays and does not hand off by itself.
+  live-sync:
+    build:
+      context: ../..
+      dockerfile: test/docker-compose/Dockerfile.cold-ingest
+    container_name: cold-ingest-livesync
+    environment:
+      - CONFIG_PATH=/app/configs/config.yaml
+      - MONGO_URI=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-123456}@mongo:27017/${MONGO_DATABASE:-steemdb_test}?authSource=admin
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    networks:
+      - cold-ingest-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["/app/live_sync", "-config", "/app/configs/config.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9091/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    # Not started by default: profiles keep it out of `docker compose up`
+    # until the replay→live handoff is due (docker compose --profile live up -d live-sync).
+    profiles: ["live"]
+
   # Steemd Node with Ingest Plugin
   steemd:
     image: ${STEEMD_IMAGE:-steemd:with-ingest}

@@ -25,6 +25,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o processor ./cmd/p
 # Build refresher binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o refresher ./cmd/refresher
 
+# Build live_sync binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o live_sync ./cmd/live_sync
+
 # Final stage
 FROM alpine:latest
 
@@ -42,6 +45,7 @@ WORKDIR /app
 COPY --from=builder /build/cold_ingest /app/cold_ingest
 COPY --from=builder /build/processor /app/processor
 COPY --from=builder /build/refresher /app/refresher
+COPY --from=builder /build/live_sync /app/live_sync
 
 # Create directories
 RUN mkdir -p /app/configs /app/logs /app/data && \
