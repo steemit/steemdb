@@ -25,6 +25,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o processor ./cmd/p
 # Build refresher binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o refresher ./cmd/refresher
 
+# Build live_sync binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o live_sync ./cmd/live_sync
+
 # Final stage
 FROM alpine:latest
 
@@ -42,6 +45,7 @@ WORKDIR /app
 COPY --from=builder /build/cold_ingest /app/cold_ingest
 COPY --from=builder /build/processor /app/processor
 COPY --from=builder /build/refresher /app/refresher
+COPY --from=builder /build/live_sync /app/live_sync
 
 # Create directories
 RUN mkdir -p /app/configs /app/logs /app/data && \
@@ -54,8 +58,8 @@ USER appuser
 EXPOSE 8080 9090
 
 # Health checks are defined per service in docker-compose.yml: this image runs
-# four binaries (cold_ingest:8080, processor:9092, refresher:9093) with metrics
-# on different ports.
+# four binaries — cold_ingest:8080, processor:9092, refresher:9093,
+# live_sync:9091 — each serving metrics on a different port.
 
 # Run the service
 CMD ["/app/cold_ingest", "-config", "/app/configs/config.yaml"]
