@@ -119,6 +119,8 @@ services:
       context: ../..
       dockerfile: test/docker-compose/Dockerfile.cold-ingest
     container_name: cold-ingest-livesync
+    ports:
+      - "9091:9091"
     environment:
       - CONFIG_PATH=/app/configs/config.yaml
       - MONGO_URI=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-123456}@mongo:27017/${MONGO_DATABASE:-steemdb_test}?authSource=admin

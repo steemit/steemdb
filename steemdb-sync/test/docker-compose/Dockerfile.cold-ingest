@@ -58,8 +58,8 @@ USER appuser
 EXPOSE 8080 9090
 
 # Health checks are defined per service in docker-compose.yml: this image runs
-# four binaries (cold_ingest:8080, processor:9092, refresher:9093) with metrics
-# on different ports.
+# four binaries — cold_ingest:8080, processor:9092, refresher:9093,
+# live_sync:9091 — each serving metrics on a different port.
 
 # Run the service
 CMD ["/app/cold_ingest", "-config", "/app/configs/config.yaml"]
