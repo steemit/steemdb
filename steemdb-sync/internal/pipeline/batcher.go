@@ -86,12 +86,22 @@ func (b *Batcher) AddBlockInfo(blockNum uint32, blockID string, timestamp time.T
 		log.Printf("[Batcher] [DEBUG] Adding block info: block=%d, block_id=%s, timestamp=%v", blockNum, blockID, timestamp)
 	}
 	b.blocksMu.Lock()
-	defer b.blocksMu.Unlock()
 	b.blocks[blockNum] = &blockInfo{
 		BlockNum:  blockNum,
 		BlockID:   blockID,
 		Timestamp: timestamp,
 	}
+	b.blocksMu.Unlock()
+
+	// AddBlockInfo is the one entry point hit by every ingested record
+	// (regular ops and block-only), including the synchronous batch flush
+	// path that bypasses AddOperation — without this, GetMaxBlockSeen stays
+	// at 0 and the cold-start target-height exit never fires.
+	b.maxBlockMu.Lock()
+	if blockNum > b.maxBlockSeen {
+		b.maxBlockSeen = blockNum
+	}
+	b.maxBlockMu.Unlock()
 }
 
 // AddOperation adds an operation to the batch queue
