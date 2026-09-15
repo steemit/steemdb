@@ -311,6 +311,32 @@ func TestBatcherMaxBlockSeen(t *testing.T) {
 	assert.Equal(t, uint32(502), maxBlock)
 }
 
+// TestBatcherMaxBlockSeenFromBlockInfo tests max block tracking on the batch
+// flush path: HandleAppliedOps calls AddBlockInfo for every record (including
+// block-only ones) without AddOperation, so the cold-start target-height
+// monitor must see those blocks via GetMaxBlockSeen.
+func TestBatcherMaxBlockSeenFromBlockInfo(t *testing.T) {
+	batcher, mongoClient, _ := setupTestBatcher(t)
+	if batcher == nil {
+		return
+	}
+	defer mongoClient.Close(context.Background())
+
+	batcher.Start()
+	defer func() {
+		go batcher.Stop()
+		time.Sleep(200 * time.Millisecond)
+	}()
+
+	// Out-of-order block infos, as retries can deliver them
+	batcher.AddBlockInfo(700, "000002bc", time.Now())
+	batcher.AddBlockInfo(698, "000002ba", time.Now())
+	batcher.AddBlockInfo(699, "000002bb", time.Now())
+
+	maxBlock := batcher.GetMaxBlockSeen()
+	assert.Equal(t, uint32(700), maxBlock)
+}
+
 // TestBatcherConcurrentAdd tests concurrent operation addition
 func TestBatcherConcurrentAdd(t *testing.T) {
 	batcher, mongoClient, _ := setupTestBatcher(t)
