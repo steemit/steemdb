@@ -77,8 +77,9 @@ export function Sidebar() {
             </Button>
           </div>
 
-          {/* Connection status */}
-          <div className="flex items-center justify-between px-4 py-2 border-b">
+          {/* Connection status — px-7 aligns the label with the nav icons
+              below (nav p-4 + item px-3 = 28px) */}
+          <div className="flex items-center justify-between px-7 py-2 border-b">
             <span className="text-sm text-muted-foreground">Connection</span>
             {getConnectionBadge()}
           </div>
