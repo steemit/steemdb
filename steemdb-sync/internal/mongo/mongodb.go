@@ -122,7 +122,13 @@ func (c *Client) createIndexes(ctx context.Context) error {
 		{"follow", bson.D{{Key: "_block", Value: 1}, {Key: "follower", Value: 1}, {Key: "following", Value: 1}}},
 		{"reblog", bson.D{{Key: "_block", Value: 1}, {Key: "permlink", Value: 1}, {Key: "account", Value: 1}}},
 		{"witness_vote", bson.D{{Key: "_ts", Value: 1}, {Key: "account", Value: 1}, {Key: "witness", Value: 1}}},
+		// benefactor_reward needs both indexes: the upsert filter is
+		// {_block, benefactor, permlink, author} (see BenefactorRewardHandler),
+		// while the _ts-led one only serves the web-layer $sort on _ts
+		// (LabsService.GetBenefactors). Without the _block-led index every
+		// upsert is a collection scan.
 		{"benefactor_reward", bson.D{{Key: "_ts", Value: 1}, {Key: "benefactor", Value: 1}, {Key: "permlink", Value: 1}, {Key: "author", Value: 1}}},
+		{"benefactor_reward", bson.D{{Key: "_block", Value: 1}, {Key: "benefactor", Value: 1}, {Key: "permlink", Value: 1}, {Key: "author", Value: 1}}},
 	}
 	for _, p := range patternBIndexes {
 		if _, err := c.db.Collection(p.collection).Indexes().CreateOne(ctx, mongo.IndexModel{Keys: p.keys}); err != nil {
