@@ -1,8 +1,9 @@
 # Frontend build stage
 FROM node:20-alpine AS frontend-builder
 
-# Install pnpm
-RUN npm install -g pnpm
+# Install pnpm (pinned: pnpm v11 fails install with ERR_PNPM_IGNORED_BUILDS
+# on dependencies like esbuild that ship postinstall scripts)
+RUN npm install -g pnpm@10.17.0
 
 # Set working directory
 WORKDIR /app

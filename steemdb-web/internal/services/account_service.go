@@ -38,7 +38,10 @@ func (s *AccountService) GetAccount(ctx context.Context, name string) (map[strin
 	collection := s.db.Collection("account")
 	var account bson.M
 
-	err := collection.FindOne(ctx, bson.M{"name": name}).Decode(&account)
+	// The sync schema keys account documents by _id = account name; the
+	// "name" field only exists on docs already populated by the refresher,
+	// and querying it would also be an unindexed collection scan.
+	err := collection.FindOne(ctx, bson.M{"_id": name}).Decode(&account)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("account not found: %s", name)
@@ -104,9 +107,9 @@ func (s *AccountService) GetAccounts(ctx context.Context, params models.Paginati
 func (s *AccountService) SearchAccounts(ctx context.Context, query string, limit int) (*models.AccountSearchResult, error) {
 	collection := s.db.Collection("account")
 
-	// Build search filter
+	// Build search filter — _id is the account name (see GetAccount)
 	filter := bson.M{
-		"name": bson.M{
+		"_id": bson.M{
 			"$regex":   fmt.Sprintf("^%s", query),
 			"$options": "i",
 		},
@@ -350,8 +353,14 @@ func (s *AccountService) GetTopAccounts(ctx context.Context, criteria string, li
 // map — sync writes raw RPC values that a rigid struct cannot decode) into an
 // AccountSummary with tolerant type coercion.
 func accountSummaryFromMap(m bson.M) models.AccountSummary {
+	// Stubs not yet populated by the refresher carry no "name" field; _id is
+	// always the account name.
+	name := mapString(m, "name")
+	if name == "" {
+		name = mapString(m, "_id")
+	}
 	return models.AccountSummary{
-		Name:          mapString(m, "name"),
+		Name:          name,
 		Reputation:    int64(mapFloat(m, "reputation")),
 		VestingShares: mapFloat(m, "vesting_shares"),
 		Balance:       mapFloat(m, "balance"),
