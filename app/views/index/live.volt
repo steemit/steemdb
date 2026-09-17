@@ -6,7 +6,7 @@
          var sock = null;
          var ellog = null;
 
-         window.onload = function() {
+         function connectLiveFeed() {
 
             var wsuri;
             ellog = document.getElementById('log');
@@ -40,7 +40,15 @@
                   log(JSON.stringify(data));
                }
             }
-         };
+         }
+
+         // connect as soon as the DOM is ready: window.onload waits for every
+         // iframe (the TradingView widget took ~40s), which delayed the feed
+         if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", connectLiveFeed);
+         } else {
+            connectLiveFeed();
+         }
 
          function broadcast() {
             var account = document.getElementById('account').value;
