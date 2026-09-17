@@ -13,6 +13,8 @@ import math
 import sys
 import os
 import re
+import time
+import urllib.request
 
 log_tag = '[Live] '
 env_dist = os.environ
@@ -30,6 +32,48 @@ fullnodes = [
     steemd_url,
 ]
 rpc = Steem(fullnodes)
+
+# The legacy steem-python client can fail on get_dynamic_global_properties when a
+# node answers with the newer asset format (bad_cast_exception). Talk to the node
+# over plain JSON-RPC instead and keep steem-python only for get_block.
+PROPS_METHODS = [
+    'database_api.get_dynamic_global_properties',
+    'condenser_api.get_dynamic_global_properties',
+]
+
+
+def fetch_props():
+    last_error = None
+    for node in fullnodes:
+        for method in PROPS_METHODS:
+            try:
+                body = json.dumps(
+                    {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': []}
+                ).encode('utf8')
+                with urllib.request.urlopen(node, data=body, timeout=15) as response:
+                    payload = json.loads(response.read())
+                if 'result' in payload:
+                    return payload['result']
+                last_error = payload.get('error', payload)
+            except Exception as e:
+                last_error = e
+    # last resort: the steem-python client
+    try:
+        return rpc.get_dynamic_global_properties()
+    except Exception as e:
+        last_error = e
+    raise RuntimeError('cannot fetch dynamic global properties: %s' % (last_error,))
+
+
+def asset_amount(value):
+    """Accept legacy "123.456 STEEM" strings, NAI objects and plain numbers."""
+    if isinstance(value, dict):
+        amount = float(value.get('amount', 0))
+        return amount / (10 ** int(value.get('precision', 3)))
+    if isinstance(value, (int, float)):
+        return float(value)
+    return float(str(value).split(" ")[0])
+
 
 class BroadcastServerProtocol(WebSocketServerProtocol):
 
@@ -54,38 +98,64 @@ class BroadcastServerFactory(WebSocketServerFactory):
 
     def __init__(self, url):
         WebSocketServerFactory.__init__(self, url)
-        props = rpc.get_dynamic_global_properties()
         self.clients = []
         self.channels = {}
         self.tickcount = 0
+        props = None
+        for attempt in range(60):
+            try:
+                props = fetch_props()
+                break
+            except Exception as e:
+                print(log_tag + 'waiting for node: %s' % (e,))
+                sys.stdout.flush()
+                time.sleep(3)
+        if props is None:
+            # never start with last_block_processed=0: tick() would try to publish
+            # the whole chain history in one go
+            raise RuntimeError('could not read dynamic global properties at startup')
         self.last_block = props['head_block_number']
         self.last_block_processed = props['last_irreversible_block_num']
         self.mentions = re.compile(r"([@])(\w+)\b")
+        print(log_tag + 'starting at head block %s' % (self.last_block,))
+        sys.stdout.flush()
         self.tick()
 
     def tick(self):
-        props = rpc.get_dynamic_global_properties()
-        #state = rpc.get_state('@jesta')
-        irreversible = props['last_irreversible_block_num']
+        # any unhandled error here used to kill the reactor.callLater chain for
+        # good (last seen 2026-06-16); the feed must survive node hiccups
+        try:
+            props = fetch_props()
+            irreversible = props['last_irreversible_block_num']
 
-        if props['head_block_number'] != self.last_block:
-            self.last_block = props['head_block_number']
-            # print("new block {}".format(self.last_block))
-            self.publishProps(props)
-            #self.publishState(state)
+            if props['head_block_number'] != self.last_block:
+                self.last_block = props['head_block_number']
+                # print("new block {}\n".format(self.last_block))
+                self.publishProps(props)
+                #self.publishState(state)
 
-        while (irreversible - self.last_block_processed) > 0:
-            self.last_block_processed += 1
-            # publish operation events to subscribers
-            # print("processing block {} [{}/{}/{}]".format(self.last_block_processed, len(self.clients), len(self.channels), sum(len(v) for v in self.channels.values())))
-            self.publishBlock(self.last_block_processed)
-            # self.publishOps(self.last_block_processed)
+            # after a long outage do not replay the whole backlog to the clients
+            backlog = irreversible - self.last_block_processed
+            if backlog > 120:
+                print(log_tag + 'skipping backlog of %s blocks' % (backlog,))
+                sys.stdout.flush()
+                self.last_block_processed = irreversible - 20
+
+            while (irreversible - self.last_block_processed) > 0:
+                self.last_block_processed += 1
+                # publish operation events to subscribers
+                # print("processing block {} [{}/{}/{}]".format(self.last_block_processed, len(self.clients), len(self.channels), sum(len(v) for v in self.channels.values())))
+                self.publishBlock(self.last_block_processed)
+                # self.publishOps(self.last_block_processed)
+        except Exception as e:
+            print(log_tag + 'tick error: %s' % (e,))
+            sys.stdout.flush()
 
         reactor.callLater(1, self.tick)
 
     def publishProps(self, props):
-        total_vesting_fund_steem = float(props['total_vesting_fund_steem'].split(" ")[0])
-        total_vesting_shares = float(props['total_vesting_shares'].split(" ")[0])
+        total_vesting_fund_steem = asset_amount(props['total_vesting_fund_steem'])
+        total_vesting_shares = asset_amount(props['total_vesting_shares'])
         props['steem_per_mvests'] = math.floor(total_vesting_fund_steem / total_vesting_shares * 1000000 * 1000) / 1000
         props['reversible_blocks'] = props['head_block_number'] - props['last_irreversible_block_num']
         self.publish("props", "props", props)
