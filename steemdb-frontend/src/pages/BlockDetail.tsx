@@ -201,9 +201,11 @@ function VirtualOpsTab({ ops }: { ops: VirtualOperation[] }) {
 
 function JsonTab({ data }: { data: unknown }) {
   return (
-    <pre className="max-h-[32rem] overflow-auto rounded-md bg-muted p-4 text-xs leading-relaxed">
-      {JSON.stringify(data, null, 2)}
-    </pre>
+    <div className="min-w-0">
+      <pre className="max-h-[32rem] max-w-full overflow-auto rounded-md bg-muted p-4 text-xs leading-relaxed">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </div>
   );
 }
 
