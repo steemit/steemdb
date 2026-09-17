@@ -28,7 +28,93 @@
     <div class="row">
       <div class="sixteen wide column">
         <!-- TradingView Widget BEGIN -->
-        <script type="text/javascript" src="https://d33t3vvu2t2yu5.cloudfront.net/tv.js"></script>
+        <div id="tv-chart-box" style="min-height:400px;position:relative;">
+          <div id="tv-chart-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#999;">
+            Loading chart&hellip;
+          </div>
+          <canvas id="price-fallback" style="display:none;width:100%;height:400px;"></canvas>
+        </div>
+        <script type="text/javascript" src="https://d33t3vvu2t2yu5.cloudfront.net/tv.js" async></script>
+        <script type="text/javascript">
+        (function() {
+          var WIDGET_WAIT_MS = 8000;
+          function chartReady() {
+            // tv.js creates an iframe under a wrapper div inside our box
+            var f = document.querySelector('#tv-chart-box iframe');
+            return f && f.clientHeight > 50 && f.clientWidth > 50;
+          }
+          function showFallback() {
+            if (document.getElementById('price-fallback').style.display !== 'none') return;
+            document.getElementById('tv-chart-loading').style.display = 'none';
+            var canvas = document.getElementById('price-fallback');
+            canvas.style.display = 'block';
+            fetch('https://api.coingecko.com/api/v3/coins/steem/market_chart?vs_currency=usd&days=90&interval=daily')
+              .then(function(r) { return r.json(); })
+              .then(function(d) { drawPriceLine(canvas, d.prices); })
+              .catch(function() {
+                canvas.outerHTML = '<div style="height:400px;display:flex;align-items:center;justify-content:center;color:#999;">Price chart unavailable</div>';
+              });
+          }
+          function drawPriceLine(canvas, prices) {
+            var dpr = window.devicePixelRatio || 1;
+            var w = canvas.clientWidth, h = canvas.clientHeight;
+            canvas.width = w * dpr; canvas.height = h * dpr;
+            var ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            var xs = prices.map(function(p) { return p[0]; });
+            var ys = prices.map(function(p) { return p[1]; });
+            var xMin = Math.min.apply(null, xs), xMax = Math.max.apply(null, xs);
+            var yMin = Math.min.apply(null, ys), yMax = Math.max.apply(null, ys);
+            var pad = (yMax - yMin) * 0.1 || 0.0001;
+            yMin -= pad; yMax += pad;
+            var L = 60, R = 10, T = 15, B = 30;
+            function X(v) { return L + (v - xMin) / (xMax - xMin) * (w - L - R); }
+            function Y(v) { return T + (1 - (v - yMin) / (yMax - yMin)) * (h - T - B); }
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = '#999';
+            for (var g = 0; g <= 4; g++) {
+              var gv = yMin + (yMax - yMin) * g / 4;
+              var gy = Y(gv);
+              ctx.beginPath(); ctx.moveTo(L, gy); ctx.lineTo(w - R, gy); ctx.stroke();
+              ctx.fillText('$' + gv.toFixed(4), 4, gy + 4);
+            }
+            for (var m = 0; m <= 3; m++) {
+              var t = new Date(xMin + (xMax - xMin) * m / 3);
+              ctx.fillText(t.toISOString().slice(0, 10), X(xMin + (xMax - xMin) * m / 3) - 24, h - 10);
+            }
+            ctx.strokeStyle = '#2185d0';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            prices.forEach(function(p, i) {
+              if (i === 0) ctx.moveTo(X(p[0]), Y(p[1])); else ctx.lineTo(X(p[0]), Y(p[1]));
+            });
+            ctx.stroke();
+            var last = prices[prices.length - 1];
+            ctx.fillStyle = '#2185d0';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.fillText('STEEM / USD  $' + last[1].toFixed(4) + '  (90d, CoinGecko)', L + 8, T + 12);
+          }
+          // wait for the widget: if tv.js is blocked (s.tradingview.com unreachable
+          // from some networks, e.g. mainland China), fall back to a canvas chart
+          var started = Date.now();
+          (function check() {
+            if (chartReady()) {
+              document.getElementById('tv-chart-loading').style.display = 'none';
+              return;
+            }
+            if (typeof TradingView === 'undefined' || Date.now() - started > WIDGET_WAIT_MS) {
+              if (Date.now() - started > WIDGET_WAIT_MS) { showFallback(); return; }
+            }
+            setTimeout(check, 500);
+          })();
+          setTimeout(function() {
+            if (!chartReady()) showFallback();
+          }, WIDGET_WAIT_MS + 4000);
+        })();
+        </script>
         <script type="text/javascript">
         new TradingView.widget({
           "autosize": true,
@@ -42,7 +128,8 @@
           "enable_publishing": false,
           "hide_top_toolbar": true,
           "allow_symbol_change": true,
-          "hideideas": true
+          "hideideas": true,
+          "container_id": "tv-chart-box"
         });
         </script>
         <!-- TradingView Widget END -->
