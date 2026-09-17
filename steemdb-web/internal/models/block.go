@@ -18,6 +18,7 @@ type Block struct {
 	Extensions            []interface{}            `json:"extensions" bson:"extensions"`
 	WitnessSignature      string                   `json:"witness_signature" bson:"witness_signature"`
 	Transactions          []Transaction            `json:"transactions" bson:"transactions"`
+	TransactionIDs        []string                 `json:"transaction_ids" bson:"transaction_ids"`
 	TransactionCount      int                      `json:"transaction_count" bson:"transaction_count"`
 	OperationCount        int                      `json:"operation_count" bson:"operation_count"`
 	Created               time.Time                `json:"created" bson:"created"`
@@ -51,6 +52,21 @@ type Operation struct {
 	OpValue   map[string]interface{} `json:"op_value" bson:"op_value"`
 	Virtual   bool                   `json:"virtual" bson:"virtual"`
 	Source    string                 `json:"source" bson:"source"`
+}
+
+// VirtualOperation represents a virtual operation of a block, as returned by
+// the steem RPC get_ops_in_block call (condenser API shape). Virtual
+// operations are not part of any signed transaction and are not persisted
+// locally, so this shape only ever comes from the RPC.
+type VirtualOperation struct {
+	BlockNum   int64                  `json:"block_num"`
+	TrxID      string                 `json:"trx_id"`
+	TrxInBlock int64                  `json:"trx_in_block"`
+	OpInTrx    int64                  `json:"op_in_trx"`
+	VirtualOp  int64                  `json:"virtual_op"`
+	Timestamp  time.Time              `json:"timestamp"`
+	OpType     string                 `json:"op_type"`
+	OpValue    map[string]interface{} `json:"op_value"`
 }
 
 // BlockSummary represents a simplified block view for lists

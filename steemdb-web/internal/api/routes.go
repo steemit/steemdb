@@ -58,6 +58,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis
 			blocks.GET("/latest", blockHandler.GetLatestBlocks)
 			blocks.GET("/stats", blockHandler.GetBlockStats)
 			blocks.GET("/:number", blockHandler.GetBlock)
+			blocks.GET("/:number/virtual-ops", blockHandler.GetBlockVirtualOps)
 		}
 
 		// Operation routes

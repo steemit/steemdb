@@ -9,6 +9,7 @@ import (
 
 	sdkapi "github.com/steemit/steemgosdk/api"
 	protocolapi "github.com/steemit/steemutil/protocol/api"
+	steemprotocol "github.com/steemit/steemutil/protocol"
 
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
@@ -113,6 +114,46 @@ func (c *Client) GetBlock(blockNum int64) (*Block, error) {
 		lastErr = err
 		c.logger.Warn("RPC call failed, retrying",
 			utils.String("method", "get_block"),
+			utils.Int64("block_num", blockNum),
+			utils.Int("attempt", attempt+1),
+			utils.Error(err),
+		)
+
+		// Switch to next node on error
+		c.switchNode()
+
+		// Wait before retry (except on last attempt)
+		if attempt < maxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// GetOpsInBlock gets the operations in a block. When onlyVirtual is true only
+// virtual operations are returned; otherwise all operations are returned.
+func (c *Client) GetOpsInBlock(blockNum int64, onlyVirtual bool) ([]*steemprotocol.OperationObject, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		api := c.getCurrentAPI()
+		ops, err := api.GetOpsInBlock(uint(blockNum), onlyVirtual)
+		if err == nil {
+			return ops, nil
+		}
+
+		lastErr = err
+		c.logger.Warn("RPC call failed, retrying",
+			utils.String("method", "get_ops_in_block"),
 			utils.Int64("block_num", blockNum),
 			utils.Int("attempt", attempt+1),
 			utils.Error(err),

@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -73,7 +75,6 @@ func (s *BlockService) enrichTransactions(block *models.Block, blockNum int64) {
 		tx := &rpcBlock.Transactions[i]
 		ops := make([]models.Operation, 0, len(tx.Operations))
 		for j := range tx.Operations {
-			opValue, _ := tx.Operations[j].Value.(map[string]interface{})
 			ops = append(ops, models.Operation{
 				ID:       fmt.Sprintf("%d:%d:%d", blockNum, i, j),
 				BlockNum: uint32(blockNum),
@@ -81,7 +82,7 @@ func (s *BlockService) enrichTransactions(block *models.Block, blockNum int64) {
 				TrxIndex: int32(i),
 				OpIndex:  int32(j),
 				OpType:   tx.Operations[j].Type,
-				OpValue:  opValue,
+				OpValue:  opToMap(tx.Operations[j].Value),
 			})
 		}
 		block.Transactions = append(block.Transactions, models.Transaction{
@@ -99,6 +100,29 @@ func (s *BlockService) enrichTransactions(block *models.Block, blockNum int64) {
 	if block.TransactionCount == 0 {
 		block.TransactionCount = len(block.Transactions)
 	}
+	if len(block.TransactionIDs) == 0 {
+		block.TransactionIDs = rpcBlock.TransactionIDs
+	}
+	// Cold-ingested historical blocks only persist the block number, so the
+	// remaining header fields are enriched from the RPC block when empty.
+	if block.BlockID == "" {
+		block.BlockID = rpcBlock.BlockID
+	}
+	if block.Previous == "" {
+		block.Previous = rpcBlock.Previous
+	}
+	if block.Witness == "" {
+		block.Witness = rpcBlock.Witness
+	}
+	if block.TransactionMerkleRoot == "" {
+		block.TransactionMerkleRoot = rpcBlock.TransactionRoot
+	}
+	if block.WitnessSignature == "" {
+		block.WitnessSignature = rpcBlock.WitnessSignature
+	}
+	if len(block.Extensions) == 0 {
+		block.Extensions = rpcBlock.Extensions
+	}
 	if block.OperationCount == 0 {
 		opCount := 0
 		for _, tx := range block.Transactions {
@@ -106,6 +130,64 @@ func (s *BlockService) enrichTransactions(block *models.Block, blockNum int64) {
 		}
 		block.OperationCount = opCount
 	}
+}
+
+// opToMap normalizes an RPC operation payload to a generic map so it can be
+// serialized as op_value. Known operation types decode to typed structs (e.g.
+// *protocol.VoteOperation) and unknown ones to *json.RawMessage, so round-trip
+// through JSON to get the generic map shape in every case.
+func opToMap(value interface{}) map[string]interface{} {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case map[string]interface{}:
+		return v
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			// Payloads that are not JSON objects (rare) have no map form.
+			return nil
+		}
+		return out
+	}
+}
+
+// GetVirtualOps retrieves the virtual operations of a block. Virtual
+// operations are not persisted locally (the sync batcher only stores block
+// headers and user operations), so they are always fetched from the steem RPC,
+// mirroring the legacy steemd.getVirtualOpsInBlock call.
+func (s *BlockService) GetVirtualOps(ctx context.Context, blockNum int64) ([]models.VirtualOperation, error) {
+	ops, err := s.steemClient.GetOpsInBlock(blockNum, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get virtual ops: %w", err)
+	}
+
+	result := make([]models.VirtualOperation, 0, len(ops))
+	for _, op := range ops {
+		if op == nil {
+			continue
+		}
+		opTimestamp := time.Time{}
+		if op.Timestamp != nil {
+			opTimestamp = steem.ToTime(*op.Timestamp)
+		}
+		result = append(result, models.VirtualOperation{
+			BlockNum:   int64(op.BlockNumber),
+			TrxID:      op.TransactionID,
+			TrxInBlock: int64(op.TransactionInBlock),
+			OpInTrx:    int64(op.OperationInTransaction),
+			VirtualOp:  int64(op.VirtualOperation),
+			Timestamp:  opTimestamp,
+			OpType:     string(op.Operation.Type()),
+			OpValue:    opToMap(op.Operation.Data()),
+		})
+	}
+
+	return result, nil
 }
 
 // GetBlocks retrieves multiple blocks with pagination

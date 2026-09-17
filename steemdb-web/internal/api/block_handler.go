@@ -50,6 +50,30 @@ func (h *BlockHandler) GetBlock(c *gin.Context) {
 	h.respondWithSuccess(c, block)
 }
 
+// GetBlockVirtualOps handles GET /api/v1/blocks/:number/virtual-ops
+func (h *BlockHandler) GetBlockVirtualOps(c *gin.Context) {
+	numberStr := c.Param("number")
+	if numberStr == "" {
+		h.respondWithError(c, http.StatusBadRequest, "Block number is required")
+		return
+	}
+
+	blockNum, err := strconv.ParseInt(numberStr, 10, 64)
+	if err != nil {
+		h.respondWithError(c, http.StatusBadRequest, "Invalid block number")
+		return
+	}
+
+	ops, err := h.blockService.GetVirtualOps(c.Request.Context(), blockNum)
+	if err != nil {
+		h.logger.Error("Failed to get block virtual ops", utils.Int64("number", blockNum), utils.Error(err))
+		h.respondWithError(c, http.StatusBadGateway, "Failed to retrieve virtual operations")
+		return
+	}
+
+	h.respondWithSuccess(c, ops)
+}
+
 // GetBlocks handles GET /api/v1/blocks
 func (h *BlockHandler) GetBlocks(c *gin.Context) {
 	// Parse pagination parameters
