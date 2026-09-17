@@ -330,9 +330,9 @@
       ellog = document.getElementById('log');
 
       if (window.location.hostname === "localhost") {
-         wsuri = "wss://localhost:8888";
+         wsuri = "wss://localhost/live-ws";
       } else {
-         wsuri = "wss://" + window.location.hostname + ":8888";
+         wsuri = "wss://" + window.location.hostname + "/live-ws";
       }
 
       if ("WebSocket" in window) {
