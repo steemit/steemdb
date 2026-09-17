@@ -300,7 +300,7 @@ export function BlockDetailPage() {
       </div>
 
       {/* Previous / next block navigation */}
-      <div className="flex items-center justify-between border-y py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-y py-3">
         <button
           onClick={() => navigate(`/blocks/${block.block_num - 1}`)}
           className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -319,7 +319,9 @@ export function BlockDetailPage() {
 
       {/* Tabbed data panels */}
       <div className="rounded-lg border">
-        <div className="flex gap-1 overflow-x-auto border-b px-2 pt-2">
+        {/* Tabs wrap on narrow screens instead of forcing the page wider
+            (nowrap buttons would set a ~530px min-content width). */}
+        <div className="flex flex-wrap gap-1 border-b px-2 pt-2">
           {tabs
             .filter((tab) => tab.enabled)
             .map((tab) => (
