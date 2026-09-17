@@ -122,7 +122,8 @@ Base URL: `/api/v1`
 
 #### Blocks
 - `GET /blocks` - Get recent blocks
-- `GET /blocks/:number` - Get specific block
+- `GET /blocks/:number` - Get specific block (headers enriched from the steem RPC for cold-ingested blocks)
+- `GET /blocks/:number/virtual-ops` - Get the virtual operations of a block (always served from the steem RPC; virtual ops are not persisted locally)
 - `GET /blocks/:number/operations` - Get block operations
 
 #### Witnesses

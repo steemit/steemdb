@@ -8,6 +8,7 @@ import type {
   BlockProductionPoint,
   TransactionVolumePoint,
   WitnessVotingPoint,
+  VirtualOperation,
   Witness, 
   GlobalStats, 
   BlockchainProps,
@@ -101,6 +102,10 @@ class ApiClient {
   // Block endpoints
   async getBlock(blockNumber: number): Promise<ApiResponse<Block>> {
     return this.request<Block>(`/v1/blocks/${blockNumber}`);
+  }
+
+  async getBlockVirtualOps(blockNumber: number): Promise<ApiResponse<VirtualOperation[]>> {
+    return this.request<VirtualOperation[]>(`/v1/blocks/${blockNumber}/virtual-ops`);
   }
 
   async getBlocks(params: PaginationParams): Promise<ApiResponse<Block[]>> {
@@ -313,6 +318,7 @@ export const {
   getAccounts,
   getAccountHistory,
   getBlock,
+  getBlockVirtualOps,
   getBlocks,
   getLatestBlocks,
   getWitnesses,

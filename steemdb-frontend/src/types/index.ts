@@ -63,7 +63,9 @@ export interface Block {
   previous: string;
   transaction_merkle_root: string;
   witness_signature: string;
+  extensions?: unknown[];
   transactions: BlockTransaction[];
+  transaction_ids?: string[];
   transaction_count: number;
   operation_count: number;
 }
@@ -90,6 +92,19 @@ export interface BlockOperation {
   op_type: string;
   op_value: Record<string, unknown>;
   virtual: boolean;
+}
+
+// VirtualOperation is the /v1/blocks/:number/virtual-ops item shape
+// (steemdb-web models.VirtualOperation, sourced from the steem RPC).
+export interface VirtualOperation {
+  block_num: number;
+  trx_id: string;
+  trx_in_block: number;
+  op_in_trx: number;
+  virtual_op: number;
+  timestamp: string;
+  op_type: string;
+  op_value: Record<string, unknown>;
 }
 
 // BlockSummary is the compact block shape shared by the /v1/dashboard
