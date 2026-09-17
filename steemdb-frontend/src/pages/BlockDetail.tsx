@@ -340,7 +340,7 @@ export function BlockDetailPage() {
               </button>
             ))}
         </div>
-        <div className="p-4">
+        <div className="min-w-0 overflow-hidden p-4">
           {currentTab === 'operations' && (
             <div className="rounded-md border divide-y">
               {transactions.flatMap((tx) =>
