@@ -119,36 +119,47 @@ export function BlocksPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {blocks.map((block) => (
-                    <tr
-                      key={block.block_num}
-                      className="border-b hover:bg-accent/50 cursor-pointer"
-                      onClick={() => navigate(`/blocks/${block.block_num}`)}
-                    >
-                      <td className="p-3">
-                        <div className="font-medium">#{formatNumber(block.block_num)}</div>
-                      </td>
-                      <td className="p-3 text-sm text-muted-foreground">
-                        {formatTimeAgo(block.timestamp)}
-                      </td>
-                      <td className="p-3">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/accounts/${block.witness}`);
-                          }}
-                          className="text-primary hover:underline"
-                        >
-                          @{block.witness}
-                        </button>
-                      </td>
-                      <td className="p-3 text-right">{formatNumber(block.transaction_count || 0)}</td>
-                      <td className="p-3 text-right">{formatNumber(block.operation_count || 0)}</td>
-                      <td className="p-3 text-right">
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </td>
-                    </tr>
-                  ))}
+                  {blocks.map((block) => {
+                    const blockNum = block.number ?? block.block_num;
+                    const witness = block.witness?.trim();
+                    const txCount = block.transaction_count ?? block.transactions ?? 0;
+                    const opCount = block.operation_count ?? block.operations ?? 0;
+
+                    return (
+                      <tr
+                        key={blockNum}
+                        className="border-b hover:bg-accent/50 cursor-pointer"
+                        onClick={() => blockNum !== undefined && navigate(`/blocks/${blockNum}`)}
+                      >
+                        <td className="p-3">
+                          <div className="font-medium">#{blockNum !== undefined ? formatNumber(blockNum) : '—'}</div>
+                        </td>
+                        <td className="p-3 text-sm text-muted-foreground">
+                          {formatTimeAgo(block.timestamp)}
+                        </td>
+                        <td className="p-3">
+                          {witness ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/accounts/${witness}`);
+                              }}
+                              className="text-primary hover:underline"
+                            >
+                              @{witness}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">{formatNumber(txCount)}</td>
+                        <td className="p-3 text-right">{formatNumber(opCount)}</td>
+                        <td className="p-3 text-right">
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

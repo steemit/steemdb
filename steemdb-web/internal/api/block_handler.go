@@ -88,16 +88,36 @@ func (h *BlockHandler) GetBlocks(c *gin.Context) {
 		}
 	}
 
-	if pageSize := c.Query("page_size"); pageSize != "" {
-		if ps, err := strconv.Atoi(pageSize); err == nil && ps > 0 && ps <= 100 {
+	pageSizeStr := c.Query("page_size")
+	if pageSizeStr == "" {
+		pageSizeStr = c.Query("limit")
+	}
+	if pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
 			params.PageSize = ps
 		}
 	}
 
 	// Parse sort parameters
+	sortBy := c.Query("sort_by")
+	if sortBy == "" {
+		sortBy = c.Query("sort")
+	}
+	if sortBy == "" {
+		sortBy = "block_num"
+	}
+
+	sortOrder := c.Query("sort_order")
+	if sortOrder == "" {
+		sortOrder = c.Query("order")
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+
 	sortParams := models.SortParams{
-		SortBy:    c.DefaultQuery("sort_by", "block_num"),
-		SortOrder: c.DefaultQuery("sort_order", "desc"),
+		SortBy:    sortBy,
+		SortOrder: sortOrder,
 	}
 
 	result, err := h.blockService.GetBlocks(c.Request.Context(), params, sortParams)

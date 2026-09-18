@@ -108,19 +108,26 @@ class ApiClient {
     return this.request<VirtualOperation[]>(`/v1/blocks/${blockNumber}/virtual-ops`);
   }
 
-  async getBlocks(params: PaginationParams): Promise<ApiResponse<Block[]>> {
+  async getBlocks(params: PaginationParams): Promise<ApiResponse<BlockSummary[]>> {
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
+      page_size: params.limit.toString(),
       limit: params.limit.toString(),
-      ...(params.sort && { sort: params.sort }),
-      ...(params.order && { order: params.order }),
+      ...(params.sort && {
+        sort: params.sort,
+        sort_by: params.sort === 'number' ? 'block_num' : params.sort,
+      }),
+      ...(params.order && {
+        order: params.order,
+        sort_order: params.order,
+      }),
     });
 
-    return this.request<Block[]>(`/v1/blocks?${searchParams}`);
+    return this.request<BlockSummary[]>(`/v1/blocks?${searchParams}`);
   }
 
-  async getLatestBlocks(limit: number = 10): Promise<ApiResponse<Block[]>> {
-    return this.request<Block[]>(`/v1/blocks/latest?limit=${limit}`);
+  async getLatestBlocks(limit: number = 10): Promise<ApiResponse<BlockSummary[]>> {
+    return this.request<BlockSummary[]>(`/v1/blocks/latest?limit=${limit}`);
   }
 
   // Witness endpoints

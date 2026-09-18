@@ -72,6 +72,7 @@ type VirtualOperation struct {
 // BlockSummary represents a simplified block view for lists
 type BlockSummary struct {
 	Number           uint32    `json:"number"`        // mirrors block_num / _id
+	BlockNum         uint32    `json:"block_num"`     // alias for frontend compatibility
 	Timestamp        time.Time `json:"timestamp"`
 	Witness          string    `json:"witness"`
 	TransactionCount int       `json:"transaction_count"`

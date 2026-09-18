@@ -240,6 +240,7 @@ func (s *DashboardService) getDashboardDataFromUpstream(ctx context.Context, pro
 
 			blocks[i] = models.BlockSummary{
 				Number:           uint32(blockNum),
+				BlockNum:         uint32(blockNum),
 				Timestamp:        block.Timestamp,
 				Witness:          block.Witness,
 				TransactionCount: len(block.Transactions),
@@ -323,6 +324,7 @@ func (s *DashboardService) getDashboardDataFromLocal(ctx context.Context, props 
 
 		latestBlocks = append(latestBlocks, models.BlockSummary{
 			Number:           block.BlockNum,
+			BlockNum:         block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
