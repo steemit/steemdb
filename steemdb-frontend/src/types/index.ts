@@ -112,6 +112,7 @@ export interface VirtualOperation {
 // blocks channel (transactions/operations counts).
 export interface BlockSummary {
   number: number;
+  block_num?: number;
   timestamp: string;
   witness: string;
   transactions?: number;

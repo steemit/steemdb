@@ -202,7 +202,7 @@ func (s *BlockService) GetBlocks(ctx context.Context, params models.PaginationPa
 	if sortParams.SortBy != "" {
 		sortField = sortParams.SortBy
 	}
-	if sortField == "block_num" {
+	if sortField == "block_num" || sortField == "number" || sortField == "id" {
 		sortField = "_id"
 	}
 	if sortParams.SortOrder == "asc" {
@@ -240,6 +240,7 @@ func (s *BlockService) GetBlocks(ctx context.Context, params models.PaginationPa
 
 		summary := models.BlockSummary{
 			Number:           block.BlockNum,
+			BlockNum:         block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
@@ -281,6 +282,7 @@ func (s *BlockService) GetLatestBlocks(ctx context.Context, limit int) ([]models
 
 		summary := models.BlockSummary{
 			Number:           block.BlockNum,
+			BlockNum:         block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
@@ -328,6 +330,7 @@ func (s *BlockService) GetBlocksByWitness(ctx context.Context, witness string, p
 
 		summary := models.BlockSummary{
 			Number:           block.BlockNum,
+			BlockNum:         block.BlockNum,
 			Timestamp:        block.Timestamp,
 			Witness:          block.Witness,
 			TransactionCount: block.TransactionCount,
