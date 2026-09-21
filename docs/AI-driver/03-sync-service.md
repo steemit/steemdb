@@ -39,7 +39,8 @@ cd steemdb-sync && go build -o ../bin/cold_ingest ./cmd/cold_ingest
   ops → transactions → blocks → meta.max_block.** The comment in
   `cmd/live_sync/main.go` says exactly why: a block header must never land
   before its operations. Any new ingest path must copy this order.
-- Condenser quirks compensated in `convertBlockOps` (reuse this, do not
+- Condenser quirks compensated in `rpc.ConvertBlockOps` (`internal/rpc/
+  blockops.go`, shared by live_sync and repair — reuse this, do not
   re-derive): in all-ops listings `op_in_trx` is 0 for every op of a
   multi-op transaction → renumber by array position; virtual op coordinates
   are unreliable → normalize to `trx=0xFFFFFFFF, op=1..n` so ids match the
@@ -91,14 +92,18 @@ duplicate snapshot on every restart.
 ## cmd/repair + internal/checker — gap filler
 
 Scanner walks 1..maxBlock marking missing headers and zero-op blocks;
-repair re-fetches via RPC. **Known defects to not replicate:** it writes
-blocks→transactions→ops (wrong order) and does not renumber op coordinates
-(deterministically loses ops of multi-op transactions — same quirks apply
-to it because it uses the same RPC). Repair does not rewind the processor
-cursor; blocks repaired behind the cursor need a manual
-`status.processor_height` rewind to re-derive. The scanner itself is
-per-block double-query (unusable at tens of millions of blocks without the
-proposed range-aggregation redesign).
+repair re-fetches via RPC. Repair shares live_sync's exact ingest
+conventions: op ids come from `rpc.ConvertBlockOps` (renumbered `op_in_trx`,
+virtual ops at `trx=-1, op=1..n`) and the write order is the same
+crash-consistency contract (ops → transactions → blocks → max_block), so a
+crashed repair leaves either nothing or a gap the next scan re-repairs —
+never a header that hides missing ops. (Both were review findings F3/F2:
+repair used to write header-first and keep raw RPC coordinates,
+deterministically collapsing multi-op transactions onto one `_id`.)
+Repair does not rewind the processor cursor; blocks repaired behind the
+cursor need a manual `status.processor_height` rewind to re-derive. The
+scanner itself is per-block double-query (unusable at tens of millions of
+blocks without the proposed range-aggregation redesign).
 
 ## The worst known failure chain (why the invariants matter)
 

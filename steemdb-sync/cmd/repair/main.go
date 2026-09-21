@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"time"
+
+	"github.com/steemit/steemutil/protocol"
+	protocolapi "github.com/steemit/steemutil/protocol/api"
 
 	"github.com/steemit/steemdb-sync/internal/checker"
 	"github.com/steemit/steemdb-sync/internal/config"
@@ -12,6 +16,28 @@ import (
 	"github.com/steemit/steemdb-sync/internal/mongo"
 	"github.com/steemit/steemdb-sync/internal/rpc"
 )
+
+// rpcFetcher is the RPC surface repair needs: the block header plus the two
+// op listings per block (all ops, virtual-only ops).
+type rpcFetcher interface {
+	GetBlock(ctx context.Context, blockNum uint32) (*protocolapi.Block, error)
+	GetOpsInBlock(ctx context.Context, blockNum uint32, onlyVirtual bool) ([]*protocol.OperationObject, error)
+}
+
+// blockWriter is the persistence surface repair needs. The ORDER of the
+// write calls inside repairBlock is the crash-consistency contract:
+// operations → transactions → block header → max_block, identical to
+// cmd/live_sync. A block header must never land before its operations —
+// the scanner and live_sync's resume logic both treat the header as "this
+// block is done", so a header-first write would hide a partial ops failure
+// from every gap-detection path.
+type blockWriter interface {
+	BulkUpsertOperations(ctx context.Context, ops []*model.Operation) error
+	BulkUpsertTransactions(ctx context.Context, txs []*model.Transaction) error
+	BulkUpsertBlocks(ctx context.Context, blocks []*model.Block) error
+	GetMaxBlock(ctx context.Context) (uint32, error)
+	UpdateMaxBlock(ctx context.Context, blockNum uint32) error
+}
 
 func main() {
 	var (
@@ -141,87 +167,16 @@ func main() {
 	for _, mb := range filteredMissing {
 		log.Printf("Repairing block %d (reason: %s)...", mb.BlockNum, mb.Reason)
 
-		// Get block and operations from RPC
-		block, regularOps, virtualOps, err := rpcClient.GetBlockWithOps(ctx, mb.BlockNum)
+		txCount, opCount, err := repairBlock(ctx, rpcClient, mongoClient, mb.BlockNum)
 		if err != nil {
-			log.Printf("Failed to get block %d from RPC: %v", mb.BlockNum, err)
+			log.Printf("Failed to repair block %d: %v", mb.BlockNum, err)
 			failed++
 			continue
-		}
-
-		// Convert block
-		modelBlock, err := rpc.ConvertBlock(block, mb.BlockNum)
-		if err != nil {
-			log.Printf("Failed to convert block %d: %v", mb.BlockNum, err)
-			failed++
-			continue
-		}
-
-		// Convert transactions
-		var modelTxs []*model.Transaction
-		for i, trx := range block.Transactions {
-			trxPtr := &trx
-			modelTx, err := rpc.ConvertTransaction(trxPtr, mb.BlockNum, int32(i))
-			if err != nil {
-				log.Printf("Failed to convert transaction %d in block %d: %v", i, mb.BlockNum, err)
-				continue
-			}
-			modelTxs = append(modelTxs, modelTx)
-		}
-
-		// Convert operations
-		var modelOps []*model.Operation
-		for _, opObj := range regularOps {
-			modelOp, err := rpc.ConvertOperation(opObj, "rpc")
-			if err != nil {
-				log.Printf("Failed to convert operation in block %d: %v", mb.BlockNum, err)
-				continue
-			}
-			modelOps = append(modelOps, modelOp)
-		}
-		for _, opObj := range virtualOps {
-			modelOp, err := rpc.ConvertOperation(opObj, "rpc")
-			if err != nil {
-				log.Printf("Failed to convert virtual operation in block %d: %v", mb.BlockNum, err)
-				continue
-			}
-			modelOps = append(modelOps, modelOp)
-		}
-
-		// Write to MongoDB (idempotent)
-		if err := mongoClient.BulkUpsertBlocks(ctx, []*model.Block{modelBlock}); err != nil {
-			log.Printf("Failed to write block %d: %v", mb.BlockNum, err)
-			failed++
-			continue
-		}
-
-		if len(modelTxs) > 0 {
-			if err := mongoClient.BulkUpsertTransactions(ctx, modelTxs); err != nil {
-				log.Printf("Failed to write transactions for block %d: %v", mb.BlockNum, err)
-				failed++
-				continue
-			}
-		}
-
-		if len(modelOps) > 0 {
-			if err := mongoClient.BulkUpsertOperations(ctx, modelOps); err != nil {
-				log.Printf("Failed to write operations for block %d: %v", mb.BlockNum, err)
-				failed++
-				continue
-			}
-		}
-
-		// Update max block if this is the highest block
-		currentMax, _ := mongoClient.GetMaxBlock(ctx)
-		if mb.BlockNum > currentMax {
-			if err := mongoClient.UpdateMaxBlock(ctx, mb.BlockNum); err != nil {
-				log.Printf("Failed to update max block: %v", err)
-			}
 		}
 
 		repaired++
 		log.Printf("Block %d repaired successfully (%d transactions, %d operations)",
-			mb.BlockNum, len(modelTxs), len(modelOps))
+			mb.BlockNum, txCount, opCount)
 
 		// Small delay to avoid overwhelming the RPC node
 		time.Sleep(100 * time.Millisecond)
@@ -233,4 +188,78 @@ func main() {
 	log.Printf("Successfully repaired: %d", repaired)
 	log.Printf("Failed: %d", failed)
 	log.Printf("Success rate: %.2f%%", float64(repaired)/float64(len(filteredMissing))*100)
+}
+
+// repairBlock re-fetches one block from RPC and re-writes its raw-layer
+// documents. Idempotent (all writes are upserts), so re-running repair after
+// a partial failure is safe.
+func repairBlock(ctx context.Context, fetcher rpcFetcher, writer blockWriter, blockNum uint32) (txCount, opCount int, err error) {
+	// Fetch the same two listings live_sync consumes: the all-ops list
+	// (regular ops at collapsed op_in_trx coordinates, virtual ops
+	// interleaved) and the dedicated virtual-ops list. Coordinate
+	// normalization happens in rpc.ConvertBlockOps — the shared
+	// implementation of the plugin's op id convention.
+	block, err := fetcher.GetBlock(ctx, blockNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get block: %w", err)
+	}
+	allOps, err := fetcher.GetOpsInBlock(ctx, blockNum, false)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get ops: %w", err)
+	}
+	virtualOps, err := fetcher.GetOpsInBlock(ctx, blockNum, true)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get virtual ops: %w", err)
+	}
+
+	// Convert block
+	modelBlock, err := rpc.ConvertBlock(block, blockNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("convert block: %w", err)
+	}
+
+	// Convert transactions
+	var modelTxs []*model.Transaction
+	for i := range block.Transactions {
+		modelTx, err := rpc.ConvertTransaction(&block.Transactions[i], blockNum, int32(i))
+		if err != nil {
+			log.Printf("Failed to convert transaction %d in block %d: %v", i, blockNum, err)
+			continue
+		}
+		modelTxs = append(modelTxs, modelTx)
+	}
+
+	// Convert operations with renumbered coordinates (multi-op transactions
+	// are re-numbered by array position; virtual ops get the plugin's
+	// trx=-1, op=1..n coordinates), producing the same `_id`s live_sync and
+	// the ingest plugin write.
+	modelOps := rpc.ConvertBlockOps(blockNum, allOps, virtualOps)
+
+	// Write order (crash-consistency invariant, same as cmd/live_sync):
+	// operations and transactions FIRST, block header LAST.
+	if len(modelOps) > 0 {
+		if err := writer.BulkUpsertOperations(ctx, modelOps); err != nil {
+			return 0, 0, fmt.Errorf("upsert operations: %w", err)
+		}
+	}
+	if len(modelTxs) > 0 {
+		if err := writer.BulkUpsertTransactions(ctx, modelTxs); err != nil {
+			return 0, 0, fmt.Errorf("upsert transactions: %w", err)
+		}
+	}
+	if err := writer.BulkUpsertBlocks(ctx, []*model.Block{modelBlock}); err != nil {
+		return 0, 0, fmt.Errorf("upsert block: %w", err)
+	}
+
+	// Update max block if this is the highest block.
+	currentMax, err := writer.GetMaxBlock(ctx)
+	if err != nil {
+		log.Printf("Failed to read max block: %v", err)
+	} else if blockNum > currentMax {
+		if err := writer.UpdateMaxBlock(ctx, blockNum); err != nil {
+			log.Printf("Failed to update max block: %v", err)
+		}
+	}
+
+	return len(modelTxs), len(modelOps), nil
 }
