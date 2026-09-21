@@ -16,6 +16,25 @@ This service implements a three-phase synchronization architecture:
 - `cmd/live_sync`: RPC-based live block synchronization service
 - `cmd/repair`: Tool for scanning and repairing missing blocks
 
+## Ingest Endpoint Security
+
+The `cold_ingest` HTTP endpoint (`/ingest/applied_ops`, default
+`127.0.0.1:8080`) has **no authentication**: any process that can reach it
+can write arbitrary operations into the database. The steemd ingest plugin
+does not support auth headers either (it only sets `Host`, `Content-Type`,
+`User-Agent` and `Connection`), so access control is done by binding:
+
+- **Default (recommended)**: `listen_addr: "127.0.0.1:8080"` — only reachable
+  from the same host, matching the plugin default endpoint
+  `http://localhost:8080/ingest/applied_ops`.
+- **Docker / remote steemd**: bind `":8080"` (or a specific interface) only
+  inside a trusted network (e.g. the compose network shared with the steemd
+  container), and never publish the port to the LAN/public internet. In
+  `test/docker-compose` the host publish is `127.0.0.1:${INGEST_PORT:-8080}:8080`.
+
+The service logs a warning at startup whenever it is bound to a
+non-loopback address.
+
 ## Steemd Ingest Plugin
 
 The cold start phase uses a custom C++ plugin (`ingest_plugin`) for the `steemd` node. This plugin:
@@ -176,7 +195,7 @@ The service exposes Prometheus metrics at `/metrics` endpoint:
 - **Queue metrics**: `steemdb_sync_queue_size`
 - **Block metrics**: `steemdb_sync_current_block`
 
-For `cold_ingest`, metrics are available at the same HTTP server (default: `:8080/metrics`).
+For `cold_ingest`, metrics are available at the same HTTP server (default: `127.0.0.1:8080/metrics`).
 For `live_sync`, metrics are available on port `:9091/metrics`.
 
 ## Dependencies

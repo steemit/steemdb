@@ -50,7 +50,7 @@ func TestLoadConfigWithDefaults(t *testing.T) {
 	assert.Equal(t, "steemdb", cfg.Mongo.Database)
 	assert.Equal(t, "https://api.steemit.com", cfg.RPC.Endpoint)
 	assert.Equal(t, 1000, cfg.Batch.Size)
-	assert.Equal(t, ":8080", cfg.Ingest.ListenAddr)
+	assert.Equal(t, "127.0.0.1:8080", cfg.Ingest.ListenAddr)
 	assert.Equal(t, 100000, cfg.Ingest.QueueSize)
 }
 
@@ -158,7 +158,7 @@ func TestConfigDefaults(t *testing.T) {
 	assert.Equal(t, 1000, cfg.Batch.Size)
 	assert.Equal(t, "1s", cfg.Batch.FlushInterval)
 	
-	assert.Equal(t, ":8080", cfg.Ingest.ListenAddr)
+	assert.Equal(t, "127.0.0.1:8080", cfg.Ingest.ListenAddr)
 	assert.Equal(t, 100000, cfg.Ingest.QueueSize)
 	
 	assert.Equal(t, "info", cfg.Log.Level)

@@ -30,8 +30,13 @@ batch:
 
 # Ingest service settings (for cold_ingest)
 ingest:
-  listen_addr: ":8080"  # HTTP server listen address
-  queue_size: 100000    # Maximum queue size for operations
+  # Wildcard on purpose: inside the container the steemd container must
+  # reach this service across the compose network (INGEST_ENDPOINT=
+  # http://cold-ingest:8080/ingest/applied_ops). The endpoint is
+  # unauthenticated, so the host port publish in docker-compose.yml is
+  # restricted to 127.0.0.1 — do NOT widen that publish to the LAN.
+  listen_addr: ":8080"
+  queue_size: 100000
 
 # Refresher settings (cmd/refresher; witness/funds/stats/clients tickers)
 refresher:

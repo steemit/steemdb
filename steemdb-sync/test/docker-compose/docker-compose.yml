@@ -30,7 +30,11 @@ services:
       dockerfile: test/docker-compose/Dockerfile.cold-ingest
     container_name: cold-ingest-service
     ports:
-      - "${INGEST_PORT:-8080}:8080"
+      # Loopback-only host publish: the ingest endpoint is unauthenticated,
+      # so it must not be reachable from the LAN/public internet. steemd
+      # reaches it via the compose network (cold-ingest:8080), not via this
+      # published port.
+      - "127.0.0.1:${INGEST_PORT:-8080}:8080"
       - "${METRICS_PORT:-9090}:9090"
     environment:
       - CONFIG_PATH=/app/configs/config.yaml
