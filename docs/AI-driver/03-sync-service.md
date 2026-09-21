@@ -54,7 +54,11 @@ Reads `operations` in windows (default 64, env `PROCESSOR_WINDOW_SIZE`;
 buffer limit 5000/collection, `PROCESSOR_BUFFER_LIMIT`):
 
 1. One query for window block metadata (existence + timestamps), one for
-   all window ops sorted by (block_num, trx_index, op_index).
+   all window ops sorted by (block_num, trx_index, op_index). The window is
+   truncated at the first header gap; a gap at the window **head** holds the
+   window (no dispatch, no cursor advance — retry until ingest/repair lands
+   the header), and ops whose block header is missing are never dispatched
+   (holding beats dispatching with a zero timestamp).
 2. Dispatch per op (panic-safe per op) to 16 handlers.
 3. Writes split in three classes (see 02); comment family is entirely
    unbuffered (direct-write bypass) for diff read-modify-write and
@@ -100,13 +104,16 @@ proposed range-aggregation redesign).
 
 A Mongo blip >15s during cold ingest → plugin gives up on a batch →
 batcher's ticker sweep writes the batch's block **headers** → processor
-reaches that height, sees header-without-ops, dispatches nothing, advances
-cursor → plugin retry lands the ops later, but the cursor has passed:
-**ops permanently underived, no alarm**. The scanner's zero-op signal that
-could catch it is drowned out by legitimate empty blocks. Fixes under
-consideration: effectiveEnd guard (don't advance past a missing window
-head), block-only markers, empty-block-aware scanning. Until landed, treat
-"block header present, ops empty" after any infra hiccup as an incident.
+reaches that height, sees header-without-ops → **holds the window and waits**
+(the window-head guard keeps `status.processor_height` put until the header
+of the next block exists; it never advances past a block that may still be
+waiting for its ops) → plugin retry lands the ops → processing resumes with
+nothing lost. The guard converts this chain from silent permanent op loss
+into a visible stall (processor stops advancing; the hold is logged every
+retry). Remaining fixes under consideration: block-only markers,
+empty-block-aware scanning (scanner's zero-op signal is still drowned out by
+legitimate empty blocks). Until those land, a prolonged processor stall
+right after an infra hiccup still deserves a manual look.
 
 ## Other review-confirmed sharp edges (short list)
 
