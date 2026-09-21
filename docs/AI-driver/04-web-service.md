@@ -87,17 +87,27 @@ fetch failure (gap in feed).
 
 ## Config reality check
 
-- `SERVER_MODE` (also `SERVER_PORT`/`SERVER_HOST`) is wired via explicit
-  `viper.BindEnv` plus a dot-to-underscore `EnvKeyReplacer` (fixed; it used
-  to be dead — `AutomaticEnv` alone looked up `SERVER.MODE`). Adding more
-  env overrides requires an explicit `BindEnv` for dotted keys.
+- Env overrides: `viper.AutomaticEnv()` plus the dot-to-underscore
+  `EnvKeyReplacer` makes **every key already declared in `setDefaults()`
+  or config.yaml** overridable by its uppercase-underscore form —
+  `SERVER_MODE`, `AUTH_JWT_SECRET`, `LOG_LEVEL`, `CACHE_ENABLED`, …
+  (unmarshal resolves each known key through env first). An explicit
+  `viper.BindEnv` is only required for keys declared nowhere (not in
+  defaults, not in the config file — those are invisible to viper's key
+  set); the existing BindEnv calls also add the legacy
+  `MONGODB_URI`/`REDIS_URI` aliases. (Before the replacer, `AutomaticEnv`
+  looked up `SERVER.MODE` for `server.mode`, which never exists — why
+  `SERVER_MODE` used to be dead.)
 - Redis is connected and `/ready` pings it, but no service uses it
   (cache/rate-limit/JWT/metrics config sections are dead). Don't build
   on the assumption that caching exists; don't add Redis dependencies to
   readiness without using them.
 - `steem.timeout`/retry and WS tuning knobs in config.yaml are not wired
   (values hardcoded in `pkg/steem/client.go` — 10s ctx between retries,
-  4 attempts × SDK retry 3, node rotation each failure).
+  4 attempts × SDK retry 3, node rotation each failure). The env override
+  coverage above reaches them too (`STEEM_TIMEOUT`, `STEEM_RETRY_ATTEMPTS`),
+  but only `steem.nodes` is consumed (`cmd/web/main.go`) — the knobs stay
+  dead until the client reads the config.
 
 ## Deployment notes
 

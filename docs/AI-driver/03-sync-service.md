@@ -10,8 +10,10 @@ cd steemdb-sync && go build -o ../bin/cold_ingest ./cmd/cold_ingest
 
 ## cmd/cold_ingest + internal/pipeline — cold-start receiver
 
-- HTTP server (:8080 default) receiving plugin batches at
-  `/ingest/applied/applied_ops`; synchronous ACK: `Batcher.
+- HTTP server (loopback-default `127.0.0.1:8080`; the endpoint is
+  unauthenticated, so wildcard-bind only on a trusted network) receiving
+  plugin batches at `/ingest/applied/applied_ops`; synchronous ACK:
+  `Batcher.
   FlushOperationsAndBlocks` writes ops (unordered bulk upsert) then blocks,
   then 200. Plugin retries 5×3s on failure.
 - `AddBlockInfo` registers per-block metadata and tracks `maxBlockSeen`

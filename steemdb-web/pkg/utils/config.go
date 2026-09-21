@@ -162,6 +162,11 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Map dots in config keys to underscores for AutomaticEnv lookups:
 	// without the replacer, viper would look up e.g. "SERVER.MODE" for
 	// server.mode, which never exists as an environment variable.
+	// With the replacer, the override surface is every dotted key already
+	// declared in setDefaults() or the config file (SERVER_MODE,
+	// AUTH_JWT_SECRET, LOG_LEVEL, CACHE_ENABLED, ...); an explicit BindEnv
+	// below is only needed for keys that are declared nowhere, or to add
+	// extra env aliases.
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Bind specific environment variables for nested configs
