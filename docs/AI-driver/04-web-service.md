@@ -23,7 +23,8 @@ former `[]models.Account` and `[]string` decodes were the counter-example
 that produced P0s (`/labs/powerup|powerdown|rshares|curation|author` failed
 on non-empty results; `/labs/pending` had an inverted time window); all five
 joins now decode as `[]bson.M` + `accountSummaryFromLookup` and the pending
-window spans [12.5 days ago, 7 days ago] (fixed 2026-09). Same rule
+window spans [7 days ago, 156 hours ago] — the legacy 12-hour pre-cashout
+review window (fixed 2026-09). Same rule
 for `json_metadata`: it may be a raw string (invalid chain JSON), decode
 leniently and never let one bad document 500 a whole page.
 

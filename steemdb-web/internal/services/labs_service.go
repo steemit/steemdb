@@ -1065,13 +1065,14 @@ func (s *LabsService) GetPendingPosts(ctx context.Context) ([]models.PendingPost
 // Helper functions
 
 // pendingPostsWindow returns the [start, end] created-time bounds for the
-// pending payout review: posts created between 12.5 days ago and 7 days ago
-// (payout maturity window). The previous code compared the bounds backwards
-// ($gte now-7d, $lte now-12.5d), which no document could ever match (P0-3).
+// pending payout review: posts created between 7 days ago and 156 hours
+// (6.5 days) ago — i.e. in their final 12 hours before the 7-day cashout.
+// This mirrors legacy LabsController::pendingAction exactly
+// ($gte strtotime("-7 days"), $lte strtotime("-156 hours")).
 func pendingPostsWindow(now time.Time) (time.Time, time.Time) {
 	sevenDaysAgo := now.AddDate(0, 0, -7)
-	twelveAndHalfDaysAgo := now.AddDate(0, 0, -12).Add(-12 * time.Hour)
-	return twelveAndHalfDaysAgo, sevenDaysAgo
+	hundredFiftySixHoursAgo := now.Add(-156 * time.Hour)
+	return sevenDaysAgo, hundredFiftySixHoursAgo
 }
 
 // accountSummaryFromLookup projects the account array produced by a $lookup

@@ -235,21 +235,22 @@ func TestPowerUpInstancesCoercion(t *testing.T) {
 	}
 }
 
-// TestPendingPostsWindow guards the P0-3 fix: the created-time window must
-// span [12.5 days ago, 7 days ago] with the earlier timestamp as the lower
-// bound, so the range is non-empty.
+// TestPendingPostsWindow guards the legacy-faithful pending window: the
+// created-time range must span [7 days ago, 156 hours (6.5 days) ago] —
+// the 12-hour review window before the 7-day cashout, matching legacy
+// LabsController::pendingAction ($gte "-7 days", $lte "-156 hours").
 func TestPendingPostsWindow(t *testing.T) {
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
 	start, end := pendingPostsWindow(now)
 
-	wantStart := now.AddDate(0, 0, -12).Add(-12 * time.Hour)
-	wantEnd := now.AddDate(0, 0, -7)
+	wantStart := now.AddDate(0, 0, -7)
+	wantEnd := now.Add(-156 * time.Hour)
 
 	if !start.Equal(wantStart) {
-		t.Errorf("window start = %v, want %v (12.5 days ago)", start, wantStart)
+		t.Errorf("window start = %v, want %v (7 days ago)", start, wantStart)
 	}
 	if !end.Equal(wantEnd) {
-		t.Errorf("window end = %v, want %v (7 days ago)", end, wantEnd)
+		t.Errorf("window end = %v, want %v (156 hours / 6.5 days ago)", end, wantEnd)
 	}
 	if !start.Before(end) {
 		t.Errorf("window is empty: start %v must be before end %v", start, end)
