@@ -135,8 +135,11 @@ causes incidents), S = structural (violation causes drift debt).
 ### Add a collection / backfill tool
 - [ ] `_id` deterministic; writes idempotent; write order rule 3.
 - [ ] A reader exists or "reserved" is documented; ownership declared.
-- [ ] Indexes through sync's createIndexes (mind the 10s startup timeout
-      on large DBs — create out-of-band).
+- [ ] Indexes through sync's createIndexes — built synchronously at
+      startup on a dedicated no-deadline context, so a first startup that
+      backfills a new index on a large DB blocks minutes-to-hours by
+      design (02 §index authority); pre-creating out-of-band is an
+      optional ops shortcut, no longer a timeout workaround.
 
 ### Touch compose / deploy
 - [ ] Shared-Mongo contract preserved; MONGO_URI overridable everywhere.
