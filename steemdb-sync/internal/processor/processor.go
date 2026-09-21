@@ -30,6 +30,11 @@ type Processor struct {
 	// cursor semantics can be unit tested without a live database.
 	store windowStore
 
+	// failures tracks consecutive per-op handler failures across replays of
+	// the same window and implements the poison-op escape hatch (see
+	// failedOpTracker). Nil-safe.
+	failures *failedOpTracker
+
 	catchUpSleep time.Duration
 }
 
@@ -69,6 +74,7 @@ func NewProcessor(ctx *Context, dispatcher *Dispatcher) (*Processor, error) {
 		cursor:       NewCursor(db),
 		inserter:     ctx.Inserter,
 		store:        newMongoWindowStore(db),
+		failures:     newFailedOpTracker(ctx.Cfg.Processor.SkipErrorOpsAfterRetries),
 		catchUpSleep: catchUpSleep,
 	}, nil
 }
@@ -173,16 +179,19 @@ func (p *Processor) Run(ctx context.Context) error {
 				height, height-prevHeight, oc.opsCount, oc.errCount)
 			lastLogged = height
 		}
-		if oc.errCount > 0 {
-			log.Printf("[Processor] Window %d-%d completed with %d handler errors", prevHeight+1, height, oc.errCount)
+		if oc.skippedCount > 0 {
+			// Companion to the per-op SKIP log in processWindow: a window
+			// summary so the sacrifice is visible at window granularity too.
+			log.Printf("[Processor] Window %d-%d committed while skipping %d poison op(s); their derived writes were NOT created",
+				prevHeight+1, height, oc.skippedCount)
 		}
 	}
 }
 
-// windowOutcome reports what one window attempt did. Every field except
-// newHeight is only meaningful when committed is true; newHeight always
+// windowOutcome reports what one window attempt did. newHeight always
 // carries the height the cursor should be read at next (the input height
-// unless the window committed).
+// unless the window committed); the counters describe the attempt itself —
+// meaningful for logging even when the window was held.
 type windowOutcome struct {
 	// committed is true when the window was fully dispatched, flushed, and
 	// the cursor advanced — the window's commit point. When false the cursor
@@ -193,7 +202,14 @@ type windowOutcome struct {
 	// newHeight is the new cursor position (== input height unless committed).
 	newHeight uint32
 	opsCount  int
-	errCount  int
+	// errCount is the number of ops whose handler failed in this attempt.
+	// A committed window always has errCount == 0 — the error gate below
+	// holds any window with handler errors.
+	errCount int
+	// skippedCount is the number of poison ops deliberately not dispatched
+	// (they exhausted processor.skip_error_ops_after_retries). Their derived
+	// writes were NOT created.
+	skippedCount int
 
 	// Phase timings for the periodic window-breakdown log.
 	fetchMs, dispatchMs, flushMs, cursorMs time.Duration
@@ -207,9 +223,13 @@ type windowOutcome struct {
 //     advance) instead of skipping over the block;
 //  2. refuse to dispatch ops of a block whose header is missing (a zero
 //     timestamp would pollute _ts downstream) — hold and wait;
-//  3. only after every buffered write has been flushed does the cursor
-//     advance. Every wait/error path above leaves the cursor untouched, so
-//     the next iteration replays the same window.
+//  3. flush every buffered write (even when the window is about to be held —
+//     idempotent upserts make the partial landing safe) and refuse to
+//     advance when any op's handler errored or any flush failed: replay
+//     never returns for a block the cursor has passed, so committing past
+//     an error would permanently drop that op's derived writes (F5);
+//  4. only then advance the cursor. Every wait/error path above leaves the
+//     cursor untouched, so the next iteration replays the same window.
 func (p *Processor) processWindow(ctx context.Context, height uint32) windowOutcome {
 	oc := windowOutcome{newHeight: height}
 
@@ -273,8 +293,12 @@ func (p *Processor) processWindow(ctx context.Context, height uint32) windowOutc
 	oc.fetchMs = tDispatch.Sub(tFetch)
 
 	// Dispatch grouped by block to preserve the per-block error accounting
-	// and intra-block ordering semantics of DispatchBlock.
-	errCount := 0
+	// and intra-block ordering semantics of DispatchBlock. Ops that have
+	// exhausted their retry budget (poison ops) are skipped here — the only
+	// path that deliberately forgoes an op's derived writes (loud log below).
+	var failed []string
+	var dispatchedIDs []string
+	skipped := 0
 	var (
 		currentBlock uint32
 		blockOps     []*model.Operation
@@ -282,36 +306,72 @@ func (p *Processor) processWindow(ctx context.Context, height uint32) windowOutc
 	)
 	dispatchGroup := func() {
 		if len(blockOps) > 0 {
-			errCount += p.dispatcher.DispatchBlock(ctx, blockOps, blockTS)
+			failed = append(failed, p.dispatcher.DispatchBlock(ctx, blockOps, blockTS)...)
+			blockOps = nil
 		}
 	}
 	for _, op := range ops {
 		if op.BlockNum != currentBlock {
 			dispatchGroup()
 			currentBlock = op.BlockNum
-			blockOps = nil
 			// Presence guaranteed by firstOpsBlockWithoutHeader above; a
 			// missing entry no longer degrades to a zero timestamp.
 			blockTS = windowTS[op.BlockNum]
 		}
+		if skip, streak, threshold := p.failures.skipInfo(op.ID); skip {
+			log.Printf("[Processor] SKIP op %s (type=%s, block=%d): handler failed %d consecutive window attempts (processor.skip_error_ops_after_retries=%d); advancing past it — derived writes for this op are NOT created. Investigate the op and re-derive manually if needed.",
+				op.ID, op.OpType, op.BlockNum, streak, threshold)
+			skipped++
+			continue
+		}
+		dispatchedIDs = append(dispatchedIDs, op.ID)
 		blockOps = append(blockOps, op)
 	}
 	dispatchGroup()
 
+	// Bookkeeping for the poison-op tracker must happen before any early
+	// return below so a held window's retry accounting stays correct even
+	// when FlushAll also fails.
+	p.failures.recordAttempt(dispatchedIDs, failed)
+
 	tFlush := time.Now()
 	oc.dispatchMs = tFlush.Sub(tDispatch)
+	oc.opsCount = len(ops)
 
-	// Flush all buffered writes. The cursor must not advance unless every
-	// bucket landed: on error the window replays (idempotent writes).
+	// Flush all buffered writes even when handler errors will hold the window
+	// below: landing the successfully-dispatched writes now is safe — buffered
+	// writes are idempotent upserts and direct-write handlers carry their own
+	// replay guards (last_applied_op) — and it leaves the replay to converge
+	// on the failing ops instead of repeating the whole buffer. On flush
+	// error the buffers keep their contents (see MongoInserter.flushBucketLocked)
+	// and the window replays.
+	var flushErr error
 	if p.inserter != nil {
-		if err := p.inserter.FlushAll(ctx); err != nil {
-			log.Printf("[Processor] Error flushing window %d-%d buffers: %v", start, effectiveEnd, err)
-			return oc
-		}
+		flushErr = p.inserter.FlushAll(ctx)
 	}
 
 	tCursor := time.Now()
 	oc.flushMs = tCursor.Sub(tFlush)
+
+	if flushErr != nil {
+		log.Printf("[Processor] Error flushing window %d-%d buffers: %v", start, effectiveEnd, flushErr)
+		if len(failed) == 0 {
+			return oc
+		}
+		// Handler errors are pending too — fall through to the gate below,
+		// which logs the more specific reason for holding the window.
+	}
+	if len(failed) > 0 {
+		// Handler-error gate (sync review finding F5): the cursor must not
+		// advance past an op whose handler failed — replay never returns for
+		// it, so committing here would permanently drop its derived writes.
+		// Hold the window; the next iteration replays it (idempotent writes).
+		log.Printf("[Processor] Window %d-%d held: %d/%d op(s) failed their handler; cursor not advanced — window replays",
+			start, effectiveEnd, len(failed), len(ops))
+		oc.errCount = len(failed)
+		oc.skippedCount = skipped
+		return oc
+	}
 
 	// Advance the cursor — the window's commit point. A crash before this
 	// replays the whole window; handler idempotency makes that safe.
@@ -319,12 +379,13 @@ func (p *Processor) processWindow(ctx context.Context, height uint32) windowOutc
 		log.Printf("[Processor] Error advancing cursor to %d: %v", effectiveEnd, err)
 		return oc
 	}
+	p.failures.reset()
 
 	oc.cursorMs = time.Since(tCursor)
 	oc.committed = true
 	oc.newHeight = effectiveEnd
-	oc.opsCount = len(ops)
-	oc.errCount = errCount
+	oc.errCount = len(failed)
+	oc.skippedCount = skipped
 
 	metrics.RecordWindow(int(effectiveEnd-start+1), len(ops), time.Since(windowStart))
 

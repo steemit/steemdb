@@ -194,3 +194,30 @@ func TestLogLevelEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "debug", cfg.Log.Level)
 }
+
+// TestProcessorSkipErrorOpsAfterRetriesEnv verifies the poison-op escape
+// hatch env override, including that the default (unset) is 0 (never skip).
+func TestProcessorSkipErrorOpsAfterRetriesEnv(t *testing.T) {
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.Processor.SkipErrorOpsAfterRetries, "default must be 0 (never skip poison ops)")
+
+	os.Setenv("PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES", "3")
+	defer os.Unsetenv("PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES")
+
+	cfg, err = config.Load("")
+	require.NoError(t, err)
+	assert.Equal(t, 3, cfg.Processor.SkipErrorOpsAfterRetries)
+}
+
+// TestProcessorSkipErrorOpsAfterRetriesValidation guards the config check.
+func TestProcessorSkipErrorOpsAfterRetriesValidation(t *testing.T) {
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+
+	cfg.Processor.SkipErrorOpsAfterRetries = -1
+	assert.Error(t, cfg.Validate())
+
+	cfg.Processor.SkipErrorOpsAfterRetries = 2
+	assert.NoError(t, cfg.Validate())
+}
