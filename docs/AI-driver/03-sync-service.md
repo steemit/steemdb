@@ -70,7 +70,10 @@ buffer limit 5000/collection, `PROCESSOR_BUFFER_LIMIT`):
 **Invariants that make crash-replay safe** — keep them true or fix the docs:
 window writes are deterministic functions of ops; same-filter conflicts
 flush the bucket (later wins); comment writes carry `last_applied_op`
-in the same UpdateOne as the body patch.
+in the same UpdateOne as the body patch, and the replay guard compares
+it as a numeric (block, trx, op) tuple — `<=` skips, `>` applies — so a
+replayed window with two diffs to one comment skips both instead of
+double-patching (unparseable markers degrade to exact string equality).
 
 Two workers run in-process (paused while catching up >1000 blocks):
 - `account_refresher` — batches `_dirty` accounts through `get_accounts`
@@ -147,10 +150,11 @@ cursor if it has passed.
 - Handler errors do not block cursor advance; mid-window flush failure
   clears the buffer and the window can still commit → buffered writes are
   not fully covered by "FlushAll replays the window".
-- `last_applied_op` equality check breaks on two diffs to the same comment
-  in one window + replay (double patch). Correct fix must compare
-  (block,trx,op) numerically — **op.ID strings do not sort**
-  (`"100:10:0" < "100:2:0"` lexicographically).
+- ~~`last_applied_op` equality check breaks on two diffs to the same comment
+  in one window + replay (double patch)~~ — fixed: the guard now compares
+  (block,trx,op) numerically (op.ID strings do not sort:
+  `"100:10:0" < "100:2:0"` lexicographically); unparseable markers fall
+  back to exact string equality.
 - Timestamp parse failures fall back to `time.Now()` (ingest handler and
   RPC converter) — a deterministic-error retry would be correct instead.
 - rescanner `$set`s the whole get_content result, which can overwrite

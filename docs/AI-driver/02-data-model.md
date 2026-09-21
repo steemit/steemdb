@@ -104,7 +104,9 @@ only web write to Mongo; self-contained.
 2. Filter-based upserts (Pattern B) → buffered with same-filter conflict
    detection (flush bucket before append, later write wins).
 3. Read-modify-write (comment diff) → unbuffered direct write +
-   `last_applied_op` idempotency marker.
+   `last_applied_op` idempotency marker, order-compared as a numeric
+   (block, trx, op) tuple (`<=` marker → skip) so multi-diff window
+   replays stay exactly-once.
 
 ## Dead/unread collections (at review time)
 
