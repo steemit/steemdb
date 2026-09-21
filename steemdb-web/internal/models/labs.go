@@ -2,13 +2,15 @@ package models
 
 import "time"
 
-// PowerUp represents a power up (vesting deposit) entry
+// PowerUp represents a power up (vesting deposit) entry. Account is a
+// tolerant summary projection: account documents written by steemdb-sync
+// keep raw RPC values (string ints/dates) that a rigid struct cannot decode.
 type PowerUp struct {
-	User      string   `json:"user"`
-	Count     int      `json:"count"`
-	Total     float64  `json:"total"`
-	Instances []string `json:"instances,omitempty"`
-	Account   *Account `json:"account,omitempty"`
+	User      string          `json:"user"`
+	Count     int             `json:"count"`
+	Total     float64         `json:"total"`
+	Instances []float64       `json:"instances,omitempty"`
+	Account   *AccountSummary `json:"account,omitempty"`
 }
 
 // PowerDown represents power down statistics
@@ -35,12 +37,12 @@ type PowerDownDay struct {
 
 // PowerDownUser represents user power down statistics
 type PowerDownUser struct {
-	User        string   `json:"user"`
-	Count       int      `json:"count"`
-	Withdrawn   float64  `json:"withdrawn"`
-	Deposited   float64  `json:"deposited"`
-	DepositedTo []string `json:"deposited_to,omitempty"`
-	Account     *Account `json:"account,omitempty"`
+	User        string          `json:"user"`
+	Count       int             `json:"count"`
+	Withdrawn   float64         `json:"withdrawn"`
+	Deposited   float64         `json:"deposited"`
+	DepositedTo []string        `json:"deposited_to,omitempty"`
+	Account     *AccountSummary `json:"account,omitempty"`
 }
 
 // PowerDownProps represents blockchain properties for power down
@@ -52,39 +54,39 @@ type PowerDownProps struct {
 
 // RsharesAllocation represents rshares allocation data
 type RsharesAllocation struct {
-	Voter   string   `json:"voter"`
-	Votes   int      `json:"votes"`
-	Rshares int64    `json:"rshares"`
-	Account *Account `json:"account,omitempty"`
+	Voter   string          `json:"voter"`
+	Votes   int             `json:"votes"`
+	Rshares int64           `json:"rshares"`
+	Account *AccountSummary `json:"account,omitempty"`
 }
 
 // CurationLeaderboard represents curation reward leaderboard entry
 type CurationLeaderboard struct {
-	Curator   string   `json:"curator"`
-	Count     int      `json:"count"`
-	Total     float64  `json:"total"`
-	Authors   []string `json:"authors,omitempty"`
-	Permlinks []string `json:"permlinks,omitempty"`
-	Account   *Account `json:"account,omitempty"`
+	Curator   string          `json:"curator"`
+	Count     int             `json:"count"`
+	Total     float64         `json:"total"`
+	Authors   []string        `json:"authors,omitempty"`
+	Permlinks []string        `json:"permlinks,omitempty"`
+	Account   *AccountSummary `json:"account,omitempty"`
 }
 
 // AuthorLeaderboard represents author reward leaderboard entry
 type AuthorLeaderboard struct {
-	Author     string   `json:"author"`
-	Count      int      `json:"count"`
-	Posts      int      `json:"posts"`
-	Replies    int      `json:"replies"`
-	PostVest   float64  `json:"post_vest"`
-	PostSbd    float64  `json:"post_sbd"`
-	PostSteem  float64  `json:"post_steem"`
-	ReplyVest  float64  `json:"reply_vest"`
-	ReplySbd   float64  `json:"reply_sbd"`
-	ReplySteem float64  `json:"reply_steem"`
-	Sbd        float64  `json:"sbd"`
-	Steem      float64  `json:"steem"`
-	Vest       float64  `json:"vest"`
-	Permlinks  []string `json:"permlinks,omitempty"`
-	Account    *Account `json:"account,omitempty"`
+	Author     string          `json:"author"`
+	Count      int             `json:"count"`
+	Posts      int             `json:"posts"`
+	Replies    int             `json:"replies"`
+	PostVest   float64         `json:"post_vest"`
+	PostSbd    float64         `json:"post_sbd"`
+	PostSteem  float64         `json:"post_steem"`
+	ReplyVest  float64         `json:"reply_vest"`
+	ReplySbd   float64         `json:"reply_sbd"`
+	ReplySteem float64         `json:"reply_steem"`
+	Sbd        float64         `json:"sbd"`
+	Steem      float64         `json:"steem"`
+	Vest       float64         `json:"vest"`
+	Permlinks  []string        `json:"permlinks,omitempty"`
+	Account    *AccountSummary `json:"account,omitempty"`
 }
 
 // Flags represents flagged accounts statistics
