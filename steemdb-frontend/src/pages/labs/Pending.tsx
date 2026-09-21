@@ -51,7 +51,7 @@ export function PendingPage() {
         </Link>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Pending Posts</h1>
-          <p className="text-muted-foreground">Posts awaiting payout (6-7 days old)</p>
+          <p className="text-muted-foreground">Posts awaiting payout (6.5-7 days old)</p>
         </div>
       </div>
 
@@ -59,7 +59,8 @@ export function PendingPage() {
         <CardHeader>
           <CardTitle>Pending Payout Posts</CardTitle>
           <CardDescription>
-            Posts created 6-7 days ago, sorted by pending payout value
+            Posts created 6.5-7 days ago, within 12 hours of cashout, sorted
+            by pending payout value
           </CardDescription>
         </CardHeader>
         <CardContent>

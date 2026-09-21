@@ -33,6 +33,20 @@ func NewLabsService(db *database.MongoDB, steemClient *steem.Client, logger util
 	}
 }
 
+// powerUpRow is one output row of the powerup aggregation ($group + $lookup).
+// Kept at package level so the tolerant decoding can be unit tested. The
+// joined account docs and the numeric amount values are decoded leniently
+// (bson.M / interface{}) because both are written by steemdb-sync with open
+// shapes: account documents carry raw RPC strings (withdrawn,
+// curation_rewards, proxied_vsf_votes, last_account_update) and
+// vesting_deposit.amount is numeric, not an asset string.
+type powerUpRow struct {
+	ID        bson.M        `bson:"_id"`
+	Count     int           `bson:"count"`
+	Instances []interface{} `bson:"instances"`
+	Account   []bson.M      `bson:"account"`
+}
+
 // GetPowerUps retrieves power up statistics
 func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.PowerUp, error) {
 	collection := s.db.Collection("vesting_deposit")
@@ -102,13 +116,7 @@ func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.
 	}
 	defer cursor.Close(ctx)
 
-	var results []struct {
-		ID        bson.M           `bson:"_id"`
-		Count     int              `bson:"count"`
-		Instances []string         `bson:"instances"`
-		Account   []models.Account `bson:"account"`
-	}
-
+	var results []powerUpRow
 	if err := cursor.All(ctx, &results); err != nil {
 		return nil, fmt.Errorf("failed to decode power ups: %w", err)
 	}
@@ -116,28 +124,24 @@ func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.
 	powerUps := make([]models.PowerUp, 0, len(results))
 	for _, r := range results {
 		user, _ := r.ID["user"].(string)
-		total := 0.0
-		for _, inst := range r.Instances {
-			// Parse amount string (e.g., "100.000 STEEM")
-			parts := strings.Fields(inst)
-			if len(parts) > 0 {
-				if val, err := strconv.ParseFloat(parts[0], 64); err == nil {
-					total += val
-				}
-			}
-		}
 
-		var account *models.Account
-		if len(r.Account) > 0 {
-			account = &r.Account[0]
+		// vesting_deposit.amount is stored as a numeric value (mirroring
+		// legacy sync.py's float conversion); older writers may still carry
+		// asset strings, so coerce each distinct amount leniently.
+		total := 0.0
+		instances := make([]float64, 0, len(r.Instances))
+		for _, inst := range r.Instances {
+			val := toFloat64(inst)
+			instances = append(instances, val)
+			total += val
 		}
 
 		powerUps = append(powerUps, models.PowerUp{
 			User:      user,
 			Count:     r.Count,
 			Total:     total,
-			Instances: r.Instances,
-			Account:   account,
+			Instances: instances,
+			Account:   accountSummaryFromLookup(r.Account),
 		})
 	}
 
@@ -357,12 +361,12 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 	defer cursor.Close(ctx)
 
 	var userResults []struct {
-		ID          bson.M           `bson:"_id"`
-		Count       int              `bson:"count"`
-		Withdrawn   float64          `bson:"withdrawn"`
-		Deposited   float64          `bson:"deposited"`
-		DepositedTo []string         `bson:"deposited_to"`
-		Account     []models.Account `bson:"account"`
+		ID          bson.M   `bson:"_id"`
+		Count       int      `bson:"count"`
+		Withdrawn   float64  `bson:"withdrawn"`
+		Deposited   float64  `bson:"deposited"`
+		DepositedTo []string `bson:"deposited_to"`
+		Account     []bson.M `bson:"account"`
 	}
 	if err := cursor.All(ctx, &userResults); err != nil {
 		return nil, fmt.Errorf("failed to decode power down users: %w", err)
@@ -373,18 +377,13 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 		userID := r.ID["user"]
 		user, _ := userID.(string)
 
-		var account *models.Account
-		if len(r.Account) > 0 {
-			account = &r.Account[0]
-		}
-
 		powerDowns = append(powerDowns, models.PowerDownUser{
 			User:        user,
 			Count:       r.Count,
 			Withdrawn:   r.Withdrawn,
 			Deposited:   r.Deposited,
 			DepositedTo: r.DepositedTo,
-			Account:     account,
+			Account:     accountSummaryFromLookup(r.Account),
 		})
 	}
 
@@ -464,10 +463,10 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time) 
 	defer cursor.Close(ctx)
 
 	var results []struct {
-		ID      bson.M           `bson:"_id"`
-		Votes   int              `bson:"votes"`
-		Rshares int64            `bson:"rshares"`
-		Account []models.Account `bson:"account"`
+		ID      bson.M   `bson:"_id"`
+		Votes   int      `bson:"votes"`
+		Rshares int64    `bson:"rshares"`
+		Account []bson.M `bson:"account"`
 	}
 	if err := cursor.All(ctx, &results); err != nil {
 		return nil, fmt.Errorf("failed to decode rshares: %w", err)
@@ -478,16 +477,11 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time) 
 		voterID := r.ID["voter"]
 		voter, _ := voterID.(string)
 
-		var account *models.Account
-		if len(r.Account) > 0 {
-			account = &r.Account[0]
-		}
-
 		allocations = append(allocations, models.RsharesAllocation{
 			Voter:   voter,
 			Votes:   r.Votes,
 			Rshares: r.Rshares,
-			Account: account,
+			Account: accountSummaryFromLookup(r.Account),
 		})
 	}
 
@@ -554,12 +548,12 @@ func (s *LabsService) GetCurationLeaderboard(ctx context.Context, date time.Time
 	defer cursor.Close(ctx)
 
 	var results []struct {
-		ID        string           `bson:"_id"`
-		Count     int              `bson:"count"`
-		Total     float64          `bson:"total"`
-		Authors   []string         `bson:"authors"`
-		Permlinks []string         `bson:"permlinks"`
-		Account   []models.Account `bson:"account"`
+		ID        string   `bson:"_id"`
+		Count     int      `bson:"count"`
+		Total     float64  `bson:"total"`
+		Authors   []string `bson:"authors"`
+		Permlinks []string `bson:"permlinks"`
+		Account   []bson.M `bson:"account"`
 	}
 	if err := cursor.All(ctx, &results); err != nil {
 		return nil, fmt.Errorf("failed to decode curation leaderboard: %w", err)
@@ -567,18 +561,13 @@ func (s *LabsService) GetCurationLeaderboard(ctx context.Context, date time.Time
 
 	leaderboard := make([]models.CurationLeaderboard, 0, len(results))
 	for _, r := range results {
-		var account *models.Account
-		if len(r.Account) > 0 {
-			account = &r.Account[0]
-		}
-
 		leaderboard = append(leaderboard, models.CurationLeaderboard{
 			Curator:   r.ID,
 			Count:     r.Count,
 			Total:     r.Total,
 			Authors:   r.Authors,
 			Permlinks: r.Permlinks,
-			Account:   account,
+			Account:   accountSummaryFromLookup(r.Account),
 		})
 	}
 
@@ -725,21 +714,21 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 	defer cursor.Close(ctx)
 
 	var results []struct {
-		ID         string           `bson:"_id"`
-		Count      int              `bson:"count"`
-		Posts      int              `bson:"posts"`
-		Replies    int              `bson:"replies"`
-		PostVest   float64          `bson:"post_vest"`
-		PostSbd    float64          `bson:"post_sbd"`
-		PostSteem  float64          `bson:"post_steem"`
-		ReplyVest  float64          `bson:"reply_vest"`
-		ReplySbd   float64          `bson:"reply_sbd"`
-		ReplySteem float64          `bson:"reply_steem"`
-		Sbd        float64          `bson:"sbd"`
-		Steem      float64          `bson:"steem"`
-		Vest       float64          `bson:"vest"`
-		Permlinks  []string         `bson:"permlinks"`
-		Account    []models.Account `bson:"account"`
+		ID         string   `bson:"_id"`
+		Count      int      `bson:"count"`
+		Posts      int      `bson:"posts"`
+		Replies    int      `bson:"replies"`
+		PostVest   float64  `bson:"post_vest"`
+		PostSbd    float64  `bson:"post_sbd"`
+		PostSteem  float64  `bson:"post_steem"`
+		ReplyVest  float64  `bson:"reply_vest"`
+		ReplySbd   float64  `bson:"reply_sbd"`
+		ReplySteem float64  `bson:"reply_steem"`
+		Sbd        float64  `bson:"sbd"`
+		Steem      float64  `bson:"steem"`
+		Vest       float64  `bson:"vest"`
+		Permlinks  []string `bson:"permlinks"`
+		Account    []bson.M `bson:"account"`
 	}
 	if err := cursor.All(ctx, &results); err != nil {
 		return nil, fmt.Errorf("failed to decode author leaderboard: %w", err)
@@ -747,11 +736,6 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 
 	leaderboard := make([]models.AuthorLeaderboard, 0, len(results))
 	for _, r := range results {
-		var account *models.Account
-		if len(r.Account) > 0 {
-			account = &r.Account[0]
-		}
-
 		leaderboard = append(leaderboard, models.AuthorLeaderboard{
 			Author:     r.ID,
 			Count:      r.Count,
@@ -767,7 +751,7 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 			Steem:      r.Steem,
 			Vest:       r.Vest,
 			Permlinks:  r.Permlinks,
-			Account:    account,
+			Account:    accountSummaryFromLookup(r.Account),
 		})
 	}
 
@@ -1030,13 +1014,12 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 func (s *LabsService) GetPendingPosts(ctx context.Context) ([]models.PendingPost, error) {
 	collection := s.db.Collection("comment")
 
-	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
-	sixDaysAgo := time.Now().AddDate(0, 0, -6).Add(-156 * time.Hour)
+	start, end := pendingPostsWindow(time.Now())
 
 	query := bson.M{
 		"created": bson.M{
-			"$gte": sevenDaysAgo,
-			"$lte": sixDaysAgo,
+			"$gte": start,
+			"$lte": end,
 		},
 	}
 
@@ -1080,6 +1063,45 @@ func (s *LabsService) GetPendingPosts(ctx context.Context) ([]models.PendingPost
 }
 
 // Helper functions
+
+// pendingPostsWindow returns the [start, end] created-time bounds for the
+// pending payout review: posts created between 7 days ago and 156 hours
+// (6.5 days) ago — i.e. in their final 12 hours before the 7-day cashout.
+// This mirrors legacy LabsController::pendingAction exactly
+// ($gte strtotime("-7 days"), $lte strtotime("-156 hours")).
+func pendingPostsWindow(now time.Time) (time.Time, time.Time) {
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	hundredFiftySixHoursAgo := now.Add(-156 * time.Hour)
+	return sevenDaysAgo, hundredFiftySixHoursAgo
+}
+
+// accountSummaryFromLookup projects the account array produced by a $lookup
+// join into the tolerant AccountSummary view. Account documents are written
+// by steemdb-sync from raw RPC values (withdrawn, curation_rewards,
+// posting_rewards, proxied_vsf_votes and last_account_update stay strings,
+// and their BSON numeric types vary between int32/int64/float64), so the
+// join result must be decoded as bson.M and coerced field by field instead
+// of into a rigid struct (P0-1, architecture constraint C1 — see
+// AccountService.GetAccount / accountSummaryFromMap).
+func accountSummaryFromLookup(docs []bson.M) *models.AccountSummary {
+	if len(docs) == 0 {
+		return nil
+	}
+	summary := accountSummaryFromMap(docs[0])
+	return &summary
+}
+
+// toFloat64 coerces an aggregation output value (numeric, or an asset string
+// like "100.000 STEEM" from older writers) to float64.
+func toFloat64(v interface{}) float64 {
+	switch val := v.(type) {
+	case string:
+		return parseAmount(val)
+	default:
+		return getFloat64(v)
+	}
+}
+
 func parseAmount(amountStr string) float64 {
 	parts := strings.Fields(amountStr)
 	if len(parts) > 0 {
@@ -1113,8 +1135,12 @@ func getFloat64(v interface{}) float64 {
 		return float64(val)
 	case int:
 		return float64(val)
+	case int32:
+		return float64(val)
 	case int64:
 		return float64(val)
+	case string:
+		return parseAmount(val)
 	default:
 		return 0
 	}
