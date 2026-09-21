@@ -87,9 +87,10 @@ fetch failure (gap in feed).
 
 ## Config reality check
 
-- Viper binds env only for Mongo/Redis URIs. `SERVER_MODE=production`
-  (compose sets it) is **not** wired — the container runs gin debug.
-  Adding env overrides requires explicit `BindEnv`.
+- `SERVER_MODE` (also `SERVER_PORT`/`SERVER_HOST`) is wired via explicit
+  `viper.BindEnv` plus a dot-to-underscore `EnvKeyReplacer` (fixed; it used
+  to be dead — `AutomaticEnv` alone looked up `SERVER.MODE`). Adding more
+  env overrides requires an explicit `BindEnv` for dotted keys.
 - Redis is connected and `/ready` pings it, but no service uses it
   (cache/rate-limit/JWT/metrics config sections are dead). Don't build
   on the assumption that caching exists; don't add Redis dependencies to

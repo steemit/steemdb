@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -158,8 +159,16 @@ func LoadConfig(configPath string) (*Config, error) {
 	// This ensures environment variables have higher priority
 	viper.AutomaticEnv()
 
+	// Map dots in config keys to underscores for AutomaticEnv lookups:
+	// without the replacer, viper would look up e.g. "SERVER.MODE" for
+	// server.mode, which never exists as an environment variable.
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
 	// Bind specific environment variables for nested configs
 	// Must be called before ReadInConfig() to ensure proper override
+	viper.BindEnv("server.mode", "SERVER_MODE")
+	viper.BindEnv("server.port", "SERVER_PORT")
+	viper.BindEnv("server.host", "SERVER_HOST")
 	viper.BindEnv("database.mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
 	viper.BindEnv("database.redis.uri", "DATABASE_REDIS_URI", "REDIS_URI")
 
