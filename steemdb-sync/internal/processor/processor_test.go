@@ -21,7 +21,8 @@ import (
 //
 // They run against fakes of the windowStore / cursorStore abstractions; the
 // production mongoWindowStore and the FlushAll/Advance error paths need a
-// live MongoDB and are covered by the e2e suite instead.
+// live MongoDB and are not covered by any automated suite (test/e2e only
+// exercises cold ingest, not the processor).
 
 // fakeWindowStore serves canned window metadata and operations and records
 // the ranges it was asked for.
