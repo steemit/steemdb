@@ -65,7 +65,7 @@ Conventions:
 - **User input into `$regex` must be `regexp.QuoteMeta`'d**; `sort_by`
   must be whitelisted.
 - **Counting large collections**: `EstimatedDocumentCount` for empty
-  filters (dashboard does; per-second WS state counts do not — known).
+  filters (dashboard and the WS `state` channel both do).
 - Error mapping: decode errors are not "not found" — distinguish
   `ErrNoDocuments` from corruption before returning 404.
 
@@ -77,15 +77,25 @@ channel; `run()` hub fans out to per-client 256-buffered send channels
 (slow clients evicted). Channels: `blocks`, `props`, `state`,
 `operation`, `@account` (mentions via regex on comment bodies —
 legacy-parity). New connections get the three defaults + replay of last
-10 irreversible blocks (currently synchronous in the hub loop — known
-head-of-line blocker; move off the hot path before extending).
+10 irreversible blocks; the replay runs on a dedicated worker fed by a
+bounded queue (capacity 128, drop-oldest on overflow) so a slow or hung
+replay cannot stall the hub loop or back-pressure the data pump (fixed
+2026-09; it used to run synchronously inside the hub loop). The `state`
+channel runs on its own 10s ticker with `EstimatedDocumentCount` (same
+rationale as dashboard); on count errors the last known counts are kept
+and a frame with no known value is skipped — zeros are never broadcast.
+All long-lived service goroutines (hub, replay worker, data pump) run
+through `runRecoverable`/`safeRun`: panics are logged and the goroutine
+keeps serving instead of killing the process. Every logical RPC in
+`pkg/steem/client.go` bounds each attempt with a 10s per-attempt timeout
+(the SDK calls take no context, so a hung node is abandoned, not waited
+out); retries rotate nodes as before.
 
-Known gaps (fix before scaling, don't copy): per-second exact
-CountDocuments on account/comment; RPC ctx not propagated (a hung node
-freezes the pump); no recover in the pump goroutine; CheckOrigin always
-true; subscription channels unvalidated/unbounded; `lastBlockProcessed`
-read across goroutines without atomics; replay advances lastBlock on
-fetch failure (gap in feed).
+Known gaps (fix before scaling, don't copy): CheckOrigin always true;
+subscription channels unvalidated/unbounded; replay advances lastBlock on
+fetch failure (gap in feed); `register`/`unregister` are unbuffered
+channels, so post-`Stop()` connect/disconnect hangs (benign while main
+exits right after); `writePump` does not watch the service context.
 
 ## Config reality check
 
@@ -105,11 +115,12 @@ fetch failure (gap in feed).
   on the assumption that caching exists; don't add Redis dependencies to
   readiness without using them.
 - `steem.timeout`/retry and WS tuning knobs in config.yaml are not wired
-  (values hardcoded in `pkg/steem/client.go` — 10s ctx between retries,
-  4 attempts × SDK retry 3, node rotation each failure). The env override
-  coverage above reaches them too (`STEEM_TIMEOUT`, `STEEM_RETRY_ATTEMPTS`),
-  but only `steem.nodes` is consumed (`cmd/web/main.go`) — the knobs stay
-  dead until the client reads the config.
+  (values hardcoded in `pkg/steem/client.go` — 10s per-attempt timeout,
+  4 attempts with node rotation each failure, backoff 1-3s capped by a
+  10s budget). The env override coverage above reaches them too
+  (`STEEM_TIMEOUT`, `STEEM_RETRY_ATTEMPTS`), but only `steem.nodes` is
+  consumed (`cmd/web/main.go`) — the knobs stay dead until the client
+  reads the config.
 
 ## Deployment notes
 
