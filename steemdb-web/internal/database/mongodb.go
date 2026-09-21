@@ -126,62 +126,14 @@ func (m *MongoDB) Transaction(ctx context.Context, fn func(mongo.SessionContext)
 	})
 }
 
-// CreateIndexes creates indexes for collections
-func (m *MongoDB) CreateIndexes(ctx context.Context) error {
-	indexes := map[string][]mongo.IndexModel{
-		"account": {
-			{Keys: map[string]interface{}{"name": 1}},
-			{Keys: map[string]interface{}{"reputation": -1}},
-			{Keys: map[string]interface{}{"vesting_shares": -1}},
-			{Keys: map[string]interface{}{"last_update": -1}},
-		},
-		"blocks": {
-			{Keys: map[string]interface{}{"timestamp": -1}},
-			{Keys: map[string]interface{}{"witness": 1}},
-		},
-		"comment": {
-			{Keys: map[string]interface{}{"author": 1, "permlink": 1}},
-			{Keys: map[string]interface{}{"category": 1}},
-			{Keys: map[string]interface{}{"created": -1}},
-			{Keys: map[string]interface{}{"net_votes": -1}},
-			{Keys: map[string]interface{}{"pending_payout_value": -1}},
-		},
-		"vote": {
-			{Keys: map[string]interface{}{"voter": 1}},
-			{Keys: map[string]interface{}{"author": 1, "permlink": 1}},
-			{Keys: map[string]interface{}{"timestamp": -1}},
-		},
-		"witness": {
-			{Keys: map[string]interface{}{"owner": 1}},
-			{Keys: map[string]interface{}{"votes": -1}},
-			{Keys: map[string]interface{}{"total_missed": 1}},
-		},
-		"transfer": {
-			{Keys: map[string]interface{}{"from": 1}},
-			{Keys: map[string]interface{}{"to": 1}},
-			{Keys: map[string]interface{}{"timestamp": -1}},
-		},
-	}
-
-	for collectionName, indexModels := range indexes {
-		collection := m.Collection(collectionName)
-
-		if len(indexModels) > 0 {
-			_, err := collection.Indexes().CreateMany(ctx, indexModels)
-			if err != nil {
-				m.logger.Warn("Failed to create indexes",
-					utils.String("collection", collectionName),
-					utils.Error(err))
-			} else {
-				m.logger.Info("Created indexes",
-					utils.String("collection", collectionName),
-					utils.Int("count", len(indexModels)))
-			}
-		}
-	}
-
-	return nil
-}
+// Note: there is intentionally no CreateIndexes here. steemdb-sync is the
+// single index authority for all sync-written collections (see
+// docs/AI-driver/02-data-model.md "Index authority"). The index creation this
+// package used to perform at startup built several indexes on fields the sync
+// writers never write (vote.timestamp, transfer.timestamp,
+// account.last_update) — pure write amplification with zero reads — and
+// raced with sync's own index builds. All legitimate entries now live in
+// steemdb-sync/internal/mongo/mongodb.go indexInventory.
 
 // GetStats returns database statistics
 func (m *MongoDB) GetStats(ctx context.Context) (map[string]interface{}, error) {

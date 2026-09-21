@@ -78,23 +78,38 @@ only web write to Mongo; self-contained.
 ## Index authority
 
 - **The single authority for indexes on sync-written collections is
-  `steemdb-sync/internal/mongo/mongodb.go` `createIndexes`, run at sync
-  service startup.** Web's `CreateIndexes` on the same collections created
-  phantom indexes on non-existent fields (`vote.timestamp`,
-  `transfer.timestamp`, `account.last_update`) — do not extend that list;
-  migrate entries into sync's list (deleting web's phantoms is pending).
+  `steemdb-sync/internal/mongo/mongodb.go` `createIndexes` (backed by
+  `indexInventory`), run at sync service startup. steemdb-web creates no
+  indexes** — its former `CreateIndexes` was removed: it built phantom
+  indexes on non-existent fields (`vote.timestamp`, `transfer.timestamp`,
+  `account.last_update`; writers use `_ts` / `scanned`) and duplicated
+  several sync-side indexes. Every legitimate entry was migrated into
+  sync's inventory, and sync's `dropLegacyWebIndexes` removes the legacy
+  web-built phantom/unused indexes from existing deployments at startup
+  (online, lossless).
+- The inventory and the drop list are guarded by `TestIndexInventory` /
+  `TestPatternBFiltersIndexed` / `TestLegacyWebIndexesAreNotRecreated` in
+  `steemdb-sync/internal/mongo/` (golden-list assertions; index changes
+  must update the tests).
 - Pattern-B collections **must** have an index matching the handler filter
   including leading order. The benefactor_reward COLLSCAN incident
   (flush 6203ms → 98ms after index) proved this is a hard coupling, not
-  tuning. There is no test guarding it yet — check manually.
-- Known missing read-side indexes at review time: `curation_reward._ts`,
-  `author_reward._ts`, `vesting_deposit._ts`, `vesting_withdraw._ts`,
-  `comment {depth, created}` / `{parent_author, parent_permlink}` /
-  `{scanned}` / rescanner queue fields, `vote {weight}`. Adding any of
-  these = sync-side change.
-- Note: `NewClient` wraps index creation in a 10s timeout — building a
-  new index on a large existing DB will time out and prevent service
-  startup. Create such indexes out-of-band first.
+  tuning; `TestPatternBFiltersIndexed` now guards it.
+- Read-side indexes were backfilled for the hot paths (review F3/F9/F11/N1):
+  `curation_reward/author_reward/vesting_deposit/vesting_withdraw {_ts:1}`
+  (labs time-range aggregations), `vote {author,permlink,_ts}` +
+  partial `{weight:1}` on `weight<0` (post votes, flags),
+  `reblog {author,permlink,_ts}`, `comment {depth,created}`,
+  `{parent_author,parent_permlink,created}`, `{scanned,created}` and
+  `{depth,pending_payout_value}` (rescanner queues), plus the posts-list
+  sort columns (`created`/`net_votes`/`pending_payout_value`/
+  `total_payout_value`/`category`). Account: `name` (labs `$lookup`),
+  `reputation`/`vesting_shares` (list sorts), `next_vesting_withdrawal`
+  (power-down schedule). Witness: `owner`/`votes`/`total_missed`.
+  `transfer` has **zero readers** — no indexes (add one with the reader).
+- Index creation runs on a dedicated context without the connect deadline:
+  builds on production-size collections take minutes-to-hours and would
+  otherwise time out at startup and block the whole sync service.
 
 ## Write-ordering / buffering classes (summary; full rule in docs/rules/)
 

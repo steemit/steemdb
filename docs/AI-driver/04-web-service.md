@@ -6,11 +6,13 @@ Single Go binary (Gin + Gorilla WebSocket) shipped in one image with Nginx
 
 ## Layering
 
-`cmd/web/main.go` (wiring: config, Mongo/Redis, CreateIndexes, graceful
-shutdown) → `internal/api/` (handlers + routes.go — parameter parsing and
-response wrapping only) → `internal/services/` (business + queries) →
-`internal/database/` + `pkg/steem` (steemgosdk client with node rotation
-and retry). Handlers stay thin; business logic lives in services.
+`cmd/web/main.go` (wiring: config, Mongo/Redis, graceful shutdown; web
+creates no indexes — sync's `createIndexes` is the single index
+authority, see 02-data-model.md) → `internal/api/` (handlers +
+routes.go — parameter parsing and response wrapping only) →
+`internal/services/` (business + queries) → `internal/database/` +
+`pkg/steem` (steemgosdk client with node rotation and retry). Handlers
+stay thin; business logic lives in services.
 
 ## The one decoding rule (learned from five broken endpoints)
 
