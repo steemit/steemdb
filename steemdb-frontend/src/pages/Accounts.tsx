@@ -346,7 +346,8 @@ export function AccountDetailPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Voting Power</span>
-              <span className="font-medium">{account.voting_power || 0}%</span>
+              {/* voting_power is stored on a 0-10000 scale (10000 = 100%) */}
+              <span className="font-medium">{((account.voting_power || 0) / 100).toFixed(1)}%</span>
             </div>
           </CardContent>
         </Card>
