@@ -35,8 +35,9 @@ recharts. ~7k lines. Dev: `pnpm install && pnpm run dev` (proxies to
 - **Scales**: `voting_power` 0–10000, vote `weight` ±10000,
   `sbd_interest_rate` basis points → divide by 100 before appending `%`.
   VESTS and STEEM are different units — never `formatCurrency(vest)` (which
-  defaults to STEEM) with a " VESTS" suffix. These four display bugs ship
-  today (review P0s); fix-adjacent code must not copy the pattern.
+  defaults to STEEM) with a " VESTS" suffix. These four display bugs were
+  fixed in PR #72; the scale rules above remain mandatory and fix-adjacent
+  code must not copy the old pattern.
 - Account amounts arrive as **numbers** from the backend (sync converts);
   types claiming `string` are stale. Use lenient formatting (existing
   utils accept both) and placeholder rendering for missing fields

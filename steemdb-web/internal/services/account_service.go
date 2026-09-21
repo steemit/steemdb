@@ -366,8 +366,11 @@ func accountSummaryFromMap(m bson.M) models.AccountSummary {
 		Balance:       mapFloat(m, "balance"),
 		SBDBalance:    mapFloat(m, "sbd_balance"),
 		PostCount:     int(mapFloat(m, "post_count")),
-		LastPost:      mapTime(m, "last_post"),
-		Created:       mapTime(m, "created"),
+		// The refresher round-trips RPC values through JSON, so integer
+		// counts land as BSON doubles; mapFloat coerces them tolerantly.
+		CommentCount: int(mapFloat(m, "comment_count")),
+		LastPost:     mapTime(m, "last_post"),
+		Created:      mapTime(m, "created"),
 	}
 }
 

@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { getAuthor } from '../../lib/api';
-import { formatCurrency, getAvatarUrl } from '../../lib/utils';
+import { formatCurrency, formatVests, getAvatarUrl } from '../../lib/utils';
 import type { AuthorLeaderboard } from '../../types';
 
 export function AuthorPage() {
@@ -142,7 +142,7 @@ export function AuthorPage() {
                     </div>
                     <div className="text-right">
                       <div className="font-semibold text-lg">
-                        {formatCurrency(entry.vest)} VESTS
+                        {formatVests(entry.vest)}
                       </div>
                     </div>
                   </div>
@@ -154,7 +154,7 @@ export function AuthorPage() {
                       </div>
                       <div className="font-medium">{entry.posts}</div>
                       <div className="text-xs text-muted-foreground">
-                        {formatCurrency(entry.post_vest)} VESTS
+                        {formatVests(entry.post_vest)}
                       </div>
                     </div>
                     <div>
@@ -164,7 +164,7 @@ export function AuthorPage() {
                       </div>
                       <div className="font-medium">{entry.replies}</div>
                       <div className="text-xs text-muted-foreground">
-                        {formatCurrency(entry.reply_vest)} VESTS
+                        {formatVests(entry.reply_vest)}
                       </div>
                     </div>
                     <div>

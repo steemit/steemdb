@@ -168,7 +168,8 @@ export function PostDetailPage() {
                     @{vote.voter}
                   </Link>
                   <div className="text-sm text-muted-foreground">
-                    {vote.weight > 0 ? '+' : ''}{vote.weight}%
+                    {/* vote weight is stored on a ±10000 scale (10000 = 100%) */}
+                    {vote.weight > 0 ? '+' : ''}{(vote.weight / 100).toFixed(1)}%
                   </div>
                 </div>
               ))}

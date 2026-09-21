@@ -62,6 +62,7 @@ type AccountSummary struct {
 	Balance       float64   `json:"balance"`
 	SBDBalance    float64   `json:"sbd_balance"`
 	PostCount     int       `json:"post_count"`
+	CommentCount  int       `json:"comment_count"`
 	LastPost      time.Time `json:"last_post"`
 	Created       time.Time `json:"created"`
 }

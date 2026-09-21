@@ -365,7 +365,8 @@ export function WitnessDetailPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">SBD Interest Rate</span>
-                <span className="font-medium">{witness.props.sbd_interest_rate || 0}%</span>
+                {/* sbd_interest_rate is stored in basis points (10000 = 100%) */}
+                <span className="font-medium">{(witness.props.sbd_interest_rate || 0) / 100}%</span>
               </div>
             </CardContent>
           </Card>

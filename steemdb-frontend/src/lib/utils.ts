@@ -118,18 +118,6 @@ export function vestToSP(vests: string, totalVests: string, totalSteem: string):
   return (vestAmount * totalSteemAmount) / totalVestAmount;
 }
 
-// Calculate voting power
-export function calculateVotingPower(lastVoteTime: Date, currentTime: Date = new Date()): number {
-  const timeDiff = currentTime.getTime() - lastVoteTime.getTime();
-  const secondsDiff = timeDiff / 1000;
-  
-  // Voting power regenerates at 20% per day (0.2 / 86400 seconds)
-  const regenRate = 0.2 / 86400;
-  const regenAmount = secondsDiff * regenRate * 100;
-  
-  return Math.min(100, regenAmount);
-}
-
 // Debounce function
 export function debounce<T extends (...args: unknown[]) => unknown>(
   func: T,
