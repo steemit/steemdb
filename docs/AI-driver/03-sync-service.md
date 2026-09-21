@@ -60,20 +60,42 @@ buffer limit 5000/collection, `PROCESSOR_BUFFER_LIMIT`):
    window (no dispatch, no cursor advance — retry until ingest/repair lands
    the header), and ops whose block header is missing are never dispatched
    (holding beats dispatching with a zero timestamp).
-2. Dispatch per op (panic-safe per op) to 16 handlers.
+2. Dispatch per op (panic-safe per op) to 16 handlers. Ops that fail their
+   handler are collected by op id; dispatch continues past them (one bad op
+   never stops the block).
 3. Writes split in three classes (see 02); comment family is entirely
    unbuffered (direct-write bypass) for diff read-modify-write and
    author_reward matched semantics.
 4. `FlushAll` (per-collection unordered BulkWrite + batched `_dirty`
-   marking) → only then `cursor.Advance` (`status.processor_height`).
+   marking) — executed even when the window is about to be held, so
+   successfully-dispatched writes land (idempotent upserts make the later
+   replay safe). A failed flush KEEPS its buffered models: an unordered
+   bulk write may have partially landed, and re-writing landed upserts is
+   harmless while dropping unlanded ones is permanent loss (review N2).
+5. Error gate before the commit: any op that failed its handler, or any
+   flush error, holds the window — the cursor does NOT advance and the next
+   iteration replays the whole window (review F5). Replay safety comes from
+   the same invariants as crash replay (below).
+
+**Poison-op escape hatch**: `processor.skip_error_ops_after_retries`
+(env `PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES`, default 0 = never skip). An
+op whose handler has failed this many *consecutive* window attempts is
+skipped (not dispatched) with a loud `SKIP op ...` log naming the op and the
+config, and the window may commit past it. Default 0 keeps the safe side: a
+stalled cursor is loudly visible (repeated per-attempt error logs, frozen
+`status.processor_height`) while silently skipped ops are not. State is
+in-memory per process and cleared on every window commit.
 
 **Invariants that make crash-replay safe** — keep them true or fix the docs:
 window writes are deterministic functions of ops; same-filter conflicts
-flush the bucket (later wins); comment writes carry `last_applied_op`
-in the same UpdateOne as the body patch, and the replay guard compares
-it as a numeric (block, trx, op) tuple — `<=` skips, `>` applies — so a
-replayed window with two diffs to one comment skips both instead of
-double-patching (unparseable markers degrade to exact string equality).
+flush the bucket (later wins); a failed flush keeps the bucket's models so
+the retry re-delivers them (idempotent upserts make the re-write harmless);
+comment writes carry `last_applied_op` in the same UpdateOne as the body
+patch, and the replay guard compares it as a numeric (block, trx, op) tuple
+— `<=` skips, `>` applies — so a replayed window with two diffs to one
+comment skips both instead of double-patching (unparseable markers degrade
+to exact string equality). These are what make BOTH crash replay AND the
+error-gate hold-and-retry window replay safe recovery strategies.
 
 Two workers run in-process (paused while catching up >1000 blocks):
 - `account_refresher` — batches `_dirty` accounts through `get_accounts`
@@ -147,9 +169,12 @@ cursor if it has passed.
 - `_id` collisions in same block: transfer/vesting_deposit/convert/
   vesting_withdraw/feed_publish/pow (legacy-inherited; fix = include
   trx/op index, needs legacy-data compatibility assessment).
-- Handler errors do not block cursor advance; mid-window flush failure
-  clears the buffer and the window can still commit → buffered writes are
-  not fully covered by "FlushAll replays the window".
+- ~~Handler errors do not block cursor advance; mid-window flush failure
+  clears the buffer and the window can still commit~~ — fixed: handler
+  errors and flush errors both hold the window (no cursor advance, full
+  replay), a failed flush keeps its buffered models for the retry, and the
+  `skip_error_ops_after_retries` escape hatch (default 0) is the only way
+  an op is deliberately passed over (loud `SKIP op` log).
 - ~~`last_applied_op` equality check breaks on two diffs to the same comment
   in one window + replay (double patch)~~ — fixed: the guard now compares
   (block,trx,op) numerically (op.ID strings do not sort:

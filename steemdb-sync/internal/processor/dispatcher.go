@@ -71,16 +71,21 @@ func safeHandle(ctx context.Context, handler OpHandler, op *model.Operation, blo
 // Operations are dispatched sequentially to preserve intra-block ordering semantics
 // (e.g., a comment op must precede a vote op on that comment within the same block).
 // A single op failure does not stop the rest of the block (matches legacy sync.py).
-func (d *Dispatcher) DispatchBlock(ctx context.Context, ops []*model.Operation, blockTS time.Time) (errors int) {
+// It returns the IDs of the operations whose handler failed or panicked; the
+// caller MUST hold the window (no cursor advance) on a non-empty result — once
+// the cursor moves past an op's block there is no replay, so an errored op
+// would otherwise be permanently underived (sync review finding F5).
+func (d *Dispatcher) DispatchBlock(ctx context.Context, ops []*model.Operation, blockTS time.Time) []string {
+	var failed []string
 	for _, op := range ops {
 		if err := d.Dispatch(ctx, op, blockTS); err != nil {
 			log.Printf("[Processor] Error processing op %s (type=%s, block=%d): %v",
 				op.ID, op.OpType, op.BlockNum, err)
-			errors++
+			failed = append(failed, op.ID)
 			// continue — don't let one bad op stop the whole block
 		}
 	}
-	return errors
+	return failed
 }
 
 // RegisteredTypes returns the set of registered op_types (for logging on startup).

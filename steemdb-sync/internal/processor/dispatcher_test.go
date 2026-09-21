@@ -98,7 +98,7 @@ func TestDispatchBlockSequentialAndErrorCount(t *testing.T) {
 		{ID: "100:0:3", BlockNum: 100, OpIndex: 3, OpType: "unknown", OpValue: map[string]interface{}{}},
 	}
 
-	errCount := d.DispatchBlock(context.Background(), ops, time.Now())
+	failed := d.DispatchBlock(context.Background(), ops, time.Now())
 
 	// Should process all in order despite the error on op index 1
 	if len(callOrder) != 3 { // 3 ops with registered handlers; unknown skipped
@@ -107,8 +107,8 @@ func TestDispatchBlockSequentialAndErrorCount(t *testing.T) {
 	if callOrder[0] != 0 || callOrder[1] != 1 || callOrder[2] != 2 {
 		t.Errorf("ops not processed in order, got: %v", callOrder)
 	}
-	if errCount != 1 {
-		t.Errorf("expected 1 error, got %d", errCount)
+	if len(failed) != 1 || failed[0] != "100:0:1" {
+		t.Errorf("expected failed IDs [100:0:1], got %v", failed)
 	}
 }
 

@@ -76,9 +76,17 @@ type ProcessorConfig struct {
 	WindowSize int `yaml:"window_size"`
 	// BufferLimit caps the per-collection write buffer size (enforced by the
 	// inserter). 0 = default (5000).
-	BufferLimit      int                    `yaml:"buffer_limit"`
-	AccountRefresher AccountRefresherConfig `yaml:"account_refresher"`
-	CommentRescanner CommentRescannerConfig `yaml:"comment_rescanner"`
+	BufferLimit int `yaml:"buffer_limit"`
+	// SkipErrorOpsAfterRetries is the escape hatch for poison operations:
+	// when an op's handler has failed for this many consecutive window
+	// attempts, the op is skipped (not dispatched) with a loud log and the
+	// window may commit past it. 0 (default) never skips — a stalled cursor
+	// is visible (repeated per-attempt error logs, frozen
+	// status.processor_height), while silently skipped ops are not.
+	// Env: PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES
+	SkipErrorOpsAfterRetries int                    `yaml:"skip_error_ops_after_retries"`
+	AccountRefresher         AccountRefresherConfig `yaml:"account_refresher"`
+	CommentRescanner         CommentRescannerConfig `yaml:"comment_rescanner"`
 }
 
 // AccountRefresherConfig contains account dirty-refresh settings
@@ -179,6 +187,8 @@ func Load(configPath string) (*Config, error) {
 			Enabled:      true,
 			CatchUpSleep: "1s",
 			StartHeight:  0,
+			// 0 = never skip poison ops (see SkipErrorOpsAfterRetries).
+			SkipErrorOpsAfterRetries: 0,
 			AccountRefresher: AccountRefresherConfig{
 				Enabled:        true,
 				Interval:       "30s",
@@ -323,6 +333,11 @@ func loadFromEnv(cfg *Config) {
 			cfg.Processor.BufferLimit = n
 		}
 	}
+	if v := os.Getenv("PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Processor.SkipErrorOpsAfterRetries = n
+		}
+	}
 	if v := os.Getenv("LIVE_SYNC_CHUNK_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.LiveSync.ChunkSize = n
@@ -363,6 +378,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Ingest.QueueSize <= 0 {
 		return errors.New("ingest.queue_size must be > 0")
+	}
+	if c.Processor.SkipErrorOpsAfterRetries < 0 {
+		return errors.New("processor.skip_error_ops_after_retries must be >= 0")
 	}
 	return nil
 }

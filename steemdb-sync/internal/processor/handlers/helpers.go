@@ -34,6 +34,22 @@ type MongoInserter struct {
 	// dirtyAccounts coalesces QueueAccountDirty marks to one update per
 	// account per window.
 	dirtyAccounts map[string]struct{}
+	// bulkWrite performs one unordered bulk write against a collection. It
+	// is a field so tests can simulate write failures without a live
+	// MongoDB (SetBulkWriteHook); production always uses the driver.
+	bulkWrite bulkWriteFunc
+}
+
+// bulkWriteFunc is the primitive behind every buffered flush: one unordered
+// BulkWrite of the given models against one collection.
+type bulkWriteFunc func(ctx context.Context, coll string, models []mongo.WriteModel) error
+
+// defaultBulkWrite returns the production bulk-write primitive over db.
+func defaultBulkWrite(db *mongo.Database) bulkWriteFunc {
+	return func(ctx context.Context, coll string, models []mongo.WriteModel) error {
+		_, err := db.Collection(coll).BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false))
+		return err
+	}
 }
 
 // writeBucket buffers the pending writes of one collection.
@@ -54,7 +70,20 @@ var unbufferedCollections = map[string]bool{
 
 // NewMongoInserter creates a new inserter backed by the given database.
 func NewMongoInserter(db *mongo.Database) *MongoInserter {
-	return &MongoInserter{db: db}
+	return &MongoInserter{db: db, bulkWrite: defaultBulkWrite(db)}
+}
+
+// SetBulkWriteHook replaces the underlying bulk-write primitive. It exists
+// for tests that simulate write failures without a live MongoDB; production
+// code must not call it. Passing nil restores the driver-backed primitive.
+func (m *MongoInserter) SetBulkWriteHook(fn bulkWriteFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if fn == nil {
+		m.bulkWrite = defaultBulkWrite(m.db)
+		return
+	}
+	m.bulkWrite = fn
 }
 
 // BeginBatch enables batch buffering with the given per-collection cap.
@@ -101,21 +130,32 @@ func (m *MongoInserter) FlushAll(ctx context.Context) error {
 }
 
 // flushBucketLocked BulkWrites one collection's pending models. Caller holds mu.
+//
+// Failure contract: on error the buffered models and their collision keys are
+// KEPT (sync review finding N2). An unordered bulk write may have partially
+// landed before failing, but every buffered write is an idempotent upsert, so
+// re-writing the models that did land on the next flush attempt is harmless —
+// while clearing the buffer on failure would permanently lose the ones that
+// did not (the window can still commit after FlushAll drains the remaining
+// buckets). The next flush (same-filter collision, buffer limit, or FlushAll)
+// retries the whole batch.
 func (m *MongoInserter) flushBucketLocked(ctx context.Context, coll string) error {
 	b := m.buckets[coll]
 	if b == nil || len(b.models) == 0 {
 		return nil
 	}
-	_, err := m.db.Collection(coll).BulkWrite(ctx, b.models, options.BulkWrite().SetOrdered(false))
+	n := len(b.models)
+	if err := m.bulkWrite(ctx, coll, b.models); err != nil {
+		return fmt.Errorf("bulk write %s (%d models): %w", coll, n, err)
+	}
 	b.models = b.models[:0]
 	b.keys = make(map[string]struct{})
-	if err != nil {
-		return fmt.Errorf("bulk write %s (%d models): %w", coll, len(b.models), err)
-	}
 	return nil
 }
 
 // flushDirtyLocked applies coalesced account dirty marks. Caller holds mu.
+// Same failure contract as flushBucketLocked: the marks are kept on error so
+// the next flush retries them (the write is an idempotent $set).
 func (m *MongoInserter) flushDirtyLocked(ctx context.Context) error {
 	if len(m.dirtyAccounts) == 0 {
 		return nil
@@ -127,10 +167,10 @@ func (m *MongoInserter) flushDirtyLocked(ctx context.Context) error {
 			SetUpdate(bson.M{"$set": bson.M{"_dirty": true}}).
 			SetUpsert(true))
 	}
-	m.dirtyAccounts = make(map[string]struct{})
-	if _, err := m.db.Collection("account").BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false)); err != nil {
+	if err := m.bulkWrite(ctx, "account", models); err != nil {
 		return fmt.Errorf("bulk write account dirty (%d models): %w", len(models), err)
 	}
+	m.dirtyAccounts = make(map[string]struct{})
 	return nil
 }
 
@@ -155,6 +195,10 @@ func (m *MongoInserter) appendModel(ctx context.Context, coll string, filter, up
 	if _, dup := b.keys[key]; dup {
 		// Same-document collision inside the window: flush first so the
 		// pending earlier write lands before this one (later op must win).
+		// If the flush fails the new model is NOT appended — the buffer (and
+		// its keys) keep the earlier write, preserving the ordering
+		// invariant; the error propagates to the handler and, via the
+		// processor's error gate, holds the window for a full replay.
 		if err := m.flushBucketLocked(ctx, coll); err != nil {
 			return err
 		}
@@ -163,6 +207,10 @@ func (m *MongoInserter) appendModel(ctx context.Context, coll string, filter, up
 		SetFilter(filter).SetUpdate(update).SetUpsert(true))
 	b.keys[key] = struct{}{}
 	if len(b.models) >= m.bufferLimit {
+		// On failure the models stay buffered (see flushBucketLocked), so a
+		// persistently failing flush can push the bucket past the limit by
+		// the remainder of the window — bounded, and the error gate holds
+		// the window after FlushAll fails.
 		return m.flushBucketLocked(ctx, coll)
 	}
 	return nil
