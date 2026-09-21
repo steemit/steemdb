@@ -89,16 +89,18 @@ outside it needs its own failure semantics; idempotency markers must
 order-compare (numerically parsed coordinates, never op.ID strings).
 
 ### G. Decorative configuration
-env tags without implementations, `SERVER_MODE` unwired, Redis/cache/
-rate-limit/JWT config with zero consumers, README endpoints that don't
-exist. **Rule**: config must be wired in the same PR that introduces it,
+env tags without implementations, Redis/cache/rate-limit/JWT config with
+zero consumers, README endpoints that don't exist (`SERVER_MODE` was in
+this group too until it got an explicit `BindEnv`). **Rule**: config must be wired in the same PR that introduces it,
 or deleted; docs that describe nonexistent behavior get fixed, not
 extended.
 
 ### H. Security posture assumed but absent
-nginx add_header inheritance silently drops all security headers on the
-SPA; ingest endpoint unauthenticated; mongo/redis published without auth;
-regex injection via unescaped user input. **Rule**: verify the posture
+nginx add_header inheritance silently dropped all security headers on the
+SPA (now fixed via a shared include in every add_header location); ingest
+endpoint unauthenticated (mitigated by loopback-default bind); mongo/redis
+published without auth; regex injection via unescaped user input (now
+QuoteMeta'd). **Rule**: verify the posture
 end-to-end (curl -I the actual responses) before calling it configured;
 QuoteMeta every user regex.
 

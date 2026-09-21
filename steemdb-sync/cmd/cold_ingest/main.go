@@ -4,9 +4,11 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,7 +57,7 @@ func main() {
 	// Create HTTP handler
 	handler := pipeline.NewIngestHandler(batcher)
 	http.HandleFunc("/ingest/applied_ops", handler.HandleAppliedOps)
-	
+
 	// Add metrics endpoint
 	http.Handle("/metrics", metrics.Handler())
 
@@ -66,6 +68,16 @@ func main() {
 	server := &http.Server{
 		Addr:    cfg.Ingest.ListenAddr,
 		Handler: http.DefaultServeMux,
+	}
+
+	// The ingest endpoint has no authentication: anyone who can reach it
+	// can write arbitrary operations into the database. Warn loudly when
+	// it is bound to something other than loopback.
+	if addr := cfg.Ingest.ListenAddr; !isLoopbackListenAddr(addr) {
+		log.Printf("WARNING: ingest server listening on %q (non-loopback). "+
+			"The ingest endpoint is unauthenticated; make sure this address is "+
+			"only reachable from a trusted network (e.g. a docker network shared "+
+			"with steemd), never exposed to the host LAN or public internet.", addr)
 	}
 
 	go func() {
@@ -83,7 +95,7 @@ func main() {
 	targetHeight := cfg.ColdStart.TargetHeight
 	if targetHeight > 0 {
 		log.Printf("Cold start target height: %d (safety margin: %d)", targetHeight, cfg.ColdStart.SafetyMargin)
-		
+
 		// Monitor for target height
 		go func() {
 			ticker := time.NewTicker(5 * time.Second)
@@ -98,9 +110,9 @@ func main() {
 					}
 
 					if maxBlockSeen >= targetHeight-cfg.ColdStart.SafetyMargin {
-						log.Printf("Reached target height (seen: %d, target: %d), shutting down...", 
+						log.Printf("Reached target height (seen: %d, target: %d), shutting down...",
 							maxBlockSeen, targetHeight-cfg.ColdStart.SafetyMargin)
-						
+
 						// Flush all batches
 						if err := batcher.Stop(); err != nil {
 							log.Printf("Error flushing batches: %v", err)
@@ -145,4 +157,28 @@ func main() {
 	}
 
 	log.Println("Shutdown complete")
+}
+
+// isLoopbackListenAddr reports whether the listen address only accepts
+// connections from the local machine. Empty means http.DefaultAddr
+// (":8080", all interfaces); a leading ":" or "0.0.0.0" host means all
+// interfaces; a host part of "localhost" or "127.x.x.x" is loopback.
+func isLoopbackListenAddr(addr string) bool {
+	if addr == "" {
+		return false
+	}
+	host := addr
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		host = addr[:i]
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		// ":8080" style — listens on all interfaces.
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

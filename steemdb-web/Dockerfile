@@ -74,6 +74,7 @@ COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 
 # Copy Nginx configuration
 COPY steemdb-web/docker/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY steemdb-web/docker/nginx/security-headers.conf /etc/nginx/security-headers.conf
 
 # Copy Supervisord configuration
 COPY steemdb-web/docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf

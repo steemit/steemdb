@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -103,17 +104,26 @@ func (s *AccountService) GetAccounts(ctx context.Context, params models.Paginati
 	}, nil
 }
 
+// accountNamePrefixFilter builds the _id filter for account name prefix
+// search. The query is user input reaching a $regex pattern, so it is
+// escaped with regexp.QuoteMeta: unescaped metacharacters turn the prefix
+// search into an arbitrary regex (e.g. ".*" forces a full collection
+// scan) — a regex injection / cheap DoS vector.
+func accountNamePrefixFilter(query string) bson.M {
+	return bson.M{
+		"_id": bson.M{
+			"$regex":   "^" + regexp.QuoteMeta(query),
+			"$options": "i",
+		},
+	}
+}
+
 // SearchAccounts searches for accounts by name pattern
 func (s *AccountService) SearchAccounts(ctx context.Context, query string, limit int) (*models.AccountSearchResult, error) {
 	collection := s.db.Collection("account")
 
 	// Build search filter — _id is the account name (see GetAccount)
-	filter := bson.M{
-		"_id": bson.M{
-			"$regex":   fmt.Sprintf("^%s", query),
-			"$options": "i",
-		},
-	}
+	filter := accountNamePrefixFilter(query)
 
 	// Count total matches
 	total, err := collection.CountDocuments(ctx, filter)

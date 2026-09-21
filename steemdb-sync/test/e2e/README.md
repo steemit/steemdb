@@ -174,6 +174,15 @@ docker run -d \
 - `--data-dir /var/steem` 是工作目录（Dockerfile 中设置）
 - 如果使用 volume 挂载，确保路径正确
 
+> **Note:** both commands point steemd at `host.docker.internal:8080` on
+> the host. `cold_ingest` now binds to `127.0.0.1:8080` by default (the
+> endpoint is unauthenticated), which a container cannot reach — when
+> `cold_ingest` runs on the host, start it with
+> `INGEST_LISTEN_ADDR=":8080"` (trusted network only), or use the
+> `test/docker-compose` workflow instead. (The e2e test itself starts
+> `cold_ingest` with `listen_addr: ":8080"` in its generated config, so
+> the automated flow is unaffected.)
+
 **检查容器状态：**
 
 ```bash

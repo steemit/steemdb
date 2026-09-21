@@ -154,7 +154,7 @@ All services are connected via a bridge network (`cold-ingest-network`):
 
 - **Port Mapping**: Host ports are mapped to container ports
   - MongoDB: `27017:27017`
-  - Cold Ingest: `8080:8080`, `9090:9090`
+  - Cold Ingest: `127.0.0.1:8080:8080` (loopback only — unauthenticated endpoint), `9090:9090`
   - Steemd: No external ports (internal only)
 
 ### Service Dependencies

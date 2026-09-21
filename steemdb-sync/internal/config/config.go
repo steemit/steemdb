@@ -130,6 +130,12 @@ type BatchConfig struct {
 
 // IngestConfig contains ingest service settings
 type IngestConfig struct {
+	// ListenAddr is the HTTP listen address for the unauthenticated
+	// ingest endpoint. It defaults to loopback: the steemd ingest plugin
+	// posts to http://localhost:8080/ingest/applied_ops, and anyone who
+	// can reach this endpoint can write arbitrary operations into the
+	// database. Bind a wildcard address (":8080" / "0.0.0.0:8080") only
+	// on a trusted network (e.g. a docker network shared with steemd).
 	ListenAddr string `yaml:"listen_addr" env:"INGEST_LISTEN_ADDR"`
 	QueueSize  int    `yaml:"queue_size" env:"INGEST_QUEUE_SIZE"`
 }
@@ -164,7 +170,9 @@ func Load(configPath string) (*Config, error) {
 			FlushInterval: "1s",
 		},
 		Ingest: IngestConfig{
-			ListenAddr: ":8080",
+			// Loopback by default: the endpoint has no authentication, so
+			// it must only be reachable by the local steemd ingest plugin.
+			ListenAddr: "127.0.0.1:8080",
 			QueueSize:  100000,
 		},
 		Processor: ProcessorConfig{

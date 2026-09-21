@@ -48,3 +48,39 @@ func TestAccountSummaryFromMapCommentCount(t *testing.T) {
 		})
 	}
 }
+
+// TestAccountNamePrefixFilterEscaping covers the regex escaping of user
+// input in SearchAccounts (P1-9): the raw query reaches a $regex pattern,
+// so every metacharacter must be quoted — an unescaped ".*" would degrade
+// the prefix search into a full collection scan, and injected anchors or
+// groups would change matching semantics.
+func TestAccountNamePrefixFilterEscaping(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "plain prefix", query: "alice", want: "^alice"},
+		{name: "dot-star would scan the whole collection", query: ".*", want: `^\.\*`},
+		{name: "anchor injection", query: "^a$", want: `^\^a\$`},
+		{name: "all metacharacters", query: `a.b*c+d?e(f)g[h]{i}j|k\l`, want: `^a\.b\*c\+d\?e\(f\)g\[h\]\{i\}j\|k\\l`},
+		{name: "empty query stays an anchored empty pattern", query: "", want: "^"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := accountNamePrefixFilter(tt.query)
+			cond, ok := filter["_id"].(bson.M)
+			if !ok {
+				t.Fatalf("filter[\"_id\"] is %T, want bson.M", filter["_id"])
+			}
+			pattern, _ := cond["$regex"].(string)
+			if pattern != tt.want {
+				t.Errorf("pattern = %q, want %q", pattern, tt.want)
+			}
+			if opts, _ := cond["$options"].(string); opts != "i" {
+				t.Errorf("options = %q, want %q", opts, "i")
+			}
+		})
+	}
+}

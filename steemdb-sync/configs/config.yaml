@@ -35,7 +35,14 @@ batch:
 
 # Ingest service settings (for cold_ingest)
 ingest:
-  listen_addr: ":8080"  # HTTP server listen address
+  # HTTP server listen address. The ingest endpoint is unauthenticated:
+  # anyone who can reach it can write arbitrary operations into the
+  # database. Keep it on loopback when steemd runs on the same host (the
+  # ingest plugin defaults to http://localhost:8080/ingest/applied_ops).
+  # Use ":8080" or "0.0.0.0:8080" ONLY inside a trusted network (e.g. a
+  # docker network shared with the steemd container).
+  # Env override: INGEST_LISTEN_ADDR
+  listen_addr: "127.0.0.1:8080"
   queue_size: 100000    # Maximum queue size for operations
 
 # Refresher process settings (cmd/refresher; replaces legacy history.py + witnesses.py)

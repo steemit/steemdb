@@ -46,6 +46,13 @@ Starts a `steemd` container with the ingest plugin enabled. The container will:
 INGEST_ENDPOINT=http://host.docker.internal:8080/ingest/applied_ops ./run.sh
 ```
 
+> **Note:** this endpoint assumes `cold_ingest` is reachable from the
+> container via `host.docker.internal`. `cold_ingest` now binds to
+> `127.0.0.1:8080` by default (the endpoint is unauthenticated), which is
+> not reachable from a container — when running it on the host, start it
+> with `INGEST_LISTEN_ADDR=":8080"` (trusted network only), or use the
+> `test/docker-compose` workflow instead.
+
 ### `run-dry.sh` - Start steemd in dry-run mode
 
 Starts `steemd` in dry-run mode, which logs operations to files instead of sending HTTP requests. Useful for testing without a running ingest service.
@@ -110,6 +117,11 @@ The E2E test (`test/e2e/cold_ingest_test.go`) will automatically detect if these
    ../bin/cold_ingest -config configs/config.yaml
    ```
 
+   > `cold_ingest` defaults to `127.0.0.1:8080`, which the steemd container
+   > cannot reach via `host.docker.internal` — start it with
+   > `INGEST_LISTEN_ADDR=":8080"` (trusted network only), or use the
+   > `test/docker-compose` workflow instead.
+
 3. Start `steemd` container (in another terminal):
    ```bash
    cd steemdb-sync/test/steem-test
@@ -149,6 +161,9 @@ data/
 - Verify `cold_ingest` service is running and accessible
 - Check container logs: `./logs.sh`
 - Verify ingest endpoint URL is correct (should be `http://host.docker.internal:8080/ingest/applied_ops`)
+- Verify `cold_ingest` is listening on a non-loopback address: the default
+  is `127.0.0.1:8080`, unreachable from the container — restart it with
+  `INGEST_LISTEN_ADDR=":8080"` (or use the `test/docker-compose` workflow)
 
 ### Container is stuck
 

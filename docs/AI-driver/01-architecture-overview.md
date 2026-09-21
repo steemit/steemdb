@@ -33,7 +33,9 @@ monorepo. One machine ingests the entire chain into MongoDB and serves a REST
 
 Four-stage pipeline:
 
-1. **Cold ingest** (`cmd/cold_ingest`, HTTP :8080): receives applied-op
+1. **Cold ingest** (`cmd/cold_ingest`, HTTP, loopback-default
+   `127.0.0.1:8080` — the endpoint is unauthenticated, so the bind must
+   stay loopback or inside a trusted network): receives applied-op
    batches pushed by the steemd ingest plugin during `--replay-blockchain`.
    Synchronous ACK: batch is flushed to Mongo (unordered upsert) before 200;
    the plugin retries 5×3s on failure. Empty blocks land as block-only docs

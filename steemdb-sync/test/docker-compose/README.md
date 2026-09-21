@@ -292,7 +292,7 @@ mongodb://admin:123456@localhost:27017/steemdb_test?authSource=admin
 
 - **Container**: `cold-ingest-service`
 - **Ports**: 
-  - `8080` - HTTP API
+  - `8080` - HTTP API (published on the host as `127.0.0.1:8080:8080` — the endpoint is unauthenticated, keep it off the LAN)
   - `9090` - Metrics endpoint
 - **Health Check**: Metrics endpoint check
 - **Logs**: `./logs/` directory
