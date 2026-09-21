@@ -256,9 +256,13 @@ func (s *AccountService) fetchBlockTimes(ctx context.Context, blockNums map[int6
 		nums = append(nums, n)
 	}
 
+	// Query by _id: blocks key their documents by _id = block number (same
+	// convention as BlockService.GetBlocks), which is always index-backed.
+	// The old query on the `block_num` field had no index anywhere and forced
+	// a collection scan per enrichment.
 	cursor, err := s.db.Collection("blocks").Find(ctx,
-		bson.M{"block_num": bson.M{"$in": nums}},
-		options.Find().SetProjection(bson.M{"block_num": 1, "timestamp": 1}),
+		bson.M{"_id": bson.M{"$in": nums}},
+		options.Find().SetProjection(bson.M{"timestamp": 1}),
 	)
 	if err != nil {
 		s.logger.Warn("Failed to fetch block times", utils.Error(err))
@@ -268,7 +272,7 @@ func (s *AccountService) fetchBlockTimes(ctx context.Context, blockNums map[int6
 
 	for cursor.Next(ctx) {
 		var block struct {
-			BlockNum  int64     `bson:"block_num"`
+			BlockNum  int64     `bson:"_id"`
 			Timestamp time.Time `bson:"timestamp"`
 		}
 		if err := cursor.Decode(&block); err != nil {

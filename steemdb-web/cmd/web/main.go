@@ -71,12 +71,13 @@ func main() {
 		}
 	}()
 
-	// Create indexes
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := mongodb.CreateIndexes(ctx); err != nil {
-		logger.Error("Failed to create indexes", utils.Error(err))
-	}
+	// Note: web deliberately creates no MongoDB indexes. steemdb-sync's
+	// createIndexes (steemdb-sync/internal/mongo/mongodb.go) is the single
+	// index authority for all sync-written collections — see
+	// docs/AI-driver/02-data-model.md "Index authority". The indexes web used
+	// to build here included phantoms on fields the writers never write
+	// (vote.timestamp, transfer.timestamp, account.last_update); all
+	// legitimate entries were migrated into sync's inventory.
 
 	// Initialize Steem client
 	steemClient := steem.NewClient(config.Steem.Nodes, logger)
@@ -180,7 +181,7 @@ func main() {
 	logger.Info("Shutting down server...")
 
 	// Graceful shutdown with timeout
-	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
