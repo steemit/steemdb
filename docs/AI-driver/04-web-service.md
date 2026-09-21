@@ -19,9 +19,11 @@ structs.** Sync documents carry open-shaped, partially-converted RPC data
 (string amounts that should be floats, string dates, string int-arrays).
 Use `bson.M` decode + explicit projection, following
 `AccountService.GetAccount` / `accountSummaryFromMap`. The labs service's
-`[]models.Account` and `[]string` decodes are the counter-example that
-produced P0s (`/labs/powerup|powerdown|rshares|curation|author` fail on
-non-empty results; `/labs/pending` has an inverted time window). Same rule
+former `[]models.Account` and `[]string` decodes were the counter-example
+that produced P0s (`/labs/powerup|powerdown|rshares|curation|author` failed
+on non-empty results; `/labs/pending` had an inverted time window); all five
+joins now decode as `[]bson.M` + `accountSummaryFromLookup` and the pending
+window spans [12.5 days ago, 7 days ago] (fixed 2026-09). Same rule
 for `json_metadata`: it may be a raw string (invalid chain JSON), decode
 leniently and never let one bad document 500 a whole page.
 

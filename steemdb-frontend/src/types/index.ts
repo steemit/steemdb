@@ -280,12 +280,27 @@ export interface Reblog {
 }
 
 // Labs types
+
+// Tolerant account summary embedded in labs leaderboard rows. The backend
+// decodes the $lookup join result as bson.M and projects these fields
+// (sync-written account docs keep raw RPC strings a rigid shape cannot hold).
+export interface LabsAccountSummary {
+  name: string;
+  reputation: number;
+  vesting_shares: number;
+  balance: number;
+  sbd_balance: number;
+  post_count: number;
+  last_post: string;
+  created: string;
+}
+
 export interface PowerUp {
   user: string;
   count: number;
   total: number;
-  instances?: string[];
-  account?: Account;
+  instances?: number[];
+  account?: LabsAccountSummary;
 }
 
 export interface PowerDown {
@@ -314,7 +329,7 @@ export interface PowerDownUser {
   withdrawn: number;
   deposited: number;
   deposited_to?: string[];
-  account?: Account;
+  account?: LabsAccountSummary;
 }
 
 export interface PowerDownProps {
@@ -327,7 +342,7 @@ export interface RsharesAllocation {
   voter: string;
   votes: number;
   rshares: number;
-  account?: Account;
+  account?: LabsAccountSummary;
 }
 
 export interface CurationLeaderboard {
@@ -336,7 +351,7 @@ export interface CurationLeaderboard {
   total: number;
   authors?: string[];
   permlinks?: string[];
-  account?: Account;
+  account?: LabsAccountSummary;
 }
 
 export interface AuthorLeaderboard {
@@ -354,7 +369,7 @@ export interface AuthorLeaderboard {
   steem: number;
   vest: number;
   permlinks?: string[];
-  account?: Account;
+  account?: LabsAccountSummary;
 }
 
 export interface Flags {
