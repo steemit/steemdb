@@ -70,7 +70,7 @@ name from the frontend, changed in the same PR across tiers.
 
 ### D. Steem scale/unit constants
 Four shipped 100× display errors (voting_power, weight,
-sbd_interest_rate, VESTS double-unit). **Rule**: see 05; every `%` and
+sbd_interest_rate, VESTS double-unit), fixed in PR #72. **Rule**: see 05; every `%` and
 every currency label needs a scale check against chain semantics.
 
 ### E. Fallbacks that fabricate data
