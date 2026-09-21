@@ -48,7 +48,9 @@ Four-stage pipeline:
 3. **Processor** (`cmd/processor`): the only consumer of `operations`.
    Windowed (default 64 blocks) dispatch to 16 handlers writing derived
    collections; `status.processor_height` advances only after the whole
-   window flushes — that is the commit point. Crash ⇒ replay whole window.
+   window flushes — that is the commit point. A missing block header at the
+   window head (or ops whose header is absent) holds the window instead of
+   advancing past it. Crash ⇒ replay whole window.
 4. **Refresher** (`cmd/refresher`, independent process): tickers replacing
    legacy Python jobs — witness snapshots (30s), stats counters (5m),
    clients aggregation (1h), funds snapshots (1h), optional account rescan.

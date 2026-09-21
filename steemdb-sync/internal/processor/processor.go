@@ -23,14 +23,34 @@ type Processor struct {
 	cfg         *config.Config
 	mongoClient *mongo.Client
 	dispatcher  *Dispatcher
-	cursor      *Cursor
+	cursor      cursorStore
 	inserter    *handlers.MongoInserter
 
-	// Collections from the operations/blocks sets
-	opsCol    *drivermongo.Collection
-	blocksCol *drivermongo.Collection
+	// store abstracts the per-window MongoDB reads so the window loop's
+	// cursor semantics can be unit tested without a live database.
+	store windowStore
 
 	catchUpSleep time.Duration
+}
+
+// cursorStore abstracts the processor cursor (read / advance) so window
+// processing can be unit tested without MongoDB. *Cursor is the production
+// implementation.
+type cursorStore interface {
+	Get(ctx context.Context) (uint32, error)
+	Advance(ctx context.Context, blockNum uint32) error
+}
+
+// windowStore abstracts the per-window MongoDB reads so window processing
+// can be unit tested without MongoDB. mongoWindowStore is the production
+// implementation.
+type windowStore interface {
+	// WindowBlocks returns the metadata of existing blocks in [start, end],
+	// ordered by block number.
+	WindowBlocks(ctx context.Context, start, end uint32) ([]windowBlockMeta, error)
+	// WindowOps returns all operations for blocks in [start, end], ordered
+	// by (block_num, trx_index, op_index).
+	WindowOps(ctx context.Context, start, end uint32) ([]*model.Operation, error)
 }
 
 // NewProcessor creates a new Processor.
@@ -48,8 +68,7 @@ func NewProcessor(ctx *Context, dispatcher *Dispatcher) (*Processor, error) {
 		dispatcher:   dispatcher,
 		cursor:       NewCursor(db),
 		inserter:     ctx.Inserter,
-		opsCol:       db.Collection("operations"),
-		blocksCol:    db.Collection("blocks"),
+		store:        newMongoWindowStore(db),
 		catchUpSleep: catchUpSleep,
 	}, nil
 }
@@ -124,102 +143,21 @@ func (p *Processor) Run(ctx context.Context) error {
 		default:
 		}
 
-		start := height + 1
-		end := start + uint32(windowSize) - 1
-
-		// Window block metadata: existence and timestamps in one query.
-		windowBlocks, err := p.fetchWindowBlocks(ctx, start, end)
-		if err != nil {
-			log.Printf("[Processor] Error fetching window blocks %d-%d: %v", start, end, err)
+		prevHeight := height
+		oc := p.processWindow(ctx, height)
+		if !oc.committed {
+			// The window waited (nothing ingested yet, or a missing block
+			// header — see processWindow) or failed (query, flush, cursor
+			// error). The cursor is untouched: retry the same window.
 			time.Sleep(p.catchUpSleep)
 			continue
 		}
-		if len(windowBlocks) == 0 {
-			// Nothing ingested in the window yet — wait for live_sync / cold_ingest.
-			time.Sleep(p.catchUpSleep)
-			continue
-		}
+		height = oc.newHeight
 
-		// Effective window end: the last contiguously existing block. A gap
-		// inside the window means ingest has not reached this range yet.
-		effectiveEnd := start
-		expect := start
-		for _, m := range windowBlocks {
-			if m.BlockNum != expect {
-				break
-			}
-			effectiveEnd = m.BlockNum
-			expect++
-		}
-		windowTS := make(map[uint32]time.Time, len(windowBlocks))
-		for _, m := range windowBlocks {
-			windowTS[m.BlockNum] = m.Timestamp
-		}
-
-		windowStart := time.Now()
-		tFetch := time.Now()
-
-		// All operations of the window in one query, ordered by (block, trx, op).
-		ops, err := p.fetchOpsForWindow(ctx, start, effectiveEnd)
-		if err != nil {
-			log.Printf("[Processor] Error fetching ops for window %d-%d: %v", start, effectiveEnd, err)
-			time.Sleep(p.catchUpSleep)
-			continue
-		}
-
-		// Dispatch grouped by block to preserve the per-block error accounting
-		// and intra-block ordering semantics of DispatchBlock.
-		tDispatch := time.Now()
-		fetchMs += tDispatch.Sub(tFetch)
-		errCount := 0
-		var (
-			currentBlock uint32
-			blockOps     []*model.Operation
-			blockTS      time.Time
-		)
-		dispatchGroup := func() {
-			if len(blockOps) > 0 {
-				errCount += p.dispatcher.DispatchBlock(ctx, blockOps, blockTS)
-			}
-		}
-		for _, op := range ops {
-			if op.BlockNum != currentBlock {
-				dispatchGroup()
-				currentBlock = op.BlockNum
-				blockOps = nil
-				blockTS = windowTS[op.BlockNum] // zero time if missing — handlers tolerate it
-			}
-			blockOps = append(blockOps, op)
-		}
-		dispatchGroup()
-
-		tFlush := time.Now()
-		dispatchMs += tFlush.Sub(tDispatch)
-
-		// Flush all buffered writes. The cursor must not advance unless every
-		// bucket landed: on error the window replays (idempotent writes).
-		if p.inserter != nil {
-			if err := p.inserter.FlushAll(ctx); err != nil {
-				log.Printf("[Processor] Error flushing window %d-%d buffers: %v", start, effectiveEnd, err)
-				time.Sleep(p.catchUpSleep)
-				continue
-			}
-		}
-
-		tCursor := time.Now()
-		flushMs += tCursor.Sub(tFlush)
-
-		// Advance the cursor — the window's commit point. A crash before this
-		// replays the whole window; handler idempotency makes that safe.
-		if err := p.cursor.Advance(ctx, effectiveEnd); err != nil {
-			log.Printf("[Processor] Error advancing cursor to %d: %v", effectiveEnd, err)
-			time.Sleep(p.catchUpSleep)
-			continue
-		}
-		height = effectiveEnd
-		cursorMs += time.Since(tCursor)
-
-		metrics.RecordWindow(int(effectiveEnd-start+1), len(ops), time.Since(windowStart))
+		fetchMs += oc.fetchMs
+		dispatchMs += oc.dispatchMs
+		flushMs += oc.flushMs
+		cursorMs += oc.cursorMs
 
 		nWin++
 		if nWin%50 == 0 {
@@ -232,13 +170,200 @@ func (p *Processor) Run(ctx context.Context) error {
 		// Periodic progress logging (every ~10k blocks)
 		if height-lastLogged >= 10000 {
 			log.Printf("[Processor] Processed through block %d (window=%d blocks, %d ops, %d errors)",
-				height, effectiveEnd-start+1, len(ops), errCount)
+				height, height-prevHeight, oc.opsCount, oc.errCount)
 			lastLogged = height
 		}
-		if errCount > 0 {
-			log.Printf("[Processor] Window %d-%d completed with %d handler errors", start, effectiveEnd, errCount)
+		if oc.errCount > 0 {
+			log.Printf("[Processor] Window %d-%d completed with %d handler errors", prevHeight+1, height, oc.errCount)
 		}
 	}
+}
+
+// windowOutcome reports what one window attempt did. Every field except
+// newHeight is only meaningful when committed is true; newHeight always
+// carries the height the cursor should be read at next (the input height
+// unless the window committed).
+type windowOutcome struct {
+	// committed is true when the window was fully dispatched, flushed, and
+	// the cursor advanced — the window's commit point. When false the cursor
+	// was left untouched and the same window must be retried; any handler
+	// writes already buffered are covered by the replay-idempotency
+	// invariant (docs/rules/processor-write-ordering.md).
+	committed bool
+	// newHeight is the new cursor position (== input height unless committed).
+	newHeight uint32
+	opsCount  int
+	errCount  int
+
+	// Phase timings for the periodic window-breakdown log.
+	fetchMs, dispatchMs, flushMs, cursorMs time.Duration
+}
+
+// processWindow attempts one window [height+1, height+windowSize].
+//
+// Ordering contract (what makes cursor semantics crash-safe):
+//  1. plan the effective range from the block headers actually present —
+//     a gap at the window HEAD holds the window (no dispatch, no cursor
+//     advance) instead of skipping over the block;
+//  2. refuse to dispatch ops of a block whose header is missing (a zero
+//     timestamp would pollute _ts downstream) — hold and wait;
+//  3. only after every buffered write has been flushed does the cursor
+//     advance. Every wait/error path above leaves the cursor untouched, so
+//     the next iteration replays the same window.
+func (p *Processor) processWindow(ctx context.Context, height uint32) windowOutcome {
+	oc := windowOutcome{newHeight: height}
+
+	start := height + 1
+	end := start + uint32(p.windowSize()) - 1
+
+	windowStart := time.Now()
+	tFetch := time.Now()
+
+	// Window block metadata: existence and timestamps in one query.
+	windowBlocks, err := p.store.WindowBlocks(ctx, start, end)
+	if err != nil {
+		log.Printf("[Processor] Error fetching window blocks %d-%d: %v", start, end, err)
+		return oc
+	}
+	if len(windowBlocks) == 0 {
+		// Nothing ingested in the window yet — wait for live_sync / cold_ingest.
+		return oc
+	}
+
+	// Effective window end: the last contiguously existing block. A gap
+	// inside the window means ingest has not reached this range yet.
+	effectiveEnd := planWindow(start, windowBlocks)
+	if effectiveEnd < start {
+		// Window head gap: the block header at `start` is missing while
+		// later blocks of the window exist (partial repair failure, or a
+		// raced header write after an ops-first ingest). Advancing here
+		// would permanently skip the head block's ops with no alarm — hold
+		// the cursor and wait for the header to land via ingest retry or
+		// repair (sync review finding F1).
+		log.Printf("[Processor] Window %d-%d head gap: block header %d missing while %d later block(s) exist; holding cursor, waiting for ingest/repair",
+			start, end, start, len(windowBlocks))
+		return oc
+	}
+
+	windowTS := make(map[uint32]time.Time, len(windowBlocks))
+	for _, m := range windowBlocks {
+		windowTS[m.BlockNum] = m.Timestamp
+	}
+
+	// All operations of the window in one query, ordered by (block, trx, op).
+	ops, err := p.store.WindowOps(ctx, start, effectiveEnd)
+	if err != nil {
+		log.Printf("[Processor] Error fetching ops for window %d-%d: %v", start, effectiveEnd, err)
+		return oc
+	}
+
+	// Ops must never be dispatched for a block without a header: handlers
+	// would stamp every derived document of that block with a zero _ts, and
+	// same-filter upserts (witness_vote's _ts filter) would silently drop
+	// documents. Hold the window until the header lands (sync review
+	// finding F1). After planWindow this is unreachable for consistent
+	// data — the check enforces the invariant instead of relying on it.
+	if blockNum, missing := firstOpsBlockWithoutHeader(ops, windowTS); missing {
+		log.Printf("[Processor] Window %d-%d: ops exist for block %d but its block header is missing; holding cursor, waiting for header",
+			start, effectiveEnd, blockNum)
+		return oc
+	}
+
+	tDispatch := time.Now()
+	oc.fetchMs = tDispatch.Sub(tFetch)
+
+	// Dispatch grouped by block to preserve the per-block error accounting
+	// and intra-block ordering semantics of DispatchBlock.
+	errCount := 0
+	var (
+		currentBlock uint32
+		blockOps     []*model.Operation
+		blockTS      time.Time
+	)
+	dispatchGroup := func() {
+		if len(blockOps) > 0 {
+			errCount += p.dispatcher.DispatchBlock(ctx, blockOps, blockTS)
+		}
+	}
+	for _, op := range ops {
+		if op.BlockNum != currentBlock {
+			dispatchGroup()
+			currentBlock = op.BlockNum
+			blockOps = nil
+			// Presence guaranteed by firstOpsBlockWithoutHeader above; a
+			// missing entry no longer degrades to a zero timestamp.
+			blockTS = windowTS[op.BlockNum]
+		}
+		blockOps = append(blockOps, op)
+	}
+	dispatchGroup()
+
+	tFlush := time.Now()
+	oc.dispatchMs = tFlush.Sub(tDispatch)
+
+	// Flush all buffered writes. The cursor must not advance unless every
+	// bucket landed: on error the window replays (idempotent writes).
+	if p.inserter != nil {
+		if err := p.inserter.FlushAll(ctx); err != nil {
+			log.Printf("[Processor] Error flushing window %d-%d buffers: %v", start, effectiveEnd, err)
+			return oc
+		}
+	}
+
+	tCursor := time.Now()
+	oc.flushMs = tCursor.Sub(tFlush)
+
+	// Advance the cursor — the window's commit point. A crash before this
+	// replays the whole window; handler idempotency makes that safe.
+	if err := p.cursor.Advance(ctx, effectiveEnd); err != nil {
+		log.Printf("[Processor] Error advancing cursor to %d: %v", effectiveEnd, err)
+		return oc
+	}
+
+	oc.cursorMs = time.Since(tCursor)
+	oc.committed = true
+	oc.newHeight = effectiveEnd
+	oc.opsCount = len(ops)
+	oc.errCount = errCount
+
+	metrics.RecordWindow(int(effectiveEnd-start+1), len(ops), time.Since(windowStart))
+
+	return oc
+}
+
+// planWindow computes the effective window end: the last block number,
+// counting from `start`, whose block header exists contiguously (input is
+// sorted by block number). It returns start-1 when the head block's header
+// is missing — including the empty-window case — which the caller must
+// treat as "process nothing, advance nothing, retry later": skipping ahead
+// would leave the head block's ops permanently underived.
+//
+// start is always >= 1 (it is computed as cursor height + 1), so the
+// start-1 sentinel cannot underflow.
+func planWindow(start uint32, windowBlocks []windowBlockMeta) uint32 {
+	effectiveEnd := start - 1
+	expect := start
+	for _, m := range windowBlocks {
+		if m.BlockNum != expect {
+			break
+		}
+		effectiveEnd = m.BlockNum
+		expect++
+	}
+	return effectiveEnd
+}
+
+// firstOpsBlockWithoutHeader returns the first block (ops are sorted by
+// block_num) that carries operations but has no entry in the window's block
+// header timestamps. Such ops must not be dispatched: handlers would receive
+// a zero time.Time and stamp it into every derived document of the block.
+func firstOpsBlockWithoutHeader(ops []*model.Operation, windowTS map[uint32]time.Time) (uint32, bool) {
+	for _, op := range ops {
+		if _, ok := windowTS[op.BlockNum]; !ok {
+			return op.BlockNum, true
+		}
+	}
+	return 0, false
 }
 
 // windowBlockMeta is the existence/timestamp record for one block in a window.
@@ -247,10 +372,25 @@ type windowBlockMeta struct {
 	Timestamp time.Time `bson:"timestamp"`
 }
 
-// fetchWindowBlocks returns the metadata of existing blocks in [start, end],
+// mongoWindowStore reads window block metadata and operations from MongoDB.
+type mongoWindowStore struct {
+	opsCol    *drivermongo.Collection
+	blocksCol *drivermongo.Collection
+}
+
+// newMongoWindowStore builds the production windowStore over the
+// operations/blocks collections of db.
+func newMongoWindowStore(db *drivermongo.Database) *mongoWindowStore {
+	return &mongoWindowStore{
+		opsCol:    db.Collection("operations"),
+		blocksCol: db.Collection("blocks"),
+	}
+}
+
+// WindowBlocks returns the metadata of existing blocks in [start, end],
 // ordered by block number.
-func (p *Processor) fetchWindowBlocks(ctx context.Context, start, end uint32) ([]windowBlockMeta, error) {
-	cursor, err := p.blocksCol.Find(ctx,
+func (s *mongoWindowStore) WindowBlocks(ctx context.Context, start, end uint32) ([]windowBlockMeta, error) {
+	cursor, err := s.blocksCol.Find(ctx,
 		bson.M{"_id": bson.M{"$gte": start, "$lte": end}},
 		options.Find().
 			SetProjection(bson.M{"_id": 1, "timestamp": 1}).
@@ -272,18 +412,18 @@ func (p *Processor) fetchWindowBlocks(ctx context.Context, start, end uint32) ([
 	return metas, cursor.Err()
 }
 
-// fetchOpsForWindow retrieves all operations for blocks in [start, end],
-// ordered by block, transaction, and op index.
+// WindowOps retrieves all operations for blocks in [start, end], ordered by
+// block, transaction, and op index.
 // Sort by the numeric trx_index and op_index fields (NOT by _id string), because the
 // _id format "{block}:{trx}:{op}" sorts lexicographically and would misorder indexes ≥ 10
 // (e.g. "100:10:0" sorts before "100:2:0" as strings).
-func (p *Processor) fetchOpsForWindow(ctx context.Context, start, end uint32) ([]*model.Operation, error) {
+func (s *mongoWindowStore) WindowOps(ctx context.Context, start, end uint32) ([]*model.Operation, error) {
 	opts := options.Find().SetSort(bson.D{
 		{Key: "block_num", Value: 1},
 		{Key: "trx_index", Value: 1},
 		{Key: "op_index", Value: 1},
 	})
-	cursor, err := p.opsCol.Find(ctx, bson.M{
+	cursor, err := s.opsCol.Find(ctx, bson.M{
 		"block_num": bson.M{"$gte": start, "$lte": end},
 	}, opts)
 	if err != nil {
@@ -296,51 +436,6 @@ func (p *Processor) fetchOpsForWindow(ctx context.Context, start, end uint32) ([
 		return nil, errors.Wrap(err, "failed to decode window ops")
 	}
 	return ops, nil
-}
-
-// fetchOpsForBlock retrieves all operations for a given block, ordered by tx/op index.
-// Sort by the numeric trx_index and op_index fields (NOT by _id string), because the
-// _id format "{block}:{trx}:{op}" sorts lexicographically and would misorder indexes ≥ 10
-// (e.g. "100:10:0" sorts before "100:2:0" as strings).
-func (p *Processor) fetchOpsForBlock(ctx context.Context, blockNum uint32) ([]*model.Operation, error) {
-	filter := bson.M{"block_num": blockNum}
-	opts := options.Find().SetSort(bson.D{
-		{Key: "trx_index", Value: 1},
-		{Key: "op_index", Value: 1},
-	})
-
-	cursor, err := p.opsCol.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to find ops for block %d", blockNum)
-	}
-	defer cursor.Close(ctx)
-
-	var ops []*model.Operation
-	if err := cursor.All(ctx, &ops); err != nil {
-		return nil, errors.Wrapf(err, "failed to decode ops for block %d", blockNum)
-	}
-	return ops, nil
-}
-
-// blockExists checks if a block document exists in the blocks collection.
-func (p *Processor) blockExists(ctx context.Context, blockNum uint32) (bool, error) {
-	count, err := p.blocksCol.CountDocuments(ctx, bson.M{"_id": blockNum})
-	if err != nil {
-		return false, errors.Wrapf(err, "failed to check block %d", blockNum)
-	}
-	return count > 0, nil
-}
-
-// getBlockTimestamp retrieves the timestamp of a block.
-func (p *Processor) getBlockTimestamp(ctx context.Context, blockNum uint32) (time.Time, error) {
-	var doc struct {
-		Timestamp time.Time `bson:"timestamp"`
-	}
-	err := p.blocksCol.FindOne(ctx, bson.M{"_id": blockNum}).Decode(&doc)
-	if err != nil {
-		return time.Time{}, errors.Wrapf(err, "failed to get timestamp for block %d", blockNum)
-	}
-	return doc.Timestamp, nil
 }
 
 // GetHeight returns the last processed block height (for metrics / monitoring).

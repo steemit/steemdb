@@ -54,7 +54,11 @@ Reads `operations` in windows (default 64, env `PROCESSOR_WINDOW_SIZE`;
 buffer limit 5000/collection, `PROCESSOR_BUFFER_LIMIT`):
 
 1. One query for window block metadata (existence + timestamps), one for
-   all window ops sorted by (block_num, trx_index, op_index).
+   all window ops sorted by (block_num, trx_index, op_index). The window is
+   truncated at the first header gap; a gap at the window **head** holds the
+   window (no dispatch, no cursor advance — retry until ingest/repair lands
+   the header), and ops whose block header is missing are never dispatched
+   (holding beats dispatching with a zero timestamp).
 2. Dispatch per op (panic-safe per op) to 16 handlers.
 3. Writes split in three classes (see 02); comment family is entirely
    unbuffered (direct-write bypass) for diff read-modify-write and
@@ -102,11 +106,33 @@ A Mongo blip >15s during cold ingest → plugin gives up on a batch →
 batcher's ticker sweep writes the batch's block **headers** → processor
 reaches that height, sees header-without-ops, dispatches nothing, advances
 cursor → plugin retry lands the ops later, but the cursor has passed:
-**ops permanently underived, no alarm**. The scanner's zero-op signal that
-could catch it is drowned out by legitimate empty blocks. Fixes under
-consideration: effectiveEnd guard (don't advance past a missing window
-head), block-only markers, empty-block-aware scanning. Until landed, treat
-"block header present, ops empty" after any infra hiccup as an incident.
+**ops permanently underived, no alarm**. This end of the chain — header
+**present**, ops **missing** — is **not** closed by the window guards: both
+guards trigger on a *missing block header*, so planWindow proceeds
+normally, the ops query simply returns nothing for the block, the flush
+succeeds over (partly) empty buffers, and the cursor advances as if the
+block had been processed. Nothing is logged and the cursor keeps moving:
+unlike the head-gap hold there is no visible signal.
+
+What the guards do close (sync review finding F1):
+
+- **Window head, header missing** (partial repair failure or a raced
+  ops-first write): planWindow yields an empty window and the processor
+  holds the cursor instead of permanently skipping the head block's ops.
+  Visible: a "holding cursor, waiting for ingest/repair" log line on every
+  retry and a stalled `status.processor_height`.
+- **Ops present, header missing**: the window is held before dispatch.
+  Previously such ops were dispatched with a zero timestamp, polluting
+  `_ts` across every derived document of the block and silently dropping
+  witness_vote documents through the `_ts` same-filter upsert path.
+
+The header-present/ops-missing mode remains open: silent dispatch loss is
+still possible. Fixes under consideration: block-only markers,
+empty-block-aware scanning (scanner's zero-op signal is still drowned out by
+legitimate empty blocks). Until one lands, treat "block header present, ops
+empty" after any infra hiccup as an incident — manually compare
+`status.processor_height` with the ops actually present and rewind the
+cursor if it has passed.
 
 ## Other review-confirmed sharp edges (short list)
 
