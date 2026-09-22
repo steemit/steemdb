@@ -46,14 +46,19 @@ const (
 // ErrAttemptTimeout is returned when a single RPC attempt does not complete
 // within rpcAttemptTimeout. The abandoned attempt keeps running in the
 // background until the SDK call finishes on its own. Against the pinned
-// dependencies (steemgosdk v0.0.15, steemutil v0.0.17) that endpoint is a
-// single 30s HTTP timeout: every method this client uses is a single-shot
-// SDK call with no internal retry (the maxRetry field that NewClient sets
-// via SetMaxRetry is never read in v0.0.15), and each jsonrpc2.Send builds
-// a fresh http.Client{Timeout: 30s} per request. If the SDK is upgraded to
-// >= v0.0.31, re-audit this bound: its api/v2 pairs a default 15s
-// per-attempt HTTP timeout with a bounded internal retry, so an abandoned
-// attempt would then be bounded differently. The buffered result channel
+// dependencies (steemgosdk v0.0.31, steemutil v0.0.31) that endpoint is
+// bounded by the SDK's own api/v2 transport: every legacy api method this
+// client calls delegates to api/v2 with context.Background(), which retries
+// transient failures up to maxRetry times — the SetMaxRetry(3) call in
+// NewClient now takes effect (in v0.0.15 the field was never read) — with a
+// 15s per-attempt HTTP timeout and 100/200/400ms exponential backoff between
+// internal attempts. Worst case one abandoned SDK call therefore runs
+// 4*15s + 0.7s ~= 61s (v0.0.15's single-shot jsonrpc2.Send with a fresh
+// http.Client{Timeout: 30s} capped it at 30s). The abandon at
+// rpcAttemptTimeout is what bounds this client's wall clock: node rotation
+// still happens after 10s, the abandoned goroutine lingers up to ~61s and
+// then exits on the SDK's own timeouts, so at most rpcMaxRetries+1 = 4 such
+// goroutines are alive per logical call. The buffered result channel
 // lets the wrapper goroutine exit cleanly once the SDK call finishes, so
 // abandoned attempts do not leak. When a retry loop exhausts its attempts,
 // the returned error wraps ErrAttemptTimeout and names the node that hung,
@@ -196,7 +201,11 @@ func (c *Client) GetDynamicGlobalProperties() (*DynamicGlobalProperties, error) 
 	return convertDynamicGlobalProperties(dgp), nil
 }
 
-// GetBlock gets a block by number
+// GetBlock gets a block by number. Since the SDK upgrade to v0.0.31, a block
+// number beyond the chain head returns an SDK ErrBlockNotFound error instead
+// of a silently zero-valued block. This wrapper does not classify that
+// sentinel, so it is rotated-and-retried like any other error (bounded at 4
+// fast-failing attempts, since the SDK itself does not retry it).
 func (c *Client) GetBlock(blockNum int64) (*Block, error) {
 	block, err := rpcCall(c, "get_block",
 		func(api *sdkapi.API) (*protocolapi.Block, error) {

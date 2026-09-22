@@ -407,11 +407,10 @@ func (ws *WebSocketService) fetchAndBroadcastProps() {
 		return
 	}
 
-	// Defense-in-depth nil guard: steemgosdk v0.0.15 (api/api.go
-	// GetDynamicGlobalProperties) always returns a non-nil pointer on
-	// success, but the SDK is under active development and the client
-	// wrapper converts a nil SDK result into (nil, nil) — dereferencing
-	// props below would panic the pump.
+	// Defense-in-depth nil guard: steemgosdk v0.0.31 (api/v2 GetDynamicGlobalProperties)
+	// always returns a non-nil pointer on success, but the SDK is under active
+	// development and the client wrapper converts a nil SDK result into (nil, nil) —
+	// dereferencing props below would panic the pump.
 	if props == nil {
 		ws.logger.Error("GetDynamicGlobalProperties returned nil properties without error")
 		return

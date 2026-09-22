@@ -135,4 +135,5 @@ are.
   the cold-start producer. Batches of 100 ops / 1s, bounded queue of 100k
   (deliberate backpressure: slow consumer throttles replay).
 - Keep `steemgosdk`/`steemutil` versions aligned across `steemdb-web` and
-  `steemdb-sync` (currently drifted v0.0.15 vs v0.0.31 — known debt).
+  `steemdb-sync` (both at v0.0.31; the earlier v0.0.15/v0.0.31 drift was
+  closed in the dependency-alignment PR).
