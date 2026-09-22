@@ -5,11 +5,14 @@ A modern, high-performance web service for SteemDB blockchain explorer, built wi
 ## 🚀 Features
 
 ### Core API Services
-- **Account API**: Account information, history, and statistics
-- **Block API**: Block data, transactions, and operations
-- **Witness API**: Witness information, voting, and performance metrics
-- **Statistics API**: Network statistics and analytics
-- **Search API**: Advanced search functionality
+- **Account API**: Account information, history, statistics, and top accounts
+- **Block API**: Block data with RPC-enriched details and virtual operations
+- **Post/Comment API**: Posts list, detail, replies, votes, and reblogs
+- **Labs API**: PowerUp, PowerDown, Rshares, Curation/Author leaderboards, Flags, Clients, Benefactors, Pending
+- **Witness API**: Witness information and voting
+- **Statistics API**: Network statistics and charts
+- **Search API**: Search across blocks, transactions, and accounts
+- **Legacy API**: 302 redirects from old `/api/*` paths to their v1 counterparts
 
 ### Real-time Features
 - **WebSocket Support**: Real-time blockchain data streaming
@@ -18,22 +21,24 @@ A modern, high-performance web service for SteemDB blockchain explorer, built wi
 
 ### Performance & Reliability
 - **High Performance**: Built with Go for optimal performance
-- **Caching**: Redis-based caching for fast data retrieval
-- **Rate Limiting**: Configurable API rate limiting
-- **Health Checks**: Comprehensive health and readiness checks
+- **Health Checks**: `/health` and `/ready` endpoints (readiness pings both MongoDB and Redis)
+- **Graceful Shutdown**: Proper signal handling and connection draining
 
-### Security & Authentication
-- **JWT Authentication**: Secure API access with JWT tokens
+### Security
 - **CORS Support**: Configurable CORS for web applications
-- **Input Validation**: Comprehensive request validation
+- **Loopback by Default**: The Go server binds to `127.0.0.1`; Nginx is the only exposed listener
+
+> Note: Redis is connected and used for the readiness probe only — response
+> caching, rate limiting, and JWT authentication are **not implemented**.
+> The corresponding `api.rate_limit`, `cache`, `metrics`, and `auth` config
+> sections are parsed but currently have no consumers.
 
 ## 🛠 Technology Stack
 
 - **Backend**: Go 1.23, Gin Web Framework
-- **Database**: MongoDB (primary), Redis (cache)
+- **Database**: MongoDB (primary, read-only view of sync-written data), Redis (readiness probe)
 - **WebSocket**: Gorilla WebSocket
-- **Authentication**: JWT tokens
-- **Monitoring**: Prometheus metrics
+- **Steem RPC**: [steemgosdk](https://github.com/steemit/steemgosdk)-based client with multi-node failover
 - **Logging**: Structured logging with Zap
 - **Configuration**: YAML-based configuration with Viper
 
@@ -43,21 +48,17 @@ A modern, high-performance web service for SteemDB blockchain explorer, built wi
 steemdb-web/
 ├── cmd/web/                # Main application entry point
 ├── internal/
-│   ├── api/               # API handlers and routes
-│   ├── database/          # Database connections and operations
+│   ├── api/               # API handlers and routes (routes.go)
+│   ├── database/          # MongoDB/Redis connections and index setup
 │   ├── models/            # Data models and structures
-│   ├── services/          # Business logic services
-│   ├── middleware/        # HTTP middleware
-│   └── websocket/         # WebSocket handlers
+│   └── services/          # Business logic services (incl. websocket_service.go)
 ├── pkg/
-│   ├── auth/              # Authentication utilities
-│   └── utils/             # Common utilities and helpers
-├── web/
-│   ├── src/               # Frontend source code
-│   └── public/            # Static assets
+│   ├── steem/             # Steem RPC client (steemgosdk-based, multi-node failover)
+│   └── utils/             # Common utilities (config, logging)
+├── web/                   # Static dev tools (websocket-test.html)
 ├── configs/               # Configuration files
-├── scripts/               # Build and deployment scripts
-└── docs/                  # Documentation
+├── docker/                # Docker configuration (nginx, supervisor)
+└── scripts/               # Build and test scripts
 ```
 
 ## 🚀 Quick Start
@@ -90,10 +91,10 @@ steemdb-web/
 
 4. **Start the services**
    ```bash
-   # Start MongoDB and Redis (using Docker)
+   # Start MongoDB and Redis (from the repository root — the compose file lives there)
    docker-compose up -d mongo redis
    
-   # Start the web service
+   # Start the web service (from steemdb-web/)
    go run cmd/web/main.go configs/local.yaml
    ```
 
@@ -115,36 +116,69 @@ steemdb-web/
 Base URL: `/api/v1`
 
 #### Accounts
+- `GET /accounts` - List accounts (page/page_size, sort_by/sort_order; limit/sort/order aliases also accepted; optional `search` name filter)
+- `GET /accounts/search?q=` - Search accounts by name prefix
+- `GET /accounts/stats` - Account statistics
+- `GET /accounts/top?criteria=` - Top accounts (reputation/vests/balance/posts)
 - `GET /accounts/:name` - Get account information
-- `GET /accounts/:name/history` - Get account history
-- `GET /accounts/:name/posts` - Get account posts
-- `GET /accounts/:name/votes` - Get account votes
+- `GET /accounts/:name/history` - Get account operation history
 
 #### Blocks
-- `GET /blocks` - Get recent blocks
+- `GET /blocks` - List blocks (page/page_size, sort_by/sort_order; limit/sort/order aliases)
+- `GET /blocks/latest` - Get latest blocks
+- `GET /blocks/stats` - Block statistics (placeholder data)
 - `GET /blocks/:number` - Get specific block (headers enriched from the steem RPC for cold-ingested blocks)
 - `GET /blocks/:number/virtual-ops` - Get the virtual operations of a block (always served from the steem RPC; virtual ops are not persisted locally)
-- `GET /blocks/:number/operations` - Get block operations
+
+#### Posts
+- `GET /posts` - List top-level posts (page/page_size, sort_by/sort_order; limit/sort/order aliases)
+- `GET /posts/daily` - Posts by date/tag
+- `GET /posts/:author/:permlink` - Get post detail
+- `GET /posts/:author/:permlink/replies` - Get post replies
+- `GET /posts/:author/:permlink/votes` - Get post votes
+- `GET /posts/:author/:permlink/reblogs` - Get post reblogs
+
+#### Labs
+- `GET /labs` - Labs index
+- `GET /labs/powerup` / `GET /labs/powerdown` - Vesting deposits/withdrawals
+- `GET /labs/rshares` / `GET /labs/curation` / `GET /labs/author` - Content reward leaderboards (date, grouping)
+- `GET /labs/flags` - Downvote activity
+- `GET /labs/clients` - Client app usage snapshot
+- `GET /labs/benefactors` - Benefactor rewards by day
+- `GET /labs/pending` - Posts approaching payout
 
 #### Witnesses
-- `GET /witnesses` - Get witness list
-- `GET /witnesses/:name` - Get witness information
-- `GET /witnesses/:name/votes` - Get witness votes
+- `GET /witnesses` - Get witness list (page/limit, sort/order)
+- `GET /witnesses/top` - Get top witnesses
+- `GET /witnesses/:username` - Get witness information
 
-#### Statistics
+#### Statistics & Misc
 - `GET /stats/global` - Get global statistics
-- `GET /stats/accounts` - Get account statistics
-- `GET /stats/witnesses` - Get witness statistics
+- `GET /stats/props` - Get dynamic global properties (from the steem RPC)
+- `GET /dashboard` - Dashboard aggregate (local/ upstream with per-probe degradation)
+- `GET /search?q=&type=` - Global search
+- `GET /charts/accounts/growth` / `GET /charts/blocks/production` / `GET /charts/transactions/volume` / `GET /charts/witnesses/voting` - Chart data
+- `GET /operations/stats` - Operation type statistics (currently returns placeholder data)
+- `GET /status`, `GET /health` - Service status
+
+#### Legacy API
+- `GET /api/{supply,props,percentage,rshares,downvotes,topwitnesses,rewards,curation,powerup,steem}` - 302 redirects to the v1 equivalents
+- `GET /api/token` - Plain-text supply figures
 
 ### WebSocket API
 
-Connect to: `ws://localhost:8080/ws`
+Connect to: `ws://localhost:8080/ws` (or `ws://localhost/ws` through Nginx)
 
 #### Subscription Channels
-- `blocks` - Real-time block updates
-- `operations` - Real-time operation updates
-- `accounts:{name}` - Account-specific updates
-- `witnesses` - Witness updates
+- `blocks` - Real-time block updates (default subscription)
+- `props` - Dynamic global properties (default subscription)
+- `state` - Collection counts / chain state (default subscription)
+- `operation` - Global operation feed (subscribe explicitly)
+- `@{account}` - Account-specific updates when the account is mentioned in an operation
+
+New clients are automatically subscribed to `blocks`, `props`, and `state`
+and receive a replay of the last 10 irreversible blocks (aligned with legacy
+`live.py`).
 
 ## ⚙️ Configuration
 
@@ -184,6 +218,10 @@ api:
     allowed_origins: ["http://localhost:3000"]
 ```
 
+> Note: the `api.rate_limit` and `cache` sections are parsed but currently
+> have no consumers — rate limiting and Redis response caching are not
+> implemented.
+
 ## 🐳 Docker Deployment
 
 ### Directory Structure
@@ -198,8 +236,12 @@ steemdb-web/
 │   └── CONFIGURATION.md       # Configuration guide
 ├── configs/                   # Application configuration (mounted at runtime)
 │   └── config.yaml           # Default configuration
-└── docker-compose.yml        # Docker Compose configuration
+└── scripts/                   # Build and test scripts
 ```
+
+(Docker Compose orchestration lives at the repository root, not in this
+directory — see the root `docker-compose.yml` and
+`docker-compose.production.yml`.)
 
 ### Configuration Mounting
 
@@ -282,19 +324,17 @@ The web service is part of the unified Docker Compose setup at the project root.
 
 ### Health Checks
 - Health endpoint: `GET /health`
-- Readiness endpoint: `GET /ready`
-- Metrics endpoint: `GET /metrics` (Prometheus format)
+- Readiness endpoint: `GET /ready` (pings MongoDB and Redis)
+
+The web service itself does **not** expose a `/metrics` endpoint; the
+`metrics.*` config keys are currently unused. Prometheus in the compose
+stacks scrapes the sync services (`live-sync` `:9091`, `processor` `:9092`,
+`steemdb-refresher` `:9093`), not this service.
 
 ### Logging
 - Structured JSON logging in production
 - Configurable log levels (debug, info, warn, error)
 - Log rotation and archival
-
-### Metrics
-- HTTP request metrics
-- Database operation metrics
-- WebSocket connection metrics
-- Custom business metrics
 
 ## 🧪 Testing
 
@@ -324,10 +364,13 @@ hey -n 1000 -c 10 http://localhost:8080/api/v1/blocks
 ### Environment Variables
 ```bash
 export SERVER_MODE=production
-export MONGODB_URI=mongodb://prod-mongo:27017
-export REDIS_URI=redis://prod-redis:6379
-export JWT_SECRET=your-production-secret
+export MONGODB_URI=mongodb://prod-mongo:27017     # alias of DATABASE_MONGODB_URI
+export REDIS_URI=redis://prod-redis:6379          # alias of DATABASE_REDIS_URI
 ```
+
+Other bound variables (via Viper's env replacer): `SERVER_PORT`,
+`SERVER_HOST`, `AUTH_JWT_SECRET` (note: the auth feature itself is not
+implemented yet).
 
 ### Systemd Service
 ```ini
@@ -389,16 +432,17 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support
 
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/steemdb/web/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/steemdb/web/discussions)
+- **Documentation**: [README.md](README.md), [docker/CONFIGURATION.md](docker/CONFIGURATION.md)
+- **Issues**: [GitHub Issues](https://github.com/steemit/steemdb/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/steemit/steemdb/discussions)
 
 ## 🗺 Roadmap
 
-- [ ] Complete API implementation
-- [ ] WebSocket real-time features
-- [ ] Frontend React application
-- [ ] Advanced caching strategies
+- [x] Core API implementation (accounts, blocks, posts, labs, witnesses, stats, search, charts)
+- [x] WebSocket real-time features
+- [x] Frontend React application (see `steemdb-frontend/`)
+- [x] Legacy API compatibility (302 redirects)
+- [ ] Response caching and rate limiting (config exists, not wired)
 - [ ] Horizontal scaling support
 - [ ] GraphQL API
 - [ ] Mobile API optimizations
