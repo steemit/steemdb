@@ -46,31 +46,14 @@ func (h *AccountHandler) GetAccount(c *gin.Context) {
 
 // GetAccounts handles GET /api/v1/accounts
 func (h *AccountHandler) GetAccounts(c *gin.Context) {
-	// Parse pagination parameters
-	params := models.PaginationParams{
-		Page:     1,
-		PageSize: 20,
-	}
+	// Accepts both the canonical names (page_size/sort_by/sort_order) and
+	// the short aliases (limit/sort/order), same convention as /v1/blocks.
+	// `search` narrows the listing to account-name prefixes.
+	params := parsePaginationParams(c)
+	sortParams := parseSortParams(c, "reputation", "desc")
+	search := c.Query("search")
 
-	if page := c.Query("page"); page != "" {
-		if p, err := strconv.Atoi(page); err == nil && p > 0 {
-			params.Page = p
-		}
-	}
-
-	if pageSize := c.Query("page_size"); pageSize != "" {
-		if ps, err := strconv.Atoi(pageSize); err == nil && ps > 0 && ps <= 100 {
-			params.PageSize = ps
-		}
-	}
-
-	// Parse sort parameters
-	sortParams := models.SortParams{
-		SortBy:    c.DefaultQuery("sort_by", "reputation"),
-		SortOrder: c.DefaultQuery("sort_order", "desc"),
-	}
-
-	result, err := h.accountService.GetAccounts(c.Request.Context(), params, sortParams)
+	result, err := h.accountService.GetAccounts(c.Request.Context(), params, sortParams, search)
 	if err != nil {
 		h.logger.Error("Failed to get accounts", utils.Error(err))
 		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve accounts")
@@ -151,28 +134,9 @@ func (h *AccountHandler) GetAccountHistory(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters. The frontend sends `limit`; page_size is
-	// accepted as a legacy alias.
-	params := models.PaginationParams{
-		Page:     1,
-		PageSize: 20,
-	}
-
-	if page := c.Query("page"); page != "" {
-		if p, err := strconv.Atoi(page); err == nil && p > 0 {
-			params.Page = p
-		}
-	}
-
-	limit := c.Query("limit")
-	if limit == "" {
-		limit = c.Query("page_size")
-	}
-	if limit != "" {
-		if ps, err := strconv.Atoi(limit); err == nil && ps > 0 && ps <= 100 {
-			params.PageSize = ps
-		}
-	}
+	// Parse pagination parameters (page plus the page_size/limit alias
+	// pair shared by all listings, params.go).
+	params := parsePaginationParams(c)
 
 	result, err := h.accountService.GetAccountHistory(c.Request.Context(), name, params)
 	if err != nil {

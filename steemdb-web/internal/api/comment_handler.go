@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,29 +27,18 @@ func NewCommentHandler(commentService *services.CommentService, logger utils.Log
 
 // GetPosts handles GET /api/v1/posts
 func (h *CommentHandler) GetPosts(c *gin.Context) {
-	// Parse pagination parameters
-	params := models.PaginationParams{
-		Page:     1,
-		PageSize: 20,
+	// The posts listing only paginates/sorts the full depth=0 set; it has
+	// no text-search semantics. Reject `search` explicitly (400) instead
+	// of silently dropping it — tag-scoped listings live on /posts/daily.
+	if c.Query("search") != "" {
+		h.respondWithError(c, http.StatusBadRequest, "Parameter 'search' is not supported on this endpoint; use /api/v1/posts/daily?tag=<category> for tag filtering")
+		return
 	}
 
-	if page := c.Query("page"); page != "" {
-		if p, err := strconv.Atoi(page); err == nil && p > 0 {
-			params.Page = p
-		}
-	}
-
-	if pageSize := c.Query("page_size"); pageSize != "" {
-		if ps, err := strconv.Atoi(pageSize); err == nil && ps > 0 && ps <= 100 {
-			params.PageSize = ps
-		}
-	}
-
-	// Parse sort parameters
-	sortParams := models.SortParams{
-		SortBy:    c.DefaultQuery("sort_by", "created"),
-		SortOrder: c.DefaultQuery("sort_order", "desc"),
-	}
+	// Accepts both the canonical names (page_size/sort_by/sort_order) and
+	// the short aliases (limit/sort/order), same convention as /v1/blocks.
+	params := parsePaginationParams(c)
+	sortParams := parseSortParams(c, "created", "desc")
 
 	result, err := h.commentService.GetPosts(c.Request.Context(), params, sortParams)
 	if err != nil {

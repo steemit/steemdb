@@ -48,10 +48,17 @@ recharts. ~7k lines. Dev: `pnpm install && pnpm run dev` (proxies to
 ## API contract conventions
 
 - Pagination params: backend canonical is `page/page_size/sort_by/
-  sort_order`; blocks also accepts `limit/sort/order`. Frontend currently
-  sends short names everywhere (broken on accounts/posts). **When touching
-  any list page, make the param names match the handler actually
-  implemented** — this is the single most-recurring contract break.
+  sort_order`; blocks/accounts/posts also accept the `limit/sort/order`
+  aliases, and accounts additionally supports `search=` (name-prefix
+  filter; posts rejects `search` with 400). `src/lib/api.ts` sends the
+  canonical names for accounts/posts/blocks (witnesses is the exception —
+  that handler reads the short names only). **When touching any list
+  page, make the param names match the handler actually implemented** —
+  this is the single most-recurring contract break (before 2026-09 the
+  accounts page's sort/search/page-size were all silently dropped).
+- Sortable columns must stay within the backend sort-key whitelist
+  (index-backed fields only — e.g. accounts: name/reputation/vests; the
+  Balance column is display-only on purpose).
 - Labs pages: `date` format must match `grouping` (`YYYY-MM-DD` for daily,
   `YYYY-MM` for monthly) — convert on toggle or the backend 400s.
 - WS: channels `blocks/props/state/operation/@name`; server auto-subscribes

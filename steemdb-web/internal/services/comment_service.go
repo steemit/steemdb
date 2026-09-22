@@ -30,6 +30,20 @@ func NewCommentService(db *database.MongoDB, redis *database.Redis, logger utils
 	}
 }
 
+// postSortField maps the API sort_by value to a mongo sort field. Only
+// index-backed fields are offered (sync's indexInventory: created,
+// net_votes, pending_payout_value, total_payout_value). comment is the
+// largest collection, so sorting on any other field would force an
+// unindexed in-memory sort; unknown values fall back to the default.
+func postSortField(sortBy string) string {
+	switch sortBy {
+	case "created", "net_votes", "pending_payout_value", "total_payout_value":
+		return sortBy
+	default:
+		return "created"
+	}
+}
+
 // GetPosts retrieves posts (depth=0) with pagination
 func (s *CommentService) GetPosts(ctx context.Context, params models.PaginationParams, sortParams models.SortParams) (*models.CommentSearchResult, error) {
 	collection := s.db.Collection("comment")
@@ -37,17 +51,11 @@ func (s *CommentService) GetPosts(ctx context.Context, params models.PaginationP
 	query := bson.M{"depth": 0}
 
 	// Build sort options
-	sort := bson.M{}
-	if sortParams.SortBy != "" {
-		sortField := sortParams.SortBy
-		if sortParams.SortOrder == "desc" {
-			sort[sortField] = -1
-		} else {
-			sort[sortField] = 1
-		}
-	} else {
-		sort["created"] = -1 // Default: newest first
+	sortOrder := -1
+	if sortParams.SortOrder == "asc" {
+		sortOrder = 1
 	}
+	sort := bson.M{postSortField(sortParams.SortBy): sortOrder}
 
 	// Count total
 	total, err := collection.CountDocuments(ctx, query)

@@ -114,12 +114,23 @@ export function AccountsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {/* Table */}
+            {/* Table. Sortable columns must match the backend sort-key
+                whitelist (index-backed only: name, reputation, vests).
+                Balance has no index behind it, so its column is
+                display-only. */}
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left p-3">Account</th>
+                    <th className="text-left p-3">
+                      <button
+                        onClick={() => handleSort('name')}
+                        className="flex items-center space-x-1 hover:text-foreground"
+                      >
+                        <span>Account</span>
+                        <ArrowUpDown className="h-3 w-3" />
+                      </button>
+                    </th>
                     <th className="text-left p-3">
                       <button
                         onClick={() => handleSort('reputation')}
@@ -129,15 +140,7 @@ export function AccountsPage() {
                         <ArrowUpDown className="h-3 w-3" />
                       </button>
                     </th>
-                    <th className="text-left p-3">
-                      <button
-                        onClick={() => handleSort('balance')}
-                        className="flex items-center space-x-1 hover:text-foreground"
-                      >
-                        <span>Balance</span>
-                        <ArrowUpDown className="h-3 w-3" />
-                      </button>
-                    </th>
+                    <th className="text-left p-3">Balance</th>
                     <th className="text-right p-3">Posts</th>
                     <th className="text-right p-3">Comments</th>
                     <th className="text-right p-3"></th>

@@ -76,49 +76,10 @@ func (h *BlockHandler) GetBlockVirtualOps(c *gin.Context) {
 
 // GetBlocks handles GET /api/v1/blocks
 func (h *BlockHandler) GetBlocks(c *gin.Context) {
-	// Parse pagination parameters
-	params := models.PaginationParams{
-		Page:     1,
-		PageSize: 20,
-	}
-
-	if page := c.Query("page"); page != "" {
-		if p, err := strconv.Atoi(page); err == nil && p > 0 {
-			params.Page = p
-		}
-	}
-
-	pageSizeStr := c.Query("page_size")
-	if pageSizeStr == "" {
-		pageSizeStr = c.Query("limit")
-	}
-	if pageSizeStr != "" {
-		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
-			params.PageSize = ps
-		}
-	}
-
-	// Parse sort parameters
-	sortBy := c.Query("sort_by")
-	if sortBy == "" {
-		sortBy = c.Query("sort")
-	}
-	if sortBy == "" {
-		sortBy = "block_num"
-	}
-
-	sortOrder := c.Query("sort_order")
-	if sortOrder == "" {
-		sortOrder = c.Query("order")
-	}
-	if sortOrder == "" {
-		sortOrder = "desc"
-	}
-
-	sortParams := models.SortParams{
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
-	}
+	// Canonical page/page_size/sort_by/sort_order with the limit/sort/order
+	// aliases — the convention shared by all collection listings (params.go).
+	params := parsePaginationParams(c)
+	sortParams := parseSortParams(c, "block_num", "desc")
 
 	result, err := h.blockService.GetBlocks(c.Request.Context(), params, sortParams)
 	if err != nil {
