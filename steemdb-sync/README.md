@@ -10,10 +10,17 @@ This service implements a three-phase synchronization architecture:
 2. **Live Sync**: Uses RPC to continuously sync new blocks
 3. **Repair**: Uses RPC to fix missing blocks
 
+After ingest, the **processor** materializes the derived collections
+(posts/votes/transfers/...) from the raw `operations` stream, and the
+**refresher** maintains background snapshots (witnesses, stats, clients,
+funds). Both run as resident services in the production compose.
+
 ## Components
 
 - `cmd/cold_ingest`: HTTP service that receives operations from steemd plugin during cold start
 - `cmd/live_sync`: RPC-based live block synchronization service
+- `cmd/processor`: Derives read-side collections from the raw operations stream
+- `cmd/refresher`: Background refreshers (witnesses, stats, clients, funds; replaces legacy history.py + witnesses.py)
 - `cmd/repair`: Tool for scanning and repairing missing blocks
 
 ## Ingest Endpoint Security
@@ -182,6 +189,7 @@ go build -o ../bin/repair ./cmd/repair
 # Repair tool with options
 ../bin/repair -config configs/config.yaml -start 1000 -end 2000  # Repair specific range
 ../bin/repair -config configs/config.yaml -dry-run               # Scan only, don't repair
+../bin/repair -config configs/config.yaml -mode backfill-accounts # Populate operations.accounts index
 ```
 
 ## Metrics
@@ -251,11 +259,12 @@ The ingest plugin requires:
   - [x] Block-only block handling
 - [x] Unit tests for core modules
 - [x] Prometheus metrics integration
+- [x] Live sync service (`cmd/live_sync`)
+- [x] Repair tool (`cmd/repair`)
+- [x] Processor (`cmd/processor`) and refresher (`cmd/refresher`)
 
 ### In Progress 🚧
 
-- [ ] Live sync service (`cmd/live_sync`)
-- [ ] Repair tool (`cmd/repair`)
 - [ ] Integration tests
 - [ ] Performance testing
 
