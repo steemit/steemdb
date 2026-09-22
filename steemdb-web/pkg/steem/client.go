@@ -1,18 +1,64 @@
 package steem
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	sdkapi "github.com/steemit/steemgosdk/api"
-	protocolapi "github.com/steemit/steemutil/protocol/api"
 	steemprotocol "github.com/steemit/steemutil/protocol"
+	protocolapi "github.com/steemit/steemutil/protocol/api"
 
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
+
+// Per-attempt RPC timeout. The steemgosdk methods take no context, so a hung
+// node (TCP half-open, stalled response) can only be bounded by wrapping each
+// attempt with its own timer — see callWithAttemptTimeout. The timeout is
+// deliberately PER ATTEMPT, not a shared budget across retries: a wall-clock
+// budget started at call entry is consumed entirely by the first hung node
+// (each attempt may take the full timeout), and the loop then exits after a
+// single attempt — defeating the node-rotation retry design. Worst case per
+// logical call is therefore attempts*timeout + backoff (4*10s + 6s = 46s):
+// bounded by construction, with no shared budget needed, because attempts are
+// bounded by rpcAttemptTimeout and the backoff sleeps sum to only
+// 1+2+3 = 3*rpcBackoffUnit on their own.
+const rpcAttemptTimeout = 10 * time.Second
+
+// Backoff between retries: attempt n waits (n+1)*rpcBackoffUnit, so the sleeps
+// sum to 1+2+3 = 6s in production. The sleeps are deliberately NOT capped by
+// a shared budget or context: an rpcCall-wide deadline would also cover the
+// attempts themselves (each up to rpcAttemptTimeout), the first hung node
+// would exhaust it, and the retry loop would exit early with a bare
+// context.DeadlineExceeded after a single attempt — exactly the bug this
+// shape removed. There is no parent context to honor anyway: the SDK calls
+// take no context, so the only cancellation point that exists is the caller
+// giving up on us.
+const (
+	rpcMaxRetries  = 3
+	rpcBackoffUnit = 1 * time.Second
+)
+
+// ErrAttemptTimeout is returned when a single RPC attempt does not complete
+// within rpcAttemptTimeout. The abandoned attempt keeps running in the
+// background until the SDK call finishes on its own. Against the pinned
+// dependencies (steemgosdk v0.0.15, steemutil v0.0.17) that endpoint is a
+// single 30s HTTP timeout: every method this client uses is a single-shot
+// SDK call with no internal retry (the maxRetry field that NewClient sets
+// via SetMaxRetry is never read in v0.0.15), and each jsonrpc2.Send builds
+// a fresh http.Client{Timeout: 30s} per request. If the SDK is upgraded to
+// >= v0.0.31, re-audit this bound: its api/v2 pairs a default 15s
+// per-attempt HTTP timeout with a bounded internal retry, so an abandoned
+// attempt would then be bounded differently. The buffered result channel
+// lets the wrapper goroutine exit cleanly once the SDK call finishes, so
+// abandoned attempts do not leak. When a retry loop exhausts its attempts,
+// the returned error wraps ErrAttemptTimeout and names the node that hung,
+// so a stalled node is distinguishable from any other deadline.
+var ErrAttemptTimeout = errors.New("steem rpc: attempt timed out")
 
 type Client struct {
 	nodes       []string
@@ -20,6 +66,11 @@ type Client struct {
 	mutex       sync.RWMutex
 	logger      utils.Logger
 	apis        []*sdkapi.API // One API instance per node
+
+	// Test seams: override the per-attempt timeout and the backoff unit to
+	// keep timeout/retry tests fast. Production code uses the constants.
+	attemptTimeout time.Duration
+	backoffUnit    time.Duration
 }
 
 // NewClient creates a new Steem RPC client using steemgosdk
@@ -36,18 +87,22 @@ func NewClient(nodes []string, logger utils.Logger) *Client {
 	}
 
 	return &Client{
-		nodes:       nodes,
-		currentNode: rand.Intn(len(nodes)),
-		logger:      logger,
-		apis:        apis,
+		nodes:          nodes,
+		currentNode:    rand.Intn(len(nodes)),
+		logger:         logger,
+		apis:           apis,
+		attemptTimeout: rpcAttemptTimeout,
+		backoffUnit:    rpcBackoffUnit,
 	}
 }
 
-// getCurrentAPI returns the current API instance
-func (c *Client) getCurrentAPI() *sdkapi.API {
+// currentNodeAndAPI returns the name and API instance of the node the next
+// attempt will hit, read together under one lock so a timeout error can name
+// the node that was actually called.
+func (c *Client) currentNodeAndAPI() (string, *sdkapi.API) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	return c.apis[c.currentNode]
+	return c.nodes[c.currentNode], c.apis[c.currentNode]
 }
 
 // switchNode switches to the next available node
@@ -58,352 +113,187 @@ func (c *Client) switchNode() {
 	c.logger.Debug("Switched to node", utils.String("node", c.nodes[c.currentNode]))
 }
 
-// GetDynamicGlobalProperties gets the dynamic global properties
-func (c *Client) GetDynamicGlobalProperties() (*DynamicGlobalProperties, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+// callWithAttemptTimeout runs fn, a context-unaware SDK call, and abandons it
+// if it does not finish within timeout. The result channel is buffered so a
+// late fn result is delivered without blocking (and the wrapper goroutine can
+// exit) even though nobody reads it anymore.
+func callWithAttemptTimeout[T any](timeout time.Duration, fn func() (T, error)) (T, error) {
+	type attemptResult struct {
+		val T
+		err error
+	}
+	ch := make(chan attemptResult, 1)
+	go func() {
+		val, err := fn()
+		ch <- attemptResult{val: val, err: err}
+	}()
 
+	select {
+	case res := <-ch:
+		return res.val, res.err
+	case <-time.After(timeout):
+		var zero T
+		return zero, ErrAttemptTimeout
+	}
+}
+
+// rpcCall executes one logical RPC: up to rpcMaxRetries+1 attempts, each
+// bounded by c.attemptTimeout (per attempt — see rpcAttemptTimeout for why
+// this is not one shared budget), rotating to the next node after every
+// failure and sleeping (attempt+1)*backoffUnit between attempts (1+2+3 =
+// 6 units total — small enough that the sleeps need no cap). Worst-case wall
+// time is attempts*timeout + 6 units. It is a free function (not a method)
+// because Go does not allow methods to declare type parameters.
+func rpcCall[T any](c *Client, method string, call func(*sdkapi.API) (T, error), extra ...zap.Field) (T, error) {
 	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
-		dgp, err := api.GetDynamicGlobalProperties()
+	for attempt := 0; attempt <= rpcMaxRetries; attempt++ {
+		node, api := c.currentNodeAndAPI()
+		result, err := callWithAttemptTimeout(c.attemptTimeout, func() (T, error) {
+			return call(api)
+		})
 		if err == nil {
-			return convertDynamicGlobalProperties(dgp), nil
+			return result, nil
+		}
+		if errors.Is(err, ErrAttemptTimeout) {
+			// Name the node that hung so operators can tell a stalled node
+			// apart from any other deadline.
+			err = fmt.Errorf("%w (node %s)", ErrAttemptTimeout, node)
 		}
 
 		lastErr = err
 		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_dynamic_global_properties"),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
+			append(append([]zap.Field{
+				utils.String("method", method),
+				utils.Int("attempt", attempt+1),
+			}, extra...), utils.Error(err))...,
 		)
 
 		// Switch to next node on error
 		c.switchNode()
 
-		// Wait before retry (except on last attempt)
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
+		// Wait before retry (except on last attempt). A plain Sleep,
+		// deliberately not guarded by any shared deadline: a budget started
+		// at call entry is spent by the first hung attempt (each attempt may
+		// take the full attemptTimeout) and would cut the retry loop down to
+		// a single attempt.
+		if attempt < rpcMaxRetries {
+			time.Sleep(time.Duration(attempt+1) * c.backoffUnit)
 		}
 	}
 
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+	var zero T
+	return zero, fmt.Errorf("RPC call failed after %d attempts: %w", rpcMaxRetries+1, lastErr)
+}
+
+// GetDynamicGlobalProperties gets the dynamic global properties
+func (c *Client) GetDynamicGlobalProperties() (*DynamicGlobalProperties, error) {
+	dgp, err := rpcCall(c, "get_dynamic_global_properties", func(api *sdkapi.API) (*protocolapi.DynamicGlobalProperties, error) {
+		return api.GetDynamicGlobalProperties()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return convertDynamicGlobalProperties(dgp), nil
 }
 
 // GetBlock gets a block by number
 func (c *Client) GetBlock(blockNum int64) (*Block, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
-		block, err := api.GetBlock(uint(blockNum))
-		if err == nil {
-			return convertBlock(block, blockNum), nil
-		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_block"),
-			utils.Int64("block_num", blockNum),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		// Switch to next node on error
-		c.switchNode()
-
-		// Wait before retry (except on last attempt)
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
+	block, err := rpcCall(c, "get_block",
+		func(api *sdkapi.API) (*protocolapi.Block, error) {
+			return api.GetBlock(uint(blockNum))
+		},
+		utils.Int64("block_num", blockNum))
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+	return convertBlock(block, blockNum), nil
 }
 
 // GetOpsInBlock gets the operations in a block. When onlyVirtual is true only
 // virtual operations are returned; otherwise all operations are returned.
 func (c *Client) GetOpsInBlock(blockNum int64, onlyVirtual bool) ([]*steemprotocol.OperationObject, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
-		ops, err := api.GetOpsInBlock(uint(blockNum), onlyVirtual)
-		if err == nil {
-			return ops, nil
-		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_ops_in_block"),
-			utils.Int64("block_num", blockNum),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		// Switch to next node on error
-		c.switchNode()
-
-		// Wait before retry (except on last attempt)
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+	return rpcCall(c, "get_ops_in_block",
+		func(api *sdkapi.API) ([]*steemprotocol.OperationObject, error) {
+			return api.GetOpsInBlock(uint(blockNum), onlyVirtual)
+		},
+		utils.Int64("block_num", blockNum))
 }
 
 // GetAccounts gets account information
 func (c *Client) GetAccounts(names []string) ([]Account, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
+	return rpcCall(c, "get_accounts", func(api *sdkapi.API) ([]Account, error) {
 		var accounts []Account
-		err := api.CallWithResult("condenser_api", "get_accounts", []interface{}{names}, &accounts)
-		if err == nil {
-			return accounts, nil
+		if err := api.CallWithResult("condenser_api", "get_accounts", []interface{}{names}, &accounts); err != nil {
+			return nil, err
 		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_accounts"),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		// Switch to next node on error
-		c.switchNode()
-
-		// Wait before retry (except on last attempt)
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+		return accounts, nil
+	})
 }
 
 // GetWitnessesByVote gets witnesses by vote
 func (c *Client) GetWitnessesByVote(from string, limit int) ([]Witness, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
+	return rpcCall(c, "get_witnesses_by_vote", func(api *sdkapi.API) ([]Witness, error) {
 		var witnesses []Witness
-		err := api.CallWithResult("condenser_api", "get_witnesses_by_vote", []interface{}{from, limit}, &witnesses)
-		if err == nil {
-			return witnesses, nil
+		if err := api.CallWithResult("condenser_api", "get_witnesses_by_vote", []interface{}{from, limit}, &witnesses); err != nil {
+			return nil, err
 		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_witnesses_by_vote"),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		// Switch to next node on error
-		c.switchNode()
-
-		// Wait before retry (except on last attempt)
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+		return witnesses, nil
+	})
 }
 
 // GetWitnessByAccount gets a single witness by account name
 func (c *Client) GetWitnessByAccount(account string) (*Witness, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
-		var witness Witness
-		err := api.CallWithResult("condenser_api", "get_witness_by_account", []interface{}{account}, &witness)
-		if err == nil {
-			if witness.Owner == "" {
-				return nil, nil
+	witness, err := rpcCall(c, "get_witness_by_account",
+		func(api *sdkapi.API) (*Witness, error) {
+			var witness Witness
+			if err := api.CallWithResult("condenser_api", "get_witness_by_account", []interface{}{account}, &witness); err != nil {
+				return nil, err
 			}
 			return &witness, nil
-		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_witness_by_account"),
-			utils.String("account", account),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		c.switchNode()
-
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
+		},
+		utils.String("account", account))
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+	if witness.Owner == "" {
+		return nil, nil
+	}
+	return witness, nil
 }
 
 // GetTransaction gets a transaction by transaction ID
 func (c *Client) GetTransaction(txID string) (map[string]interface{}, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
-		var tx map[string]interface{}
-		err := api.CallWithResult("condenser_api", "get_transaction", []interface{}{txID}, &tx)
-		if err == nil {
-			return tx, nil
-		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_transaction"),
-			utils.String("tx_id", txID),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		c.switchNode()
-
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
+	return rpcCall(c, "get_transaction",
+		func(api *sdkapi.API) (map[string]interface{}, error) {
+			var tx map[string]interface{}
+			if err := api.CallWithResult("condenser_api", "get_transaction", []interface{}{txID}, &tx); err != nil {
+				return nil, err
 			}
-		}
-	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+			return tx, nil
+		},
+		utils.String("tx_id", txID))
 }
 
 // GetWitnessSchedule gets the witness schedule
 func (c *Client) GetWitnessSchedule() (map[string]interface{}, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
+	return rpcCall(c, "get_witness_schedule", func(api *sdkapi.API) (map[string]interface{}, error) {
 		var schedule map[string]interface{}
-		err := api.CallWithResult("condenser_api", "get_witness_schedule", []interface{}{}, &schedule)
-		if err == nil {
-			return schedule, nil
+		if err := api.CallWithResult("condenser_api", "get_witness_schedule", []interface{}{}, &schedule); err != nil {
+			return nil, err
 		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_witness_schedule"),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		c.switchNode()
-
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+		return schedule, nil
+	})
 }
 
 // GetActiveWitnesses gets the active witnesses
 func (c *Client) GetActiveWitnesses() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var lastErr error
-	maxRetries := 3
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		api := c.getCurrentAPI()
+	return rpcCall(c, "get_active_witnesses", func(api *sdkapi.API) ([]string, error) {
 		var witnesses []string
-		err := api.CallWithResult("condenser_api", "get_active_witnesses", []interface{}{}, &witnesses)
-		if err == nil {
-			return witnesses, nil
+		if err := api.CallWithResult("condenser_api", "get_active_witnesses", []interface{}{}, &witnesses); err != nil {
+			return nil, err
 		}
-
-		lastErr = err
-		c.logger.Warn("RPC call failed, retrying",
-			utils.String("method", "get_active_witnesses"),
-			utils.Int("attempt", attempt+1),
-			utils.Error(err),
-		)
-
-		c.switchNode()
-
-		if attempt < maxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("RPC call failed after %d attempts: %w", maxRetries+1, lastErr)
+		return witnesses, nil
+	})
 }
 
 // Helper functions to convert steemgosdk types to our types
