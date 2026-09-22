@@ -18,15 +18,13 @@ import (
 // AccountService handles account-related operations
 type AccountService struct {
 	db     *database.MongoDB
-	redis  *database.Redis
 	logger utils.Logger
 }
 
 // NewAccountService creates a new account service
-func NewAccountService(db *database.MongoDB, redis *database.Redis, logger utils.Logger) *AccountService {
+func NewAccountService(db *database.MongoDB, logger utils.Logger) *AccountService {
 	return &AccountService{
 		db:     db,
-		redis:  redis,
 		logger: logger,
 	}
 }

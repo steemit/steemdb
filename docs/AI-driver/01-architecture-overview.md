@@ -91,14 +91,15 @@ conflicts with one, stop and surface the conflict.
 ## Deployment topology (as actually run in production)
 
 - Production steady state (traffic cutover plan stage C) is codified in-repo
-  as **`docker-compose.production.yml`** (single box, all-in-one): six
+  as **`docker-compose.production.yml`** (single box, all-in-one): five
   resident services — `steemdb-web`, `processor`, `live-sync` (started via
   the `live` profile after the cold-start handoff), `steemdb-refresher`,
-  `mongo`, `redis` — plus prometheus (real scrape config:
+  `mongo` — plus prometheus (real scrape config:
   `monitoring/prometheus.yml`) and grafana. `cold_ingest`/`steemd` retire
   after replay; `repair` is an ad-hoc maintenance binary from the same
-  steemdb-sync image.
-- Root `docker-compose.yml` is the **dev/demo** stack: web + mongo + redis +
+  steemdb-sync image. (A `redis` service used to be resident too; it backed
+  nothing — web only pinged it from `/ready` — and was removed.)
+- Root `docker-compose.yml` is the **dev/demo** stack: web + mongo +
   prometheus + grafana + refresher only. It deliberately has no writers —
   never assume it yields a working explorer (derived collections would have
   no writer; Posts/Labs/Accounts would be empty).
@@ -135,4 +136,5 @@ are.
   the cold-start producer. Batches of 100 ops / 1s, bounded queue of 100k
   (deliberate backpressure: slow consumer throttles replay).
 - Keep `steemgosdk`/`steemutil` versions aligned across `steemdb-web` and
-  `steemdb-sync` (currently drifted v0.0.15 vs v0.0.31 — known debt).
+  `steemdb-sync` (both at v0.0.31; the earlier v0.0.15/v0.0.31 drift was
+  closed in the dependency-alignment PR).

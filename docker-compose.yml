@@ -10,7 +10,6 @@ services:
     environment:
       - SERVER_MODE=production
       - DATABASE_MONGODB_URI=mongodb://mongo:27017/
-      - DATABASE_REDIS_URI=redis://redis:6379
     volumes:
       # Mount configuration directory from host to container
       # Edit steemdb-web/configs/config.yaml on host to change application settings
@@ -19,7 +18,6 @@ services:
       - ./steemdb-web/logs:/app/logs
     depends_on:
       - mongo
-      - redis
     restart: unless-stopped
     networks:
       - steemdb-network
@@ -52,25 +50,9 @@ services:
       retries: 3
       start_period: 40s
 
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-      # Uncomment and create redis.conf if you need custom Redis configuration
-      # - ./steemdb-web/configs/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    restart: unless-stopped
-    networks:
-      - steemdb-network
-    # Uncomment if using custom redis.conf
-    # command: redis-server /usr/local/etc/redis/redis.conf
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # Redis was removed from this stack: nothing in web used it beyond the
+  # /ready probe (no cache, no rate limiter), so it only added a false
+  # readiness dependency.
 
   # Prometheus Monitoring
   prometheus:
@@ -135,8 +117,6 @@ services:
 
 volumes:
   mongo_data:
-    driver: local
-  redis_data:
     driver: local
   prometheus_data:
     driver: local

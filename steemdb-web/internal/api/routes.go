@@ -13,12 +13,12 @@ import (
 )
 
 // SetupRoutes configures all API routes
-func SetupRoutes(router *gin.Engine, db *database.MongoDB, redis *database.Redis, steemClient *steem.Client, logger utils.Logger) {
+func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Client, logger utils.Logger) {
 	// Initialize services
-	accountService := services.NewAccountService(db, redis, logger)
-	blockService := services.NewBlockService(db, redis, steemClient, logger)
+	accountService := services.NewAccountService(db, logger)
+	blockService := services.NewBlockService(db, steemClient, logger)
 	dashboardService := services.NewDashboardService(db, steemClient, logger)
-	commentService := services.NewCommentService(db, redis, logger)
+	commentService := services.NewCommentService(db, logger)
 	labsService := services.NewLabsService(db, steemClient, logger)
 	witnessService := services.NewWitnessService(db, steemClient, logger)
 	statsService := services.NewStatsService(db, steemClient, logger)

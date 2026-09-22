@@ -211,7 +211,7 @@ For `refresher`, metrics are available on port `:9093/metrics`.
 ### Production deployment
 
 The resident production stack (processor + live_sync + refresher alongside
-the web family and mongo/redis) is orchestrated by the repo-root
+the web family and mongo) is orchestrated by the repo-root
 `docker-compose.production.yml`; `Dockerfile.sync` in this directory builds
 the single image its sync services run from (all five binaries —
 `cold_ingest` and `repair` are run ad hoc from the same image). The cold

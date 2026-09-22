@@ -6,7 +6,7 @@ Single Go binary (Gin + Gorilla WebSocket) shipped in one image with Nginx
 
 ## Layering
 
-`cmd/web/main.go` (wiring: config, Mongo/Redis, graceful shutdown; web
+`cmd/web/main.go` (wiring: config, Mongo, graceful shutdown; web
 creates no indexes — sync's `createIndexes` is the single index
 authority, see 02-data-model.md) → `internal/api/` (handlers +
 routes.go — parameter parsing and response wrapping only) →
@@ -110,18 +110,22 @@ exits right after); `writePump` does not watch the service context.
 - Env overrides: `viper.AutomaticEnv()` plus the dot-to-underscore
   `EnvKeyReplacer` makes **every key already declared in `setDefaults()`
   or config.yaml** overridable by its uppercase-underscore form —
-  `SERVER_MODE`, `AUTH_JWT_SECRET`, `LOG_LEVEL`, `CACHE_ENABLED`, …
+  `SERVER_MODE`, `AUTH_JWT_SECRET`, `LOG_LEVEL`, …
   (unmarshal resolves each known key through env first). An explicit
   `viper.BindEnv` is only required for keys declared nowhere (not in
   defaults, not in the config file — those are invisible to viper's key
-  set); the existing BindEnv calls also add the legacy
-  `MONGODB_URI`/`REDIS_URI` aliases. (Before the replacer, `AutomaticEnv`
+  set); the existing BindEnv call also adds the legacy `MONGODB_URI`
+  alias. (Before the replacer, `AutomaticEnv`
   looked up `SERVER.MODE` for `server.mode`, which never exists — why
   `SERVER_MODE` used to be dead.)
-- Redis is connected and `/ready` pings it, but no service uses it
-  (cache/rate-limit/JWT/metrics config sections are dead). Don't build
-  on the assumption that caching exists; don't add Redis dependencies to
-  readiness without using them.
+- Redis was removed from web entirely (2026-09): the client was wired
+  only into `/ready` and three service structs that never called it, so
+  a Redis outage took web out of rotation behind a dependency nothing
+  used. `/ready` now pings Mongo only (`internal/api/health_handler.go`);
+  the redis/cache config sections and the `go-redis` dependency are gone.
+  Rate-limit/JWT/metrics config sections remain declared-but-unwired.
+  If a real cache is ever built, reintroduce Redis alongside the feature
+  that uses it — including its readiness gate — not before.
 - `steem.timeout`/retry and WS tuning knobs in config.yaml are not wired
   (values hardcoded in `pkg/steem/client.go` — 10s per-attempt timeout,
   4 attempts with node rotation each failure, backoff 1-3s with no shared
@@ -135,7 +139,7 @@ exits right after); `writePump` does not watch the service context.
 
 - Image: multi-stage (frontend dist + Go binary + nginx + supervisord).
   Configs mount at `/app/configs` (hot-edit + restart).
-- Root compose runs web+mongo(4.4)+redis+prometheus+grafana+refresher.
+- Root compose runs web+mongo(4.4)+prometheus+grafana+refresher.
   Prometheus has no scrape config; grafana ships admin123 — monitoring
   is decorative until configured.
 - Ports: web 80/8080/9090(metrics, unpublished), processor 9092,

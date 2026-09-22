@@ -66,8 +66,6 @@ database:
   mongodb:
     uri: "mongodb://mongo:27017"
     database: "steemdb"
-  redis:
-    uri: "redis://redis:6379"
 
 # ... other sections
 ```
@@ -80,7 +78,6 @@ You can also override configuration using environment variables in `docker-compo
 environment:
   - SERVER_MODE=production
   - MONGODB_URI=mongodb://mongo:27017
-  - REDIS_URI=redis://redis:6379
 ```
 
 Note: The Go application uses Viper for configuration, which supports environment variable overrides. Check `pkg/utils/config.go` for supported environment variable names.

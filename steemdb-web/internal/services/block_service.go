@@ -19,16 +19,14 @@ import (
 // BlockService handles block-related operations
 type BlockService struct {
 	db          *database.MongoDB
-	redis       *database.Redis
 	steemClient *steem.Client
 	logger      utils.Logger
 }
 
 // NewBlockService creates a new block service
-func NewBlockService(db *database.MongoDB, redis *database.Redis, steemClient *steem.Client, logger utils.Logger) *BlockService {
+func NewBlockService(db *database.MongoDB, steemClient *steem.Client, logger utils.Logger) *BlockService {
 	return &BlockService{
 		db:          db,
-		redis:       redis,
 		steemClient: steemClient,
 		logger:      logger,
 	}

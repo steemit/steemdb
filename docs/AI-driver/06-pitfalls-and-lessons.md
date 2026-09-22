@@ -93,7 +93,9 @@ env tags without implementations, Redis/cache/rate-limit/JWT config with
 zero consumers, README endpoints that don't exist (`SERVER_MODE` was in
 this group too until it got an explicit `BindEnv`). **Rule**: config must be wired in the same PR that introduces it,
 or deleted; docs that describe nonexistent behavior get fixed, not
-extended.
+extended. (The rule was executed for the Redis/cache pair in 2026-09:
+web's redis client, its config sections, and the compose services were
+removed; rate-limit/JWT/metrics sections remain declared-but-unwired.)
 
 ### H. Security posture assumed but absent
 nginx add_header inheritance silently dropped all security headers on the

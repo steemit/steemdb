@@ -203,7 +203,7 @@ check which stack you are combining.
 ## Production
 
 The resident production topology (processor + live-sync + refresher + web
-family + mongo/redis on one box) is codified in the repo root
+family + mongo on one box) is codified in the repo root
 `docker-compose.production.yml`; `steemdb-sync/Dockerfile.sync` builds the
 one image its sync services run from (all five binaries; `cold_ingest` and
 `repair` are run ad hoc from it). The env names it sets are the

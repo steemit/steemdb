@@ -8,14 +8,15 @@
 # this file yields an explorer whose Posts/Labs/Accounts pages stay empty
 # forever (derived collections would have no writer).
 #
-# Resident services (six):
+# Resident services (five):
 #   steemdb-web        REST API + WebSocket + Nginx + SPA     (public :80)
 #   processor          operations -> derived collections      (metrics :9092)
 #   live-sync          RPC catch-up + chain-head follow       (metrics :9091)
 #   steemdb-refresher  witness/stats/funds/clients tickers    (metrics :9093)
 #   mongo              raw + derived data                     (no host port)
-#   redis              cache; web /ready hard-depends on it   (no host port)
 # plus the monitoring pair (prometheus with a real scrape config, grafana).
+# (Redis used to live here as a "cache"; nothing used it beyond the web
+# /ready probe, so both were removed — /ready checks Mongo only.)
 #
 # SHARED-MONGO CONTRACT: the `steemdb` database is written by the sync side
 # only — processor / live-sync / steemdb-refresher are the writers, and
@@ -108,8 +109,7 @@
 #     LIVE_SYNC_RPC_CONCURRENCY
 #   web (steemdb-web/pkg/utils/config.go, viper BindEnv/AutomaticEnv):
 #     SERVER_MODE, SERVER_PORT, SERVER_HOST,
-#     DATABASE_MONGODB_URI (alias MONGODB_URI),
-#     DATABASE_REDIS_URI (alias REDIS_URI)
+#     DATABASE_MONGODB_URI (alias MONGODB_URI)
 #
 # Setup: cp .env.production.example .env  (then edit; GRAFANA_ADMIN_PASSWORD
 # is required — the compose refuses to start with the placeholder unset).
@@ -118,7 +118,7 @@
 services:
   # --------------------------------------------------------------------------
   # SteemDB Web — Go API + WebSocket behind Nginx (SPA served as static).
-  # The ONLY service with a published host port. Mongo/Redis are reached over
+  # The ONLY service with a published host port. Mongo is reached over
   # the compose network; the database name comes from the mounted config
   # (steemdb-web/configs/config.yaml, database.mongodb.database: steemdb).
   # --------------------------------------------------------------------------
@@ -133,14 +133,11 @@ services:
       # switches gin out of debug mode.
       - SERVER_MODE=production
       - DATABASE_MONGODB_URI=${WEB_MONGODB_URI:-mongodb://mongo:27017/}
-      - DATABASE_REDIS_URI=redis://redis:6379
     volumes:
       # Host-side config; edit and `docker compose restart steemdb-web`.
       - ./steemdb-web/configs:/app/configs:ro
     depends_on:
       mongo:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -298,22 +295,6 @@ services:
       start_period: 40s
 
   # --------------------------------------------------------------------------
-  # Redis — cache target; web /ready hard-depends on it. No host port.
-  # --------------------------------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    networks:
-      - steemdb-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # --------------------------------------------------------------------------
   # Prometheus — scrapes the sync-side metrics endpoints. Targets are
   # verified against code in monitoring/prometheus.yml (web is NOT scraped:
   # it starts no metrics server; cold_ingest is not part of this stack).
@@ -356,8 +337,6 @@ services:
 
 volumes:
   mongo_data:
-    driver: local
-  redis_data:
     driver: local
   prometheus_data:
     driver: local

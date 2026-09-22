@@ -17,7 +17,6 @@ type Config struct {
 	API        APIConfig        `mapstructure:"api"`
 	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
 	Steem      SteemConfig      `mapstructure:"steem"`
-	Cache      CacheConfig      `mapstructure:"cache"`
 	Log        LogConfig        `mapstructure:"log"`
 	Metrics    MetricsConfig    `mapstructure:"metrics"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
@@ -36,7 +35,6 @@ type ServerConfig struct {
 // DatabaseConfig holds database configuration
 type DatabaseConfig struct {
 	MongoDB MongoDBConfig `mapstructure:"mongodb"`
-	Redis   RedisConfig   `mapstructure:"redis"`
 }
 
 // MongoDBConfig holds MongoDB configuration
@@ -45,17 +43,6 @@ type MongoDBConfig struct {
 	Database string        `mapstructure:"database"`
 	PoolSize int           `mapstructure:"pool_size"`
 	Timeout  time.Duration `mapstructure:"timeout"`
-}
-
-// RedisConfig holds Redis configuration
-type RedisConfig struct {
-	URI          string        `mapstructure:"uri"`
-	Password     string        `mapstructure:"password"`
-	DB           int           `mapstructure:"db"`
-	PoolSize     int           `mapstructure:"pool_size"`
-	DialTimeout  time.Duration `mapstructure:"dial_timeout"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 }
 
 // AuthConfig holds authentication configuration
@@ -106,22 +93,6 @@ type SteemConfig struct {
 	RetryAttempts int           `mapstructure:"retry_attempts"`
 }
 
-// CacheConfig holds cache configuration
-type CacheConfig struct {
-	Enabled         bool            `mapstructure:"enabled"`
-	DefaultExpiry   time.Duration   `mapstructure:"default_expiry"`
-	CleanupInterval time.Duration   `mapstructure:"cleanup_interval"`
-	Blocks          CacheItemConfig `mapstructure:"blocks"`
-	Accounts        CacheItemConfig `mapstructure:"accounts"`
-	Witnesses       CacheItemConfig `mapstructure:"witnesses"`
-}
-
-// CacheItemConfig holds cache item specific configuration
-type CacheItemConfig struct {
-	Expiry   time.Duration `mapstructure:"expiry"`
-	MaxItems int           `mapstructure:"max_items"`
-}
-
 // LogConfig holds logging configuration
 type LogConfig struct {
 	Level      string `mapstructure:"level"`
@@ -164,7 +135,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	// server.mode, which never exists as an environment variable.
 	// With the replacer, the override surface is every dotted key already
 	// declared in setDefaults() or the config file (SERVER_MODE,
-	// AUTH_JWT_SECRET, LOG_LEVEL, CACHE_ENABLED, ...); an explicit BindEnv
+	// AUTH_JWT_SECRET, LOG_LEVEL, ...); an explicit BindEnv
 	// below is only needed for keys that are declared nowhere, or to add
 	// extra env aliases.
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -175,7 +146,6 @@ func LoadConfig(configPath string) (*Config, error) {
 	viper.BindEnv("server.port", "SERVER_PORT")
 	viper.BindEnv("server.host", "SERVER_HOST")
 	viper.BindEnv("database.mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
-	viper.BindEnv("database.redis.uri", "DATABASE_REDIS_URI", "REDIS_URI")
 
 	// Read config file (will be overridden by environment variables if set)
 	if err := viper.ReadInConfig(); err != nil {
@@ -190,12 +160,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		viper.Set("database.mongodb.uri", envURI)
 	}
 
-	if envURI := os.Getenv("DATABASE_REDIS_URI"); envURI != "" {
-		viper.Set("database.redis.uri", envURI)
-	} else if envURI := os.Getenv("REDIS_URI"); envURI != "" {
-		viper.Set("database.redis.uri", envURI)
-	}
-
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
@@ -207,12 +171,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.Database.MongoDB.URI = envURI
 	} else if envURI := os.Getenv("MONGODB_URI"); envURI != "" {
 		config.Database.MongoDB.URI = envURI
-	}
-
-	if envURI := os.Getenv("DATABASE_REDIS_URI"); envURI != "" {
-		config.Database.Redis.URI = envURI
-	} else if envURI := os.Getenv("REDIS_URI"); envURI != "" {
-		config.Database.Redis.URI = envURI
 	}
 
 	return &config, nil
@@ -234,11 +192,6 @@ func setDefaults() {
 	viper.SetDefault("database.mongodb.pool_size", 100)
 	viper.SetDefault("database.mongodb.timeout", "30s")
 
-	viper.SetDefault("database.redis.uri", "redis://localhost:6379")
-	viper.SetDefault("database.redis.password", "")
-	viper.SetDefault("database.redis.db", 0)
-	viper.SetDefault("database.redis.pool_size", 100)
-
 	// Auth defaults
 	viper.SetDefault("auth.jwt_expiry", "24h")
 	viper.SetDefault("auth.refresh_expiry", "168h")
@@ -257,11 +210,6 @@ func setDefaults() {
 	viper.SetDefault("steem.nodes", []string{"https://api.steemit.com"})
 	viper.SetDefault("steem.timeout", "30s")
 	viper.SetDefault("steem.retry_attempts", 3)
-
-	// Cache defaults
-	viper.SetDefault("cache.enabled", true)
-	viper.SetDefault("cache.default_expiry", "5m")
-	viper.SetDefault("cache.cleanup_interval", "10m")
 
 	// Log defaults
 	viper.SetDefault("log.level", "info")

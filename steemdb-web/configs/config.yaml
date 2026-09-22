@@ -12,15 +12,6 @@ database:
     database: "steemdb"
     pool_size: 100
     timeout: 30s
-  
-  redis:
-    uri: "redis://localhost:6379"
-    password: ""
-    db: 0
-    pool_size: 100
-    dial_timeout: 5s
-    read_timeout: 3s
-    write_timeout: 3s
 
 auth:
   jwt_secret: "your-secret-key-change-in-production"
@@ -55,24 +46,6 @@ steem:
     - "https://api.steemit.com"
   timeout: 30s
   retry_attempts: 3
-
-cache:
-  enabled: true
-  default_expiry: 5m
-  cleanup_interval: 10m
-  
-  # Cache settings for different data types
-  blocks:
-    expiry: 1h
-    max_items: 10000
-  
-  accounts:
-    expiry: 10m
-    max_items: 50000
-  
-  witnesses:
-    expiry: 1m
-    max_items: 1000
 
 log:
   level: "debug"

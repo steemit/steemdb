@@ -44,8 +44,7 @@ func main() {
 
 	// Log loaded configuration for debugging
 	logger.Info("Loaded configuration",
-		utils.String("mongodb_uri", config.Database.MongoDB.URI),
-		utils.String("redis_uri", config.Database.Redis.URI))
+		utils.String("mongodb_uri", config.Database.MongoDB.URI))
 
 	// Initialize MongoDB
 	mongodb, err := database.NewMongoDB(config.Database.MongoDB, logger)
@@ -57,17 +56,6 @@ func main() {
 		defer cancel()
 		if err := mongodb.Close(ctx); err != nil {
 			logger.Error("Failed to close MongoDB connection", utils.Error(err))
-		}
-	}()
-
-	// Initialize Redis
-	redis, err := database.NewRedis(config.Database.Redis, logger)
-	if err != nil {
-		logger.Fatal("Failed to connect to Redis", utils.Error(err))
-	}
-	defer func() {
-		if err := redis.Close(); err != nil {
-			logger.Error("Failed to close Redis connection", utils.Error(err))
 		}
 	}()
 
@@ -109,39 +97,12 @@ func main() {
 		router.Use(api.CORSMiddleware(config.API.CORS))
 	}
 
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "healthy",
-			"timestamp": time.Now().Unix(),
-			"version":   "1.0.0",
-		})
-	})
-
-	// Readiness check endpoint
-	router.GET("/ready", func(c *gin.Context) {
-		// Check database connections
-		if err := mongodb.Ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "not_ready",
-				"error":  "database_unavailable",
-			})
-			return
-		}
-
-		if err := redis.Ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "not_ready",
-				"error":  "redis_unavailable",
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "ready",
-			"timestamp": time.Now().Unix(),
-		})
-	})
+	// Health and readiness endpoints. /health is pure liveness; /ready probes
+	// MongoDB only — Redis was removed from the service (nothing used it
+	// beyond this probe), so it must no longer gate traffic rotation.
+	healthHandler := api.NewHealthHandler(mongodb)
+	router.GET("/health", healthHandler.Health)
+	router.GET("/ready", healthHandler.Ready)
 
 	// Setup WebSocket endpoint
 	if config.WebSocket.Enabled && wsService != nil {
@@ -151,7 +112,7 @@ func main() {
 	}
 
 	// Setup API routes
-	api.SetupRoutes(router, mongodb, redis, steemClient, logger)
+	api.SetupRoutes(router, mongodb, steemClient, logger)
 
 	// Create HTTP server
 	server := &http.Server{
