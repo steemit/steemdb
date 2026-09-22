@@ -47,11 +47,10 @@ volumes:
 See `config.yaml` for the complete configuration structure. Key sections:
 
 - `server` - Server settings (port, host, mode)
-- `database` - MongoDB and Redis connection settings
+- `database` - MongoDB connection settings
 - `api` - API configuration (rate limiting, CORS)
 - `websocket` - WebSocket settings
 - `steem` - Steem blockchain node configuration
-- `cache` - Redis cache settings
 - `log` - Logging configuration
 - `metrics` - Prometheus metrics configuration
 

@@ -56,12 +56,12 @@ SteemDB is a comprehensive blockchain data platform that provides:
 │                                                    │
 │         ┌────────────────────┐                   │
 │         │                                          │         │
-│    ┌────▼─────┐                            ┌─────▼────┐    │
-│    │ MongoDB  │                            │  Redis   │    │
-│    │          │                            │          │    │
-│    │ Primary  │                            │ Readiness│    │
-│    │ Database │                            │  probe   │    │
-│    └──────────┘                            └──────────┘    │
+│    ┌────▼─────┐                                         │
+│    │ MongoDB  │                                         │
+│    │          │                                         │
+│    │ Primary  │                                         │
+│    │ Database │                                         │
+│    └──────────┘                                         │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │         Monitoring Stack                              │  │
@@ -76,7 +76,7 @@ SteemDB is a comprehensive blockchain data platform that provides:
 
 - **Backend Services**: Go (1.23 for steemdb-web, 1.25 for steemdb-sync)
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Database**: MongoDB (6.0 in `docker-compose.production.yml`, 4.4 in the dev `docker-compose.yml`), Redis 7 (readiness probe; caching not implemented yet)
+- **Database**: MongoDB (6.0 in `docker-compose.production.yml`, 4.4 in the dev `docker-compose.yml`)
 - **Web Framework**: Gin
 - **WebSocket**: Gorilla WebSocket
 - **Monitoring**: Prometheus, Grafana (scrape the sync services)
@@ -127,7 +127,6 @@ Modern React-based frontend application with full feature parity to legacy syste
 - **Go** 1.23+ for steemdb-web, 1.25+ for steemdb-sync (for development)
 - **Node.js** 18+ and **pnpm** 8+ (for frontend development)
 - **MongoDB** (included via Docker Compose: 4.4 in the dev stack, 6.0 in the production stack)
-- **Redis** 7+ (included via Docker Compose)
 
 ### Using Docker Compose (Recommended)
 
@@ -167,7 +166,6 @@ This is the fastest way to get started with all services running.
    - **API**: http://localhost/api/v1/
    - **WebSocket**: ws://localhost/ws
    - **MongoDB**: localhost:27017
-   - **Redis**: localhost:6379
 
 ### Manual Development Setup
 
@@ -193,19 +191,18 @@ pnpm run dev
 
 Two compose files cover two different purposes — pick deliberately:
 
-- **`docker-compose.yml`** (dev/demo): web + refresher + mongo/redis + monitoring.
+- **`docker-compose.yml`** (dev/demo): web + refresher + mongo + monitoring.
   It does **not** run the data writers (processor/live_sync), so Posts/Labs/Accounts
   pages stay empty until a writer fills the derived collections.
-- **`docker-compose.production.yml`** (production, single-box all-in-one): the six
-  resident services — steemdb-web, processor, live-sync, steemdb-refresher, mongo,
-  redis — plus prometheus (real scrape config) and grafana. See
+- **`docker-compose.production.yml`** (production, single-box all-in-one): the five
+  resident services — steemdb-web, processor, live-sync, steemdb-refresher, mongo
+  — plus prometheus (real scrape config) and grafana. See
   [Production Topology](#production-topology) below.
 
 **Available Services (`docker-compose.yml`, dev):**
 - `steemdb-web` - Web API service with Nginx and frontend
 - `steemdb-refresher` - witness/stats/funds/clients snapshots
 - `mongo` - MongoDB database
-- `redis` - Redis cache
 - `prometheus` / `grafana` - monitoring (scrapes the refresher metrics)
 
 **Common Commands:**
@@ -270,11 +267,10 @@ The production stack is the single-box, all-in-one topology described in
 | `live-sync` | RPC catch-up + chain-head follow (started via the `live` profile) | `:9091/metrics` |
 | `steemdb-refresher` | witness/stats/funds/clients snapshots | `:9093/metrics` |
 | `mongo` | raw + derived data (sync side is the writer & index authority) | - |
-| `redis` | cache | - |
 
 Shared-Mongo contract: the `steemdb` database is written by the sync side only;
 `steemdb-web` connects to the same database **read-only**. The collection/field
-contract is documented in `docs/AI-driver/02-data-model.md`. Mongo and Redis are
+contract is documented in `docs/AI-driver/02-data-model.md`. Mongo is
 not published to the host (compose network only).
 
 **Cold start & steady state** (cold_ingest/steemd/repair are tools, not resident
@@ -425,8 +421,8 @@ steemdb/
 
 1. **Start development environment**
    ```bash
-   # Start dependencies (MongoDB, Redis)
-   docker-compose up -d mongo redis
+   # Start dependencies (MongoDB)
+   docker-compose up -d mongo
    
    # Run web service locally
    cd steemdb-web && go run cmd/web/main.go configs/config.yaml
@@ -509,7 +505,6 @@ All services include health check endpoints:
 
 - **Web Service**: `http://localhost/health` (via Nginx)
 - **MongoDB**: Internal health check via mongo shell ping (`mongosh` in the production stack, legacy `mongo` in the 4.4 dev stack)
-- **Redis**: Internal health check via `redis-cli ping`
 - **Sync services**: health checks via their `/metrics` endpoints (production compose)
 
 **Check service health:**
@@ -531,7 +526,6 @@ Environment variables are the ones actually bound in code
 **Web Service** (viper `BindEnv` + `AutomaticEnv` with `.`->`_`):
 - `SERVER_MODE` - Server mode (development, production)
 - `DATABASE_MONGODB_URI` (alias `MONGODB_URI`) - MongoDB connection string
-- `DATABASE_REDIS_URI` (alias `REDIS_URI`) - Redis connection string
 - `AUTH_JWT_SECRET` - JWT secret key (overrides `auth.jwt_secret`)
 
 **Sync services** (processor / live_sync / refresher, `loadFromEnv`):
@@ -627,7 +621,6 @@ steemdb/
 **Service Ports:**
 - `80` - Web service (Nginx + Frontend + API) — the only published port in production
 - `27017` - MongoDB (compose network only, not published)
-- `6379` - Redis (compose network only, not published)
 - `9091/9092/9093` - live_sync / processor / refresher metrics (compose network only)
 
 **Key Endpoints:**

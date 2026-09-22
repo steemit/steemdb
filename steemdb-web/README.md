@@ -21,22 +21,23 @@ A modern, high-performance web service for SteemDB blockchain explorer, built wi
 
 ### Performance & Reliability
 - **High Performance**: Built with Go for optimal performance
-- **Health Checks**: `/health` and `/ready` endpoints (readiness pings both MongoDB and Redis)
+- **Health Checks**: `/health` and `/ready` endpoints (readiness pings MongoDB)
 - **Graceful Shutdown**: Proper signal handling and connection draining
 
 ### Security
 - **CORS Support**: Configurable CORS for web applications
 - **Loopback by Default**: The Go server binds to `127.0.0.1`; Nginx is the only exposed listener
 
-> Note: Redis is connected and used for the readiness probe only — response
-> caching, rate limiting, and JWT authentication are **not implemented**.
-> The corresponding `api.rate_limit`, `cache`, `metrics`, and `auth` config
-> sections are parsed but currently have no consumers.
+> Note: web has no Redis dependency — a former Redis client existed only for
+> the readiness probe and was removed. Response caching, rate limiting, and
+> JWT authentication are **not implemented**; the corresponding
+> `api.rate_limit`, `metrics`, and `auth` config sections are parsed but
+> currently have no consumers.
 
 ## 🛠 Technology Stack
 
 - **Backend**: Go 1.23, Gin Web Framework
-- **Database**: MongoDB (primary, read-only view of sync-written data), Redis (readiness probe)
+- **Database**: MongoDB (primary, read-only view of sync-written data)
 - **WebSocket**: Gorilla WebSocket
 - **Steem RPC**: [steemgosdk](https://github.com/steemit/steemgosdk)-based client with multi-node failover
 - **Logging**: Structured logging with Zap
@@ -49,7 +50,7 @@ steemdb-web/
 ├── cmd/web/                # Main application entry point
 ├── internal/
 │   ├── api/               # API handlers and routes (routes.go)
-│   ├── database/          # MongoDB/Redis connections only; index authority lives in steemdb-sync
+│   ├── database/          # MongoDB connection only; index authority lives in steemdb-sync
 │   ├── models/            # Data models and structures
 │   └── services/          # Business logic services (incl. websocket_service.go)
 ├── pkg/
@@ -67,7 +68,6 @@ steemdb-web/
 
 - Go 1.23 or later
 - MongoDB 4.4 or later
-- Redis 6.0 or later
 - Node.js 18+ (for frontend development)
 
 ### Installation
@@ -90,8 +90,8 @@ steemdb-web/
 
 4. **Start the services**
    ```bash
-   # Start MongoDB and Redis (from the repository root — the compose file lives there)
-   docker-compose up -d mongo redis
+   # Start MongoDB (from the repository root — the compose file lives there)
+   docker-compose up -d mongo
    
    # Start the web service (from steemdb-web/)
    go run cmd/web/main.go configs/config.yaml
@@ -200,10 +200,6 @@ database:
     uri: "mongodb://localhost:27017"
     database: "steemdb"
     pool_size: 100
-  redis:
-    uri: "redis://localhost:6379"
-    db: 0
-    pool_size: 100
 ```
 
 ### API Configuration
@@ -217,8 +213,8 @@ api:
     allowed_origins: ["http://localhost:3000"]
 ```
 
-> Note: the `api.rate_limit` and `cache` sections are parsed but currently
-> have no consumers — rate limiting and Redis response caching are not
+> Note: the `api.rate_limit` and `metrics` sections are parsed but currently
+> have no consumers — rate limiting and response caching are not
 > implemented.
 
 ## 🐳 Docker Deployment
@@ -291,7 +287,7 @@ The web service is part of the unified Docker Compose setup at the project root.
    docker-compose restart steemdb-web
    ```
 
-**Note**: The unified `docker-compose.yml` at the project root orchestrates all services including MongoDB, Redis, Prometheus, and Grafana.
+**Note**: The unified `docker-compose.yml` at the project root orchestrates all services including MongoDB, Prometheus, and Grafana.
 
 ### Using Docker
 
@@ -307,7 +303,6 @@ The web service is part of the unified Docker Compose setup at the project root.
      -p 80:80 \
      -v $(pwd)/steemdb-web/configs:/app/configs \
      -e MONGODB_URI=mongodb://mongo:27017 \
-     -e REDIS_URI=redis://redis:6379 \
      --name steemdb-web \
      steemdb-web
    ```
@@ -323,7 +318,7 @@ The web service is part of the unified Docker Compose setup at the project root.
 
 ### Health Checks
 - Health endpoint: `GET /health`
-- Readiness endpoint: `GET /ready` (pings MongoDB and Redis)
+- Readiness endpoint: `GET /ready` (pings MongoDB)
 
 The web service itself does **not** expose a `/metrics` endpoint; the
 `metrics.*` config keys are currently unused. Prometheus in the compose
@@ -364,7 +359,6 @@ hey -n 1000 -c 10 http://localhost:8080/api/v1/blocks
 ```bash
 export SERVER_MODE=production
 export MONGODB_URI=mongodb://prod-mongo:27017     # alias of DATABASE_MONGODB_URI
-export REDIS_URI=redis://prod-redis:6379          # alias of DATABASE_REDIS_URI
 ```
 
 Other bound variables (via Viper's env replacer): `SERVER_PORT`,

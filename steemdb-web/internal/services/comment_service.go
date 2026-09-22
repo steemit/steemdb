@@ -17,15 +17,13 @@ import (
 // CommentService handles comment/post-related operations
 type CommentService struct {
 	db     *database.MongoDB
-	redis  *database.Redis
 	logger utils.Logger
 }
 
 // NewCommentService creates a new comment service
-func NewCommentService(db *database.MongoDB, redis *database.Redis, logger utils.Logger) *CommentService {
+func NewCommentService(db *database.MongoDB, logger utils.Logger) *CommentService {
 	return &CommentService{
 		db:     db,
-		redis:  redis,
 		logger: logger,
 	}
 }

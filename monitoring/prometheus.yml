@@ -16,7 +16,7 @@
 #                  /metrics lives on the ingest listener (INGEST_LISTEN_ADDR,
 #                  default 127.0.0.1:8080) and only exists while a replay
 #                  runs (see steemdb-sync/test/docker-compose/).
-#   mongo/redis  — no exporters are deployed; add one before scraping.
+#   mongo       — no exporter is deployed; add one before scraping.
 
 global:
   scrape_interval: 15s
