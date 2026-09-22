@@ -320,7 +320,7 @@ func TestOperationID(t *testing.T) {
    - [x] 客户端初始化
    - [x] 无效端点处理
    - [x] 无效区块号处理（需要网络）
-   - [x] GetBlockWithOps 结构验证（需要网络）
+   - [x] GetOpsInBlock 结构验证（需要网络；原 GetBlockWithOps 包装已在 PR #75 移除——测试现使用 GetBlock + GetOpsInBlock）
    - [x] GetOpsInBlock onlyVirtual 标志（需要网络）
 
 2. **错误处理测试**

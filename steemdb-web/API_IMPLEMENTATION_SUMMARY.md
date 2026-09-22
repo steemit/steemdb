@@ -1,5 +1,12 @@
 # SteemDB Web API Implementation Summary
 
+> **Historical snapshot — not maintained.** This file records the API state at
+> implementation time and is kept as a historical record. Endpoint coverage
+> and completion markers below have drifted from the codebase (e.g. some
+> endpoints listed as complete return placeholder data, and later PRs added or
+> changed endpoints). Do not use this file as a development reference: the code
+> is the source of truth — see `README.md` and `internal/api/routes.go`.
+
 ## 🎯 Implementation Overview
 
 Successfully implemented the core API infrastructure for SteemDB Web Service, providing a comprehensive RESTful API for blockchain data access.

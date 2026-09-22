@@ -62,7 +62,7 @@ projection for anything sync writes (02-data-model).
 field = permanently zero. **Rule**: open the writer's handler before
 naming a bson tag or index.
 
-### C. Parameter-name drift across three tiers
+### C. Parameter-name drift across three tiers (fixed in PR #80)
 accounts/posts ignore `limit/sort/order/search`; one handler implemented
 aliases, others didn't; frontend standardized on the short names nothing
 reads. **Rule**: alias fallback in every list handler + one canonical
