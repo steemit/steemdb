@@ -11,7 +11,7 @@ Modern React-based frontend application for the SteemDB blockchain explorer, bui
 - **Zustand**: Lightweight state management
 - **TanStack Query**: Powerful data fetching and caching
 - **React Router DOM**: Declarative routing
-- **D3.js & Recharts**: Data visualization libraries
+- **Recharts**: Data visualization library
 
 ## 🛠 Technology Stack
 
@@ -22,7 +22,7 @@ Modern React-based frontend application for the SteemDB blockchain explorer, bui
 - **State Management**: Zustand
 - **Data Fetching**: TanStack Query (React Query)
 - **Routing**: React Router DOM
-- **Charts**: D3.js, Recharts
+- **Charts**: Recharts
 - **Package Manager**: pnpm
 
 ## 📁 Project Structure
@@ -32,7 +32,8 @@ steemdb-frontend/
 ├── src/
 │   ├── components/          # Reusable UI components
 │   │   ├── ui/              # Basic UI components (Button, Card, etc.)
-│   │   └── layout/          # Layout components (Header, Sidebar, etc.)
+│   │   ├── layout/          # Layout components (Header, Sidebar, etc.)
+│   │   └── dashboard/       # Dashboard-specific components
 │   ├── pages/               # Page components
 │   ├── lib/                 # Utilities and helpers
 │   │   ├── api.ts           # API client
@@ -43,12 +44,12 @@ steemdb-frontend/
 │   ├── App.tsx              # Main app component
 │   └── main.tsx             # Application entry point
 ├── public/                  # Static assets
-├── dist/                   # Build output (generated)
-├── index.html              # HTML template
-├── package.json            # Dependencies and scripts
-├── vite.config.ts          # Vite configuration
+├── dist/                    # Build output (generated)
+├── index.html               # HTML template
+├── package.json             # Dependencies and scripts
+├── vite.config.ts           # Vite configuration
 ├── tailwind.config.js       # Tailwind CSS configuration
-└── tsconfig.json           # TypeScript configuration
+└── tsconfig.json            # TypeScript configuration
 ```
 
 ## 🚀 Quick Start
@@ -85,7 +86,7 @@ The development server runs on `http://localhost:5173` with hot module replaceme
 # Start development server
 pnpm run dev
 
-# Build for production
+# Build for production (runs tsc -b for type checking first)
 pnpm run build
 
 # Preview production build
@@ -93,24 +94,28 @@ pnpm run preview
 
 # Run linter
 pnpm run lint
-
-# Type check
-pnpm run type-check
 ```
+
+(Type checking runs as part of `pnpm run build` via `tsc -b`; there is no
+standalone `type-check` script.)
 
 ## 🔧 Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the project root:
+The variables below are read at build time by `vite.config.ts` (`define`
+block); unset values fall back to production-relative or dev-localhost
+defaults:
 
 ```env
-# API Configuration
-VITE_API_BASE_URL=http://localhost/api/v1
-VITE_WS_URL=ws://localhost/ws
+# API and WebSocket configuration
+VITE_API_URL=/api                # API base URL (dev default: http://localhost:8080/api)
+VITE_WS_HOST=                    # WebSocket host (dev default: localhost:8080)
+VITE_WS_PATH=/ws                 # WebSocket path
 
-# Feature Flags
-VITE_ENABLE_ANALYTICS=false
+# App metadata
+VITE_APP_NAME=SteemDB
+VITE_APP_VERSION=1.0.0
 ```
 
 ### API Integration
@@ -150,7 +155,9 @@ Components are styled using:
    ```
 
 2. **Output location**
-   The built files are in the `dist/` directory, which is automatically copied to the `steemdb-web` Docker image during the build process.
+   A local build writes to the `dist/` directory. In the Docker deployment the
+   `steemdb-web` image builds the frontend from source itself and copies its
+   build output into the image (a local `dist/` is not used by the image build).
 
 ### Production Deployment
 
@@ -164,17 +171,15 @@ See the main [README.md](../README.md) for deployment instructions.
 
 ## 🧪 Testing
 
-### Running Tests
+No test framework is configured yet (there is no `test` script in
+`package.json`). For static verification use:
 
 ```bash
-# Run tests (when test framework is added)
-pnpm test
+# Lint
+pnpm run lint
 
-# Run tests in watch mode
-pnpm test:watch
-
-# Run tests with coverage
-pnpm test:coverage
+# Type checking + production build
+pnpm run build
 ```
 
 ## 📚 Development Guidelines
@@ -201,15 +206,16 @@ export const MyComponent = () => {
 
 ### State Management
 
-Use Zustand for global state:
+Use the Zustand stores exported from `@/store` (one per domain — theme,
+websocket, blockchain, navigation, notification, favorites):
 
 ```tsx
-import { useStore } from '@/store';
+import { useNavigationStore } from '@/store';
 
 export const MyComponent = () => {
-  const { data, setData } = useStore();
-  
-  return <div>{data}</div>;
+  const sidebarOpen = useNavigationStore((s) => s.sidebarOpen);
+
+  return <div>{sidebarOpen ? 'open' : 'closed'}</div>;
 };
 ```
 
