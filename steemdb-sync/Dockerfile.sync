@@ -1,0 +1,60 @@
+# Multi-service image for the steemdb-sync binaries. One image runs any
+# sync service via `command:` in docker-compose:
+#
+#   resident services (docker-compose.production.yml):
+#     processor  — operations -> derived collections (metrics :9092)
+#     live_sync  — RPC catch-up + chain-head follow (metrics :9091)
+#     refresher  — witness/stats/funds/clients tickers (metrics :9093)
+#
+#   cold-start / maintenance tools (run ad hoc from the same image, e.g.
+#   `docker compose -f docker-compose.production.yml run --rm processor \
+#     /app/repair -config /app/configs/config.yaml`):
+#     cold_ingest — HTTP receiver for the steemd ingest plugin; serves
+#                   /metrics on its ingest listener (INGEST_LISTEN_ADDR)
+#     repair      — gap-repair / rescan maintenance binary
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY configs/ ./configs/
+
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cold_ingest ./cmd/cold_ingest \
+ && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o live_sync ./cmd/live_sync \
+ && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o processor ./cmd/processor \
+ && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o refresher ./cmd/refresher \
+ && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o repair ./cmd/repair
+
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates wget && \
+    addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
+
+WORKDIR /app
+
+COPY --from=builder /build/cold_ingest /app/cold_ingest
+COPY --from=builder /build/live_sync /app/live_sync
+COPY --from=builder /build/processor /app/processor
+COPY --from=builder /build/refresher /app/refresher
+COPY --from=builder /build/repair /app/repair
+COPY --from=builder /build/configs /app/configs
+
+RUN mkdir -p /app/logs && chown -R appuser:appuser /app
+
+USER appuser
+
+# Metrics endpoints are served unconditionally at startup:
+#   live_sync :9091, processor :9092, refresher :9093;
+#   cold_ingest serves /metrics on its ingest listener (INGEST_LISTEN_ADDR).
+EXPOSE 8080 9091 9092 9093
+
+# Health checks are defined per service in docker-compose.yml: this image
+# runs several binaries and each serves metrics on a different port.
+CMD ["/app/processor", "-config", "/app/configs/config.yaml"]

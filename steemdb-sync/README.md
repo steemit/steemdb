@@ -197,6 +197,19 @@ The service exposes Prometheus metrics at `/metrics` endpoint:
 
 For `cold_ingest`, metrics are available at the same HTTP server (default: `127.0.0.1:8080/metrics`).
 For `live_sync`, metrics are available on port `:9091/metrics`.
+For `processor`, metrics are available on port `:9092/metrics`.
+For `refresher`, metrics are available on port `:9093/metrics`.
+
+### Production deployment
+
+The resident production stack (processor + live_sync + refresher alongside
+the web family and mongo/redis) is orchestrated by the repo-root
+`docker-compose.production.yml`; `Dockerfile.sync` in this directory builds
+the single image its sync services run from (all five binaries —
+`cold_ingest` and `repair` are run ad hoc from the same image). The cold
+start itself (steemd replay + ingest plugin) uses the stack under
+`test/docker-compose/`. Env overrides consumed by the compose file are the
+ones implemented in `internal/config/config.go` (`loadFromEnv`).
 
 ## Dependencies
 

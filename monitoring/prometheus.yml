@@ -1,0 +1,39 @@
+# Prometheus scrape configuration for the PRODUCTION stack
+# (docker-compose.production.yml). Every target below is verified against
+# the code that serves it — do not add a target without such a check:
+#
+#   live-sync    :9091/metrics  cmd/live_sync/main.go:83-91  (unconditional goroutine)
+#   processor    :9092/metrics  cmd/processor/main.go:112-124 (unconditional goroutine)
+#   steemdb-refresher :9093/metrics  cmd/refresher/main.go:49-61 (unconditional)
+#
+# Deliberately NOT scraped:
+#   steemdb-web  — starts no metrics server. pkg/utils/config.go declares
+#                  metrics.* defaults (port 9090, path /metrics) but no
+#                  server is ever started from them; scraping :9090 would
+#                  just be a permanently-down target. Add the target only
+#                  after the web side actually serves /metrics.
+#   cold_ingest  — cold-start tool, not part of the resident stack; its
+#                  /metrics lives on the ingest listener (INGEST_LISTEN_ADDR,
+#                  default 127.0.0.1:8080) and only exists while a replay
+#                  runs (see steemdb-sync/test/docker-compose/).
+#   mongo/redis  — no exporters are deployed; add one before scraping.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # live-sync stays DOWN until the `live` profile is enabled (after the
+  # cold-start handoff) — expected noise, not an outage. Leave this job
+  # commented out until the handoff is done, or just ignore the down target.
+  - job_name: live-sync
+    static_configs:
+      - targets: ['live-sync:9091']
+
+  - job_name: processor
+    static_configs:
+      - targets: ['processor:9092']
+
+  - job_name: refresher
+    static_configs:
+      - targets: ['steemdb-refresher:9093']

@@ -304,6 +304,18 @@ func parseDatabaseFromURI(uri string) string {
 func loadFromEnv(cfg *Config) {
 	if v := os.Getenv("MONGO_URI"); v != "" {
 		cfg.Mongo.URI = v
+		// The database name resolved from the YAML URI during Load() is
+		// stale now that the effective URI changed (e.g. the image-baked
+		// config resolves steemdb_test, while the env URI points elsewhere).
+		// Re-derive it from the env URI so the database used by
+		// client.Database() always matches the URI actually connected to.
+		// An explicit MONGO_DATABASE still wins (handled below); a URI
+		// without a database segment keeps the YAML-derived value.
+		if os.Getenv("MONGO_DATABASE") == "" {
+			if dbName := parseDatabaseFromURI(v); dbName != "" {
+				cfg.Mongo.Database = dbName
+			}
+		}
 	}
 	if v := os.Getenv("MONGO_DATABASE"); v != "" {
 		cfg.Mongo.Database = v

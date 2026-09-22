@@ -192,12 +192,22 @@ pnpm run dev
 
 ### Docker Compose Deployment
 
-The project includes a unified `docker-compose.yml` at the root directory that orchestrates all services:
+Two compose files cover two different purposes — pick deliberately:
 
-**Available Services:**
+- **`docker-compose.yml`** (dev/demo): web + refresher + mongo/redis + monitoring.
+  It does **not** run the data writers (processor/live_sync), so Posts/Labs/Accounts
+  pages stay empty until a writer fills the derived collections.
+- **`docker-compose.production.yml`** (production, single-box all-in-one): the six
+  resident services — steemdb-web, processor, live-sync, steemdb-refresher, mongo,
+  redis — plus prometheus (real scrape config) and grafana. See
+  [Production Topology](#production-topology) below.
+
+**Available Services (`docker-compose.yml`, dev):**
 - `steemdb-web` - Web API service with Nginx and frontend
+- `steemdb-refresher` - witness/stats/funds/clients snapshots
 - `mongo` - MongoDB database
 - `redis` - Redis cache
+- `prometheus` / `grafana` - monitoring (scrapes the refresher metrics)
 
 **Common Commands:**
 
@@ -248,28 +258,141 @@ docker-compose down -v
 **For detailed configuration instructions:**
 - [steemdb-web/docker/CONFIGURATION.md](steemdb-web/docker/CONFIGURATION.md)
 
+### Production Topology
+
+The production stack is the single-box, all-in-one topology described in
+`docs/AI-driver/01-architecture-overview.md`. It is codified in
+**`docker-compose.production.yml`**:
+
+| Service | Role | Metrics |
+|---|---|---|
+| `steemdb-web` | REST API + WebSocket + Nginx + SPA (only published port) | - |
+| `processor` | `operations` -> derived collections (the only writer of posts/votes/...) | `:9092/metrics` |
+| `live-sync` | RPC catch-up + chain-head follow (started via the `live` profile) | `:9091/metrics` |
+| `steemdb-refresher` | witness/stats/funds/clients snapshots | `:9093/metrics` |
+| `mongo` | raw + derived data (sync side is the writer & index authority) | - |
+| `redis` | cache | - |
+
+Shared-Mongo contract: the `steemdb` database is written by the sync side only;
+`steemdb-web` connects to the same database **read-only**. The collection/field
+contract is documented in `docs/AI-driver/02-data-model.md`. Mongo and Redis are
+not published to the host (compose network only).
+
+**Cold start & steady state** (cold_ingest/steemd/repair are tools, not resident
+services — details in the header of `docker-compose.production.yml`):
+
+> **Data handoff is a manual step.** The cold-start stack
+> (`steemdb-sync/test/docker-compose/`) runs its **own** Mongo (mongo:4.4,
+> auth-enabled, database `steemdb_test`, separate volume), while the production
+> compose runs a different mongo:6.0 on a fresh **empty** volume. Nothing
+> copies the replayed data between the two. Skip the handoff in step 1 below
+> and the processor starts against an empty database while live-sync would
+> re-fetch the entire chain from block 1 over RPC — the months-long refetch
+> the cold replay exists to avoid.
+
+1. **Replay the chain with the cold-start stack** (`steemdb-sync/test/docker-compose/`:
+   steemd ingest plugin pushes ops to cold_ingest; both retire when the replay
+   finishes), writing into the **production** Mongo via one of:
+
+   - **Path A (recommended; matches the original design — the replay writes
+     production directly).** Bring up the production mongo alone first:
+
+     ```bash
+     docker compose -f docker-compose.production.yml up -d mongo
+     ```
+
+     Then run the cold-start stack with its writers repointed at that mongo
+     via a local compose override (not shipped — the shipped test compose is a
+     test fixture): set `cold_ingest`'s `MONGO_URI` to the production mongo
+     with database **`steemdb`** (not `steemdb_test`). Either attach the
+     `cold-ingest` container to the production compose network (default name
+     `steemdb_steemdb-network`; check `docker network ls`) and use
+     `mongodb://mongo:27017/steemdb`, or publish the production mongo on
+     loopback (the commented-out `127.0.0.1:27017` port in its service block)
+     and point the URI at the host. Add credentials if mongo auth is enabled.
+     Set `MONGO_DATABASE=steemdb` in the cold stack's `.env` as well — it
+     builds the cold stack's `MONGO_URI` from that variable, and an explicit
+     `MONGO_DATABASE` wins over a URI's database name, so both must agree on
+     `steemdb`.
+     Only the receiver (`cold-ingest`) and `steemd` are needed for the replay —
+     do **not** also run the cold stack's processor/live-sync against the
+     production database (the production processor does the catch-up; a second
+     processor would race it on the same status cursor).
+     *Trade-off:* zero-copy and no version boundary to cross. Mounting the
+     production `mongo_data` volume into the cold stack's mongo:4.4 instead is
+     also possible but drags 4.4→6.0 in-place-upgrade and
+     auth-initialization caveats with it — prefer repointing the URI.
+
+   - **Path B (fallback — replay into `steemdb_test`, then dump/restore).**
+     Let the replay land in the cold stack's own database, stop its writers,
+     then move the data (logical dump/restore is the supported way across
+     4.4 → 6.0 — never copy data files between major versions; mongo:6.0
+     images no longer bundle the tools, so use the
+     `mongodb/mongodb-database-tools` image or a host install):
+
+     ```bash
+     # Source URI (auth) is built from MONGO_USERNAME/MONGO_PASSWORD/
+     # MONGO_DATABASE in the cold stack's .env (steemdb-sync/test/docker-compose/).
+     mongodump --uri="mongodb://<user>:<pass>@<cold-mongo-host>:27017/steemdb_test?authSource=admin" \
+       --archive=steemdb.archive
+     mongorestore --uri="mongodb://<prod-mongo-host>:27017" \
+       --nsFrom=steemdb_test --nsTo=steemdb --archive=steemdb.archive
+     ```
+
+     *Trade-off:* slower and needs disk headroom for the archive, but leaves
+     both stacks untouched.
+
+2. **Verify the handoff in the production Mongo** (database `steemdb`; N = the
+   replayed target height — counts must line up before anything else starts):
+
+   ```js
+   db.blocks.countDocuments()                       // == N (blocks are numbered 1..N)
+   db.operations.countDocuments()                   // == ops cold_ingest reported
+   db.meta.findOne({_id: "sync_state"}).max_block   // == N
+   ```
+
+   Also confirm **zero block gaps** over the range (the `repair` binary can
+   scan for gaps), then start the production stack **without** the live
+   profile — processor catches up over the replayed operations.
+
+3. Hand off to live sync: `docker compose -f docker-compose.production.yml --profile live up -d live-sync`
+   (resumes from `meta.max_block` / highest block, then follows the chain head).
+
+4. `repair` is an ad-hoc maintenance binary built into the steemdb-sync image
+   (run via `docker compose ... run --rm processor /app/repair ...`).
+
+**Setup:**
+
+```bash
+cp .env.production.example .env   # set GRAFANA_ADMIN_PASSWORD (required) etc.
+docker compose -f docker-compose.production.yml up -d --build
+```
+
 ### Production Deployment
 
 1. **Build production images**
    ```bash
-   docker-compose build
+   docker compose -f docker-compose.production.yml build
    ```
 
-2. **Set environment variables**
+2. **Set environment variables** (via `.env`, see `.env.production.example`)
    ```bash
-   export SERVER_MODE=production
-   export MONGODB_URI=mongodb://prod-mongo:27017
-   export REDIS_ADDR=prod-redis:6379
+   # Required
+   GRAFANA_ADMIN_PASSWORD=<secret>
+   # Common overrides
+   RPC_ENDPOINT=https://api.steemit.com
+   MONGO_URI=mongodb://mongo:27017/steemdb        # sync-side writers
+   WEB_MONGODB_URI=mongodb://mongo:27017/         # web (db name from its config)
    ```
 
-3. **Deploy with production configuration**
+3. **Deploy with the production compose**
    ```bash
-   docker-compose -f docker-compose.yml up -d
+   docker compose -f docker-compose.production.yml up -d
    ```
 
 4. **Set up reverse proxy** (if needed)
    - Configure Nginx or Traefik for SSL termination
-   - Point to `http://localhost:80` for the web service
+   - Point to `http://localhost:80` (or `${WEB_PORT}`) for the web service
 
 ## 💻 Development
 
@@ -347,20 +470,32 @@ steemdb/
 
 ### Prometheus Metrics
 
-The web service exposes Prometheus metrics:
+Prometheus is configured with real scrape targets (targets are verified against
+code, not guessed):
 
-- **Web Service**: `http://localhost:9090/metrics` (if exposed)
+- **Sync services** (production compose, `monitoring/prometheus.yml`):
+  - `live-sync` — `http://live-sync:9091/metrics`
+  - `processor` — `http://processor:9092/metrics`
+  - `steemdb-refresher` — `http://steemdb-refresher:9093/metrics`
+- **Dev compose** (`monitoring/prometheus.dev.yml`): scrapes `steemdb-refresher:9093`
+  (the only resident sync service there).
+- **steemdb-web is not scraped**: it currently starts no metrics server (the
+  `metrics.*` config keys are unused defaults). Do not add a web scrape target
+  until the web side actually serves `/metrics`.
 
-### Key Metrics
+### Key Metrics (steemdb-sync services)
 
-- `steemdb_http_requests_total` - HTTP request counts
-- `steemdb_websocket_connections` - Active WebSocket connections
+- `steemdb_sync_current_block` - processed/followed block height
+- `steemdb_sync_processor_window_duration_seconds` / `_blocks` / `_ops` - processor window breakdown
+- `steemdb_sync_mongo_write_duration_seconds` / `steemdb_sync_mongo_write_total` - Mongo write path
+- `steemdb_sync_rpc_latency_seconds` / `steemdb_sync_rpc_total` - Steem RPC calls
 
 ### Grafana Dashboards
 
-Access Grafana at `http://localhost:3000`:
-- Default credentials: `admin/admin123`
-- Pre-configured dashboards for web services
+Grafana is not published to the host by default (reach it via SSH tunnel or
+reverse proxy). In the production compose the admin password comes from
+`GRAFANA_ADMIN_PASSWORD` in `.env` — there is no baked-in default. Datasource
+provisioning is not included; add the prometheus datasource manually.
 
 ### Health Checks
 
@@ -369,6 +504,7 @@ All services include health check endpoints:
 - **Web Service**: `http://localhost/health` (via Nginx)
 - **MongoDB**: Internal health check via `mongosh`
 - **Redis**: Internal health check via `redis-cli ping`
+- **Sync services**: internal health checks via their `/metrics` endpoints
 
 **Check service health:**
 ```bash
@@ -383,13 +519,23 @@ docker-compose ps
 
 ### Environment Variables
 
-The web service supports environment variable overrides:
+Environment variables are the ones actually bound in code
+(`steemdb-web/pkg/utils/config.go`, `steemdb-sync/internal/config/config.go`):
 
-**Web Service:**
+**Web Service** (viper `BindEnv` + `AutomaticEnv` with `.`->`_`):
 - `SERVER_MODE` - Server mode (development, production)
-- `MONGODB_URI` - MongoDB connection string
-- `REDIS_ADDR` - Redis address
-- `JWT_SECRET` - JWT secret key
+- `DATABASE_MONGODB_URI` (alias `MONGODB_URI`) - MongoDB connection string
+- `DATABASE_REDIS_URI` (alias `REDIS_URI`) - Redis connection string
+- `AUTH_JWT_SECRET` - JWT secret key (overrides `auth.jwt_secret`)
+
+**Sync services** (processor / live_sync / refresher, `loadFromEnv`):
+- `MONGO_URI` - MongoDB connection string (database name parsed from the URI)
+- `RPC_ENDPOINT` - Steem RPC endpoint
+- `LOG_LEVEL`, `PROCESSOR_WINDOW_SIZE`, `PROCESSOR_BUFFER_LIMIT`,
+  `LIVE_SYNC_CHUNK_SIZE`, `LIVE_SYNC_FOLLOW_THRESHOLD`, `LIVE_SYNC_RPC_CONCURRENCY` - tuning
+
+See `.env.production.example` for the variables consumed by
+`docker-compose.production.yml`.
 
 ### Configuration Files
 
@@ -469,16 +615,15 @@ steemdb/
 ### Quick Reference
 
 **Service Ports:**
-- `80` - Web service (Nginx + Frontend + API)
-- `9090` - Web service metrics (if exposed)
-- `27017` - MongoDB
-- `6379` - Redis
+- `80` - Web service (Nginx + Frontend + API) — the only published port in production
+- `27017` - MongoDB (compose network only, not published)
+- `6379` - Redis (compose network only, not published)
+- `9091/9092/9093` - live_sync / processor / refresher metrics (compose network only)
 
 **Key Endpoints:**
 - Health: `http://localhost/health`
 - API: `http://localhost/api/v1/`
 - WebSocket: `ws://localhost/ws`
-- Metrics: `http://localhost:9090/metrics` (if exposed)
 
 ---
 

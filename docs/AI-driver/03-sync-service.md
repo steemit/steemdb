@@ -199,3 +199,14 @@ occupies host port 8080 — do not run it next to anything you value on 8080.
 `docker-compose.db.test.yml` (repo root) is a different, auth-less db stack;
 sync's default config URI points at the auth'd test stack instead — always
 check which stack you are combining.
+
+## Production
+
+The resident production topology (processor + live-sync + refresher + web
+family + mongo/redis on one box) is codified in the repo root
+`docker-compose.production.yml`; `steemdb-sync/Dockerfile.sync` builds the
+one image its sync services run from (all five binaries; `cold_ingest` and
+`repair` are run ad hoc from it). The env names it sets are the
+`loadFromEnv`-verified ones listed in `internal/config/config.go`. Its
+header documents the cold-start handoff order (replay → processor → enable
+the `live` profile) and the shared-Mongo contract.
