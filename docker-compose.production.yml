@@ -38,13 +38,61 @@
 #                  docker compose -f docker-compose.production.yml run --rm \
 #                    processor /app/repair -config /app/configs/config.yaml
 #
-# Cold-start order (all-in-one box): replay with the cold-start stack ->
-# verify blocks have zero gaps -> start this stack WITHOUT the live profile
-# (processor catches up over the replayed operations) -> enable live-sync
-# (`docker compose -f docker-compose.production.yml --profile live up -d
-# live-sync`) which resumes from meta.max_block / highest block and follows
-# the chain head from then on. There is no mode switch inside live_sync;
-# the only manual step is starting the service.
+# Cold-start order (all-in-one box) — DATA HANDOFF IS A MANUAL STEP. The
+# cold-start stack (steemdb-sync/test/docker-compose/) brings its OWN mongo
+# (mongo:4.4, auth-enabled, database steemdb_test, separate volume); this
+# stack runs a different mongo:6.0 on a fresh empty volume, and nothing
+# copies data between them. Run "replay, then start this stack" verbatim and
+# the processor idles on an empty database while live-sync re-fetches the
+# whole chain from block 1 over RPC — the months-long refetch the cold
+# replay exists to avoid. Make the replay land in THIS stack's `steemdb`
+# database first (full runbook: README.md, "Cold start & steady state"):
+#
+#   Path A (recommended; matches the original design — the replay writes
+#   the production mongo directly):
+#     1. docker compose -f docker-compose.production.yml up -d mongo
+#     2. Run the cold-start stack with its writers repointed at that mongo
+#        via a local compose override (not shipped; the shipped test
+#        compose is a test fixture): cold_ingest MONGO_URI -> the
+#        production mongo with database `steemdb` (NOT steemdb_test).
+#        Either attach cold-ingest to this stack's compose network
+#        (default name steemdb_steemdb-network; check `docker network ls`)
+#        and use mongodb://mongo:27017/steemdb — keeping the cold stack's
+#        own mongo out of the picture — or publish this mongo on 127.0.0.1
+#        (commented out in its service block below) and point the URI at
+#        the host. Add credentials if mongo auth is enabled. Only the
+#        receiver (cold-ingest) + steemd are needed; the processor below
+#        does the catch-up, so do NOT also run a second processor against
+#        the production database. (Mounting the production mongo_data
+#        volume into the cold stack's mongo:4.4 is also possible but drags
+#        4.4->6.0 in-place-upgrade and auth-initialization caveats with
+#        it — prefer repointing the URI.)
+#   Path B (fallback; the replay lands in the cold stack's own
+#   steemdb_test, then the data is moved):
+#     1. After the replay finishes and the cold stack's writers are
+#        stopped, mongodump the steemdb_test database out of the cold mongo
+#        (auth'd source URI from that stack's env) and mongorestore it into
+#        this stack's `steemdb` with --nsFrom steemdb_test --nsTo steemdb.
+#        Logical dump/restore is the supported way across 4.4 -> 6.0 (never
+#        copy data files between major versions); mongo:6.0 images no
+#        longer bundle mongodump/mongorestore — use the
+#        mongodb-database-tools image or a host install. Slower and needs
+#        archive headroom, but leaves both stacks untouched.
+#
+#   Either way, verify IN THE PRODUCTION MONGO before starting the rest of
+#   this stack (database `steemdb`; N = replayed target height, blocks are
+#   numbered 1..N):
+#     db.blocks.countDocuments()                     == N
+#     db.operations.countDocuments()                 == ops cold_ingest reported
+#     db.meta.findOne({_id: "sync_state"}).max_block == N
+#     plus zero gaps over the block range (the repair binary can scan).
+#
+#   Then: start this stack WITHOUT the live profile (processor catches up
+#   over the replayed operations) -> enable live-sync (`docker compose -f
+#   docker-compose.production.yml --profile live up -d live-sync`) which
+#   resumes from meta.max_block / highest block and follows the chain head
+#   from then on. There is no mode switch inside live_sync; the only manual
+#   step is starting the service.
 #
 # Environment variables below are the ones actually read by code (verified
 # against the binaries — decorative env names from config struct tags are

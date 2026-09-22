@@ -23,6 +23,9 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  # live-sync stays DOWN until the `live` profile is enabled (after the
+  # cold-start handoff) — expected noise, not an outage. Leave this job
+  # commented out until the handoff is done, or just ignore the down target.
   - job_name: live-sync
     static_configs:
       - targets: ['live-sync:9091']

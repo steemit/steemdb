@@ -281,13 +281,79 @@ not published to the host (compose network only).
 **Cold start & steady state** (cold_ingest/steemd/repair are tools, not resident
 services — details in the header of `docker-compose.production.yml`):
 
-1. Replay the chain with the cold-start stack (`steemdb-sync/test/docker-compose/`:
+> **Data handoff is a manual step.** The cold-start stack
+> (`steemdb-sync/test/docker-compose/`) runs its **own** Mongo (mongo:4.4,
+> auth-enabled, database `steemdb_test`, separate volume), while the production
+> compose runs a different mongo:6.0 on a fresh **empty** volume. Nothing
+> copies the replayed data between the two. Skip the handoff in step 1 below
+> and the processor starts against an empty database while live-sync would
+> re-fetch the entire chain from block 1 over RPC — the months-long refetch
+> the cold replay exists to avoid.
+
+1. **Replay the chain with the cold-start stack** (`steemdb-sync/test/docker-compose/`:
    steemd ingest plugin pushes ops to cold_ingest; both retire when the replay
-   finishes).
-2. Verify zero block gaps, then start the production stack **without** the live
+   finishes), writing into the **production** Mongo via one of:
+
+   - **Path A (recommended; matches the original design — the replay writes
+     production directly).** Bring up the production mongo alone first:
+
+     ```bash
+     docker compose -f docker-compose.production.yml up -d mongo
+     ```
+
+     Then run the cold-start stack with its writers repointed at that mongo
+     via a local compose override (not shipped — the shipped test compose is a
+     test fixture): set `cold_ingest`'s `MONGO_URI` to the production mongo
+     with database **`steemdb`** (not `steemdb_test`). Either attach the
+     `cold-ingest` container to the production compose network (default name
+     `steemdb_steemdb-network`; check `docker network ls`) and use
+     `mongodb://mongo:27017/steemdb`, or publish the production mongo on
+     loopback (the commented-out `127.0.0.1:27017` port in its service block)
+     and point the URI at the host. Add credentials if mongo auth is enabled.
+     Only the receiver (`cold-ingest`) and `steemd` are needed for the replay —
+     do **not** also run the cold stack's processor/live-sync against the
+     production database (the production processor does the catch-up; a second
+     processor would race it on the same status cursor).
+     *Trade-off:* zero-copy and no version boundary to cross. Mounting the
+     production `mongo_data` volume into the cold stack's mongo:4.4 instead is
+     also possible but drags 4.4→6.0 in-place-upgrade and
+     auth-initialization caveats with it — prefer repointing the URI.
+
+   - **Path B (fallback — replay into `steemdb_test`, then dump/restore).**
+     Let the replay land in the cold stack's own database, stop its writers,
+     then move the data (logical dump/restore is the supported way across
+     4.4 → 6.0 — never copy data files between major versions; mongo:6.0
+     images no longer bundle the tools, so use the
+     `mongodb/mongodb-database-tools` image or a host install):
+
+     ```bash
+     # Source URI (auth) is built from MONGO_USERNAME/MONGO_PASSWORD/
+     # MONGO_DATABASE in the cold stack's .env (steemdb-sync/test/docker-compose/).
+     mongodump --uri="mongodb://<user>:<pass>@<cold-mongo-host>:27017/steemdb_test?authSource=admin" \
+       --archive=steemdb.archive
+     mongorestore --uri="mongodb://<prod-mongo-host>:27017" \
+       --nsFrom=steemdb_test --nsTo=steemdb --archive=steemdb.archive
+     ```
+
+     *Trade-off:* slower and needs disk headroom for the archive, but leaves
+     both stacks untouched.
+
+2. **Verify the handoff in the production Mongo** (database `steemdb`; N = the
+   replayed target height — counts must line up before anything else starts):
+
+   ```js
+   db.blocks.countDocuments()                       // == N (blocks are numbered 1..N)
+   db.operations.countDocuments()                   // == ops cold_ingest reported
+   db.meta.findOne({_id: "sync_state"}).max_block   // == N
+   ```
+
+   Also confirm **zero block gaps** over the range (the `repair` binary can
+   scan for gaps), then start the production stack **without** the live
    profile — processor catches up over the replayed operations.
+
 3. Hand off to live sync: `docker compose -f docker-compose.production.yml --profile live up -d live-sync`
    (resumes from `meta.max_block` / highest block, then follows the chain head).
+
 4. `repair` is an ad-hoc maintenance binary built into the steemdb-sync image
    (run via `docker compose ... run --rm processor /app/repair ...`).
 
