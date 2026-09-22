@@ -59,8 +59,8 @@ SteemDB is a comprehensive blockchain data platform that provides:
 │    ┌────▼─────┐                            ┌─────▼────┐    │
 │    │ MongoDB  │                            │  Redis   │    │
 │    │          │                            │          │    │
-│    │ Primary  │                            │  Cache   │    │
-│    │ Database │                            │  Layer   │    │
+│    │ Primary  │                            │ Readiness│    │
+│    │ Database │                            │  probe   │    │
 │    └──────────┘                            └──────────┘    │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐  │
@@ -74,12 +74,12 @@ SteemDB is a comprehensive blockchain data platform that provides:
 
 ### Technology Stack
 
-- **Backend Services**: Go 1.23
+- **Backend Services**: Go (1.23 for steemdb-web, 1.25 for steemdb-sync)
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Database**: MongoDB 6.0 (primary), Redis 7 (cache)
+- **Database**: MongoDB (6.0 in `docker-compose.production.yml`, 4.4 in the dev `docker-compose.yml`), Redis 7 (readiness probe; caching not implemented yet)
 - **Web Framework**: Gin
 - **WebSocket**: Gorilla WebSocket
-- **Monitoring**: Prometheus, Grafana
+- **Monitoring**: Prometheus, Grafana (scrape the sync services)
 - **Containerization**: Docker, Docker Compose
 - **Process Management**: Supervisord
 
@@ -96,8 +96,7 @@ Modern web service providing RESTful API and WebSocket support, with full legacy
 - Legacy API compatibility: 302 redirects for backward compatibility
 - WebSocket real-time data streaming (aligned with legacy live.py functionality)
 - Nginx integration for static file serving
-- JWT authentication support
-- Health checks and metrics
+- Health checks (`/health`, `/ready`)
 
 **Documentation**: [steemdb-web/README.md](steemdb-web/README.md)
 
@@ -111,7 +110,7 @@ Modern React-based frontend application with full feature parity to legacy syste
 - Zustand for state management
 - TanStack Query for data fetching
 - React Router DOM for navigation
-- D3.js and Recharts for data visualization
+- Recharts for data visualization
 - **Posts Pages**: List, detail, replies, votes, and reblogs
 - **Labs Pages**: PowerUp, PowerDown, Rshares, Curation, Author, Flags, Clients, Benefactors, Pending
 - **Dashboard**: Network performance, reward pool, and global properties
@@ -127,8 +126,8 @@ Modern React-based frontend application with full feature parity to legacy syste
 - **Docker** 20.10+ and **Docker Compose** 2.0+
 - **Go** 1.23+ (for development)
 - **Node.js** 18+ and **pnpm** 8+ (for frontend development)
-- **MongoDB** 6.0+ (included in Docker Compose)
-- **Redis** 7+ (included in Docker Compose)
+- **MongoDB** (included via Docker Compose: 4.4 in the dev stack, 6.0 in the production stack)
+- **Redis** 7+ (included via Docker Compose)
 
 ### Using Docker Compose (Recommended)
 
@@ -400,22 +399,26 @@ docker compose -f docker-compose.production.yml up -d --build
 
 ```
 steemdb/
-├── docker-compose.yml          # Unified Docker Compose configuration
+├── docker-compose.yml          # Dev/demo Docker Compose configuration
+├── docker-compose.production.yml # Production topology (single-box all-in-one)
 ├── steemdb-web/                # Web API service
 │   ├── cmd/web/                # Main entry point
 │   ├── internal/               # Internal packages
-│   │   ├── api/                # API handlers
+│   │   ├── api/                # API handlers and routes
 │   │   ├── database/           # Database connections
 │   │   ├── models/             # Data models
-│   │   ├── services/           # Business logic
-│   │   └── websocket/          # WebSocket handlers
-│   ├── pkg/                    # Public packages
-│   ├── docker/                 # Docker configurations
+│   │   └── services/           # Business logic (incl. WebSocket service)
+│   ├── pkg/                    # Public packages (steem RPC client, utils)
+│   ├── docker/                 # Docker configurations (nginx, supervisor)
 │   └── configs/                # Configuration files
-└── steemdb-frontend/           # React frontend
-    ├── src/                    # Source code
-    ├── public/                 # Static assets
-    └── dist/                   # Build output
+├── steemdb-sync/               # Data sync service
+│   ├── cmd/                    # cold_ingest / live_sync / processor / refresher / repair
+│   ├── internal/               # config, metrics, model, mongo, pipeline, processor, refresher, rpc, checker
+│   └── configs/                # Configuration files
+├── steemdb-frontend/           # React frontend
+│   ├── src/                    # Source code
+│   └── public/                 # Static assets
+└── legacy/                     # Legacy PHP application (reference only)
 ```
 
 ### Development Workflow
@@ -437,8 +440,11 @@ steemdb/
    # Web service tests
    cd steemdb-web && go test ./...
    
-   # Frontend tests
-   cd steemdb-frontend && pnpm test
+   # Sync service tests
+   cd steemdb-sync && go test ./...
+   
+   # Frontend: lint + type-aware build (no test framework is configured yet)
+   cd steemdb-frontend && pnpm run lint && pnpm run build
    ```
 
 3. **Build for production**
@@ -502,9 +508,9 @@ provisioning is not included; add the prometheus datasource manually.
 All services include health check endpoints:
 
 - **Web Service**: `http://localhost/health` (via Nginx)
-- **MongoDB**: Internal health check via `mongosh`
+- **MongoDB**: Internal health check via mongo shell ping (`mongosh` in the production stack, legacy `mongo` in the 4.4 dev stack)
 - **Redis**: Internal health check via `redis-cli ping`
-- **Sync services**: internal health checks via their `/metrics` endpoints
+- **Sync services**: health checks via their `/metrics` endpoints (production compose)
 
 **Check service health:**
 ```bash
@@ -571,8 +577,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🆘 Support
 
 - **Documentation**: See individual project READMEs
-- **Issues**: [GitHub Issues](https://github.com/steemdb/steemdb/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/steemdb/steemdb/discussions)
+- **Issues**: [GitHub Issues](https://github.com/steemit/steemdb/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/steemit/steemdb/discussions)
 
 ## 🗺 Roadmap
 
@@ -599,6 +605,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ### Documentation
 
 - [steemdb-web/README.md](steemdb-web/README.md) - Web service documentation
+- [steemdb-sync/README.md](steemdb-sync/README.md) - Sync service documentation
 - [steemdb-frontend/README.md](steemdb-frontend/README.md) - Frontend documentation
 - [steemdb-web/docker/CONFIGURATION.md](steemdb-web/docker/CONFIGURATION.md) - Docker configuration guide
 
@@ -606,10 +613,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ```
 steemdb/
-├── README.md                 # This file - main project documentation
-├── docker-compose.yml        # Unified Docker Compose configuration
-├── steemdb-web/             # Web API service (includes frontend)
-└── steemdb-frontend/         # React frontend application
+├── README.md                       # This file - main project documentation
+├── docker-compose.yml              # Dev/demo Docker Compose configuration
+├── docker-compose.production.yml   # Production topology
+├── steemdb-web/                    # Web API service (serves the built frontend)
+├── steemdb-sync/                   # Data sync service (cold ingest, live sync, processor, refresher, repair)
+├── steemdb-frontend/               # React frontend application
+└── legacy/                         # Legacy PHP application (reference only)
 ```
 
 ### Quick Reference
