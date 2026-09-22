@@ -90,17 +90,30 @@ conflicts with one, stop and surface the conflict.
 
 ## Deployment topology (as actually run in production)
 
-- Root `docker-compose.yml`: web + mongo + redis + prometheus + grafana +
-  **refresher**. It does **not** include processor/live_sync/cold_ingest.
-- The full sync pipeline runs on the ingest machine against the **same
-  MongoDB database** (`steemdb`). This shared-Mongo contract is implicit —
-  keep it true: every sync service supports `MONGO_URI` env override.
-- Production steady state (traffic cutover plan stage C): live_sync +
-  processor + refresher + web family + Mongo on one box; cold_ingest/steemd
-  retired after replay. A production compose with all services does not
-  exist in-repo yet — treat "add it" as a known gap, and never assume the
-  root compose alone yields a working explorer (derived collections would
-  have no writer).
+- Production steady state (traffic cutover plan stage C) is codified in-repo
+  as **`docker-compose.production.yml`** (single box, all-in-one): six
+  resident services — `steemdb-web`, `processor`, `live-sync` (started via
+  the `live` profile after the cold-start handoff), `steemdb-refresher`,
+  `mongo`, `redis` — plus prometheus (real scrape config:
+  `monitoring/prometheus.yml`) and grafana. `cold_ingest`/`steemd` retire
+  after replay; `repair` is an ad-hoc maintenance binary from the same
+  steemdb-sync image.
+- Root `docker-compose.yml` is the **dev/demo** stack: web + mongo + redis +
+  prometheus + grafana + refresher only. It deliberately has no writers —
+  never assume it yields a working explorer (derived collections would have
+  no writer; Posts/Labs/Accounts would be empty).
+- **Shared-Mongo contract**: the `steemdb` database is written by the sync
+  side only (processor/live_sync/refresher; sync is also the index
+  authority), and web reads it read-only. The contract is spelled out in the
+  header of `docker-compose.production.yml` and field-level in
+  [02-data-model.md](02-data-model.md). Every sync service supports the
+  `MONGO_URI` env override; the baked-in config URI points at the auth'd
+  test stack and MUST be overridden in every deployment.
+- Metrics endpoints (verified, not aspirational): live_sync `:9091`,
+  processor `:9092`, refresher `:9093` (all `/metrics`, unconditional).
+  **steemdb-web serves no metrics** — its `metrics.*` config keys are
+  unused defaults; do not scrape or document a web metrics port until a
+  server actually exists.
 
 ## The review's top-level verdict (2026-09)
 

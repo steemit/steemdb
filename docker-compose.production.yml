@@ -1,0 +1,310 @@
+# =============================================================================
+# SteemDB production topology — single-box, all-in-one stack
+# =============================================================================
+# This is the stack that actually serves traffic: every resident writer of
+# the `steemdb` database plus the web family on one machine (docs/AI-driver/
+# 01-architecture-overview.md, "Deployment topology"). The dev compose at the
+# repo root intentionally runs web + refresher only; starting it instead of
+# this file yields an explorer whose Posts/Labs/Accounts pages stay empty
+# forever (derived collections would have no writer).
+#
+# Resident services (six):
+#   steemdb-web        REST API + WebSocket + Nginx + SPA     (public :80)
+#   processor          operations -> derived collections      (metrics :9092)
+#   live-sync          RPC catch-up + chain-head follow       (metrics :9091)
+#   steemdb-refresher  witness/stats/funds/clients tickers    (metrics :9093)
+#   mongo              raw + derived data                     (no host port)
+#   redis              cache; web /ready hard-depends on it   (no host port)
+# plus the monitoring pair (prometheus with a real scrape config, grafana).
+#
+# SHARED-MONGO CONTRACT: the `steemdb` database is written by the sync side
+# only — processor / live-sync / steemdb-refresher are the writers, and
+# steemdb-sync is the index authority (createIndexes at startup; the web
+# side does not create indexes). steemdb-web connects to the SAME database
+# READ-ONLY. The collection/field contract ("writers define, readers
+# conform") is documented in docs/AI-driver/02-data-model.md. Every sync
+# service supports the MONGO_URI env override, which this file uses to point
+# them all at the shared instance. Do not remove a writer from this file
+# without checking which web reads its collections.
+#
+# NOT resident here — cold-start / maintenance tools:
+#   cold_ingest  HTTP receiver for the steemd ingest plugin during
+#                --replay-blockchain. steemd + cold_ingest are retired once
+#                the replay completes. The working cold-start stack (mongo
+#                with auth, steemd replaying block_log, ingest endpoint
+#                loopback-published) lives in steemdb-sync/test/docker-compose/.
+#   repair       gap-repair / rescan maintenance binary. Both binaries are
+#                built into the steemdb-sync image; run ad hoc, e.g.:
+#                  docker compose -f docker-compose.production.yml run --rm \
+#                    processor /app/repair -config /app/configs/config.yaml
+#
+# Cold-start order (all-in-one box): replay with the cold-start stack ->
+# verify blocks have zero gaps -> start this stack WITHOUT the live profile
+# (processor catches up over the replayed operations) -> enable live-sync
+# (`docker compose -f docker-compose.production.yml --profile live up -d
+# live-sync`) which resumes from meta.max_block / highest block and follows
+# the chain head from then on. There is no mode switch inside live_sync;
+# the only manual step is starting the service.
+#
+# Environment variables below are the ones actually read by code (verified
+# against the binaries — decorative env names from config struct tags are
+# deliberately NOT used):
+#   sync services (steemdb-sync/internal/config/config.go, loadFromEnv):
+#     MONGO_URI, MONGO_DATABASE, RPC_ENDPOINT, COLD_START_TARGET_HEIGHT,
+#     INGEST_LISTEN_ADDR, LOG_LEVEL, PROCESSOR_WINDOW_SIZE,
+#     PROCESSOR_BUFFER_LIMIT, PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES,
+#     LIVE_SYNC_CHUNK_SIZE, LIVE_SYNC_FOLLOW_THRESHOLD,
+#     LIVE_SYNC_RPC_CONCURRENCY
+#   web (steemdb-web/pkg/utils/config.go, viper BindEnv/AutomaticEnv):
+#     SERVER_MODE, SERVER_PORT, SERVER_HOST,
+#     DATABASE_MONGODB_URI (alias MONGODB_URI),
+#     DATABASE_REDIS_URI (alias REDIS_URI)
+#
+# Setup: cp .env.production.example .env  (then edit; GRAFANA_ADMIN_PASSWORD
+# is required — the compose refuses to start with the placeholder unset).
+# =============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # SteemDB Web — Go API + WebSocket behind Nginx (SPA served as static).
+  # The ONLY service with a published host port. Mongo/Redis are reached over
+  # the compose network; the database name comes from the mounted config
+  # (steemdb-web/configs/config.yaml, database.mongodb.database: steemdb).
+  # --------------------------------------------------------------------------
+  steemdb-web:
+    build:
+      context: .
+      dockerfile: steemdb-web/Dockerfile
+    ports:
+      - "${WEB_PORT:-80}:80"
+    environment:
+      # Bound via viper.BindEnv("server.mode", "SERVER_MODE"); production
+      # switches gin out of debug mode.
+      - SERVER_MODE=production
+      - DATABASE_MONGODB_URI=${WEB_MONGODB_URI:-mongodb://mongo:27017/}
+      - DATABASE_REDIS_URI=redis://redis:6379
+    volumes:
+      # Host-side config; edit and `docker compose restart steemdb-web`.
+      - ./steemdb-web/configs:/app/configs:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # --------------------------------------------------------------------------
+  # Processor — sole consumer of `operations`; windowed dispatch to the
+  # handlers writing all derived collections (vote/transfer/comment/...).
+  # Cursor: status.processor_height (advances only after a whole window
+  # flushes). Also runs account_refresher + comment_rescanner workers.
+  # --------------------------------------------------------------------------
+  processor:
+    build:
+      context: ./steemdb-sync
+      dockerfile: Dockerfile.sync
+    # MONGO_URI is mandatory: the config baked into the image carries the
+    # auth'd TEST-stack URI and must be overridden in every deployment.
+    environment:
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/steemdb}
+      - RPC_ENDPOINT=${RPC_ENDPOINT:-https://api.steemit.com}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Optional tuning (read by loadFromEnv; unset = code defaults):
+      # - PROCESSOR_WINDOW_SIZE=64
+      # - PROCESSOR_BUFFER_LIMIT=5000
+      # - PROCESSOR_SKIP_ERROR_OPS_AFTER_RETRIES=0   # 0 = never skip poison ops
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    # main.go waits up to 30s for the current window to finish on SIGTERM.
+    stop_grace_period: 35s
+    networks:
+      - steemdb-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9092/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # --------------------------------------------------------------------------
+  # Live Sync — resumes from max(meta.max_block, highest block), chunked
+  # catch-up, then single-block follow at chain head. Started MANUALLY after
+  # the cold-start replay is done (the cold-start monitor does not hand off
+  # by itself), which is why it sits behind the "live" profile:
+  #   docker compose -f docker-compose.production.yml --profile live up -d live-sync
+  # Steady state keeps it running alongside the rest of this stack.
+  # --------------------------------------------------------------------------
+  live-sync:
+    build:
+      context: ./steemdb-sync
+      dockerfile: Dockerfile.sync
+    command: ["/app/live_sync", "-config", "/app/configs/config.yaml"]
+    environment:
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/steemdb}
+      - RPC_ENDPOINT=${RPC_ENDPOINT:-https://api.steemit.com}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Optional tuning (read by loadFromEnv; unset = code defaults
+      # chunk 256 / follow threshold 100 / concurrency 32):
+      # - LIVE_SYNC_CHUNK_SIZE=256
+      # - LIVE_SYNC_FOLLOW_THRESHOLD=100
+      # - LIVE_SYNC_RPC_CONCURRENCY=32
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9091/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    profiles: ["live"]
+
+  # --------------------------------------------------------------------------
+  # Refresher — tickers replacing legacy history.py + witnesses.py: witness
+  # snapshots (30s), stats counters (5m), clients aggregation (1h), funds
+  # snapshots (1h), optional full account rescan (off by default).
+  # --------------------------------------------------------------------------
+  steemdb-refresher:
+    build:
+      context: ./steemdb-sync
+      dockerfile: Dockerfile.sync
+    command: ["/app/refresher", "-config", "/app/configs/config.yaml"]
+    environment:
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/steemdb}
+      - RPC_ENDPOINT=${RPC_ENDPOINT:-https://api.steemit.com}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # --------------------------------------------------------------------------
+  # MongoDB — the shared database (see SHARED-MONGO CONTRACT above).
+  # Pinned to 6.0 to match the documented stack (AGENTS.md/README say
+  # MongoDB 6.0; the dev compose at the repo root still pins 4.4 — known
+  # drift). NOT published to the host: same-box services reach it over the
+  # compose network. To enable auth, set MONGO_INITDB_ROOT_USERNAME/
+  # PASSWORD here and put credentials into MONGO_URI / WEB_MONGODB_URI.
+  # --------------------------------------------------------------------------
+  mongo:
+    image: mongo:6.0
+    # no host port publish on purpose (minimal exposure); for ad-hoc ops on
+    # the box uncomment the loopback-only publish:
+    # ports:
+    #   - "127.0.0.1:27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=steemdb
+    volumes:
+      - mongo_data:/data/db
+    command: mongod --bind_ip_all
+    # Capacity plan (agent notes, d3): on the 16 vCPU / 128GB box give
+    # WiredTiger roughly half of RAM (~63GB) and keep the container limit
+    # above WT cache + filesystem cache, e.g.:
+    #   command: mongod --bind_ip_all --wiredTigerCacheSizeGB 63
+    #   deploy:
+    #     resources:
+    #       limits:
+    #         cpus: "8"
+    #         memory: 96g
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    healthcheck:
+      # mongo:6.0 ships mongosh (the legacy `mongo` shell is gone).
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # --------------------------------------------------------------------------
+  # Redis — cache target; web /ready hard-depends on it. No host port.
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --------------------------------------------------------------------------
+  # Prometheus — scrapes the sync-side metrics endpoints. Targets are
+  # verified against code in monitoring/prometheus.yml (web is NOT scraped:
+  # it starts no metrics server; cold_ingest is not part of this stack).
+  # Not published to the host; reach it via SSH tunnel if needed.
+  # --------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-200h}'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+
+  # --------------------------------------------------------------------------
+  # Grafana — dashboards on top of prometheus. Not published to the host;
+  # the admin password must be provided via .env (no baked-in default).
+  # Datasource provisioning is intentionally out of scope here.
+  # --------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env (see .env.production.example)}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - steemdb-network
+    depends_on:
+      - prometheus
+
+volumes:
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  steemdb-network:
+    driver: bridge

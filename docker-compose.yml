@@ -78,6 +78,10 @@ services:
     # ports:
     #   - "9091:9090"
     volumes:
+      # Scrape config for THIS stack: steemdb-refresher is the only resident
+      # sync service here (the full writer set lives in
+      # docker-compose.production.yml, which mounts monitoring/prometheus.yml).
+      - ./monitoring/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

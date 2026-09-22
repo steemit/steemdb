@@ -1,0 +1,18 @@
+# Prometheus scrape configuration for the DEV stack (repo-root
+# docker-compose.yml). The only resident sync service there is
+# steemdb-refresher (metrics :9093, cmd/refresher/main.go:49-61) — the dev
+# compose deliberately runs web + refresher only; the full writer set lives
+# in docker-compose.production.yml (whose prometheus uses
+# monitoring/prometheus.yml).
+#
+# steemdb-web is NOT scraped: it starts no metrics server (the metrics.*
+# config keys are unused defaults). See monitoring/prometheus.yml.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: refresher
+    static_configs:
+      - targets: ['steemdb-refresher:9093']
