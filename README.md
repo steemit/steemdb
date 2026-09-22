@@ -310,6 +310,10 @@ services — details in the header of `docker-compose.production.yml`):
      `mongodb://mongo:27017/steemdb`, or publish the production mongo on
      loopback (the commented-out `127.0.0.1:27017` port in its service block)
      and point the URI at the host. Add credentials if mongo auth is enabled.
+     Set `MONGO_DATABASE=steemdb` in the cold stack's `.env` as well — it
+     builds the cold stack's `MONGO_URI` from that variable, and an explicit
+     `MONGO_DATABASE` wins over a URI's database name, so both must agree on
+     `steemdb`.
      Only the receiver (`cold-ingest`) and `steemd` are needed for the replay —
      do **not** also run the cold stack's processor/live-sync against the
      production database (the production processor does the catch-up; a second
