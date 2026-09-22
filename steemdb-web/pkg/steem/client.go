@@ -45,12 +45,19 @@ const (
 
 // ErrAttemptTimeout is returned when a single RPC attempt does not complete
 // within rpcAttemptTimeout. The abandoned attempt keeps running in the
-// background until the SDK call finishes on its own (its http.Client has a
-// 15s timeout per HTTP attempt plus a bounded internal retry); the buffered
-// result channel lets the wrapper goroutine exit cleanly then, so abandoned
-// attempts do not leak. When a retry loop exhausts its attempts, the
-// returned error wraps ErrAttemptTimeout and names the node that hung, so a
-// stalled node is distinguishable from any other deadline.
+// background until the SDK call finishes on its own. Against the pinned
+// dependencies (steemgosdk v0.0.15, steemutil v0.0.17) that endpoint is a
+// single 30s HTTP timeout: every method this client uses is a single-shot
+// SDK call with no internal retry (the maxRetry field that NewClient sets
+// via SetMaxRetry is never read in v0.0.15), and each jsonrpc2.Send builds
+// a fresh http.Client{Timeout: 30s} per request. If the SDK is upgraded to
+// >= v0.0.31, re-audit this bound: its api/v2 pairs a default 15s
+// per-attempt HTTP timeout with a bounded internal retry, so an abandoned
+// attempt would then be bounded differently. The buffered result channel
+// lets the wrapper goroutine exit cleanly once the SDK call finishes, so
+// abandoned attempts do not leak. When a retry loop exhausts its attempts,
+// the returned error wraps ErrAttemptTimeout and names the node that hung,
+// so a stalled node is distinguishable from any other deadline.
 var ErrAttemptTimeout = errors.New("steem rpc: attempt timed out")
 
 type Client struct {
