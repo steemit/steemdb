@@ -53,22 +53,53 @@ func (s *AccountService) GetAccount(ctx context.Context, name string) (map[strin
 	return account, nil
 }
 
-// GetAccounts retrieves multiple accounts with pagination
-func (s *AccountService) GetAccounts(ctx context.Context, params models.PaginationParams, sortParams models.SortParams) (*models.AccountSearchResult, error) {
+// accountSortField maps the API sort_by value to a mongo sort field. Only
+// index-backed fields are offered (sync's indexInventory is the index
+// authority: reputation and vesting_shares have dedicated indexes; _id is
+// the account name and carries the default index). Sorting on any other
+// field would be an unindexed in-memory sort over the whole account
+// collection, so unknown values fall back to the default.
+func accountSortField(sortBy string) string {
+	switch sortBy {
+	case "name":
+		// _id is the account name and exists on every document; the `name`
+		// field only exists on refresher-populated documents.
+		return "_id"
+	case "vests", "vesting_shares":
+		return "vesting_shares"
+	case "reputation":
+		return "reputation"
+	default:
+		return "reputation"
+	}
+}
+
+// accountListFilter builds the listing filter for GetAccounts: an empty
+// filter lists every account; a non-empty search narrows it to account-name
+// prefixes via the escaped prefix matcher shared with SearchAccounts.
+func accountListFilter(search string) bson.M {
+	if search == "" {
+		return bson.M{}
+	}
+	return accountNamePrefixFilter(search)
+}
+
+// GetAccounts retrieves multiple accounts with pagination. A non-empty
+// search narrows the listing to account-name prefixes using the same
+// escaped prefix matcher as SearchAccounts.
+func (s *AccountService) GetAccounts(ctx context.Context, params models.PaginationParams, sortParams models.SortParams, search string) (*models.AccountSearchResult, error) {
 	collection := s.db.Collection("account")
 
-	// Build sort options
-	sortField := "reputation"
+	sortField := accountSortField(sortParams.SortBy)
 	sortOrder := -1
-	if sortParams.SortBy != "" {
-		sortField = sortParams.SortBy
-	}
 	if sortParams.SortOrder == "asc" {
 		sortOrder = 1
 	}
 
+	filter := accountListFilter(search)
+
 	// Count total documents
-	total, err := collection.CountDocuments(ctx, bson.M{})
+	total, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count accounts: %w", err)
 	}
@@ -80,7 +111,7 @@ func (s *AccountService) GetAccounts(ctx context.Context, params models.Paginati
 		SetSkip(int64(skip)).
 		SetLimit(int64(params.PageSize))
 
-	cursor, err := collection.Find(ctx, bson.M{}, findOptions)
+	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find accounts: %w", err)
 	}

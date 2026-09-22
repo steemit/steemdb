@@ -79,11 +79,14 @@ class ApiClient {
   }
 
   async getAccounts(params: PaginationParams & { search?: string }): Promise<ApiResponse<Account[]>> {
+    // Canonical backend params: page_size/sort_by/sort_order (the handler
+    // also accepts limit/sort/order aliases). `search` filters by
+    // case-insensitive account-name prefix.
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
-      limit: params.limit.toString(),
-      ...(params.sort && { sort: params.sort }),
-      ...(params.order && { order: params.order }),
+      page_size: params.limit.toString(),
+      ...(params.sort && { sort_by: params.sort }),
+      ...(params.order && { sort_order: params.order }),
       ...(params.search && { search: params.search }),
     });
 
@@ -109,18 +112,15 @@ class ApiClient {
   }
 
   async getBlocks(params: PaginationParams): Promise<ApiResponse<BlockSummary[]>> {
+    // Canonical backend params: page_size/sort_by/sort_order. The frontend
+    // "number" sort maps to the stored block_num field.
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
       page_size: params.limit.toString(),
-      limit: params.limit.toString(),
       ...(params.sort && {
-        sort: params.sort,
         sort_by: params.sort === 'number' ? 'block_num' : params.sort,
       }),
-      ...(params.order && {
-        order: params.order,
-        sort_order: params.order,
-      }),
+      ...(params.order && { sort_order: params.order }),
     });
 
     return this.request<BlockSummary[]>(`/v1/blocks?${searchParams}`);
@@ -205,9 +205,12 @@ class ApiClient {
 
   // Post/Comment endpoints
   async getPosts(params: PaginationParams & { sort_by?: string; sort_order?: 'asc' | 'desc' }): Promise<ApiResponse<Post[]>> {
+    // Canonical backend params: page_size/sort_by/sort_order (the handler
+    // also accepts limit/sort/order aliases). This endpoint has no search —
+    // it rejects a `search` param with 400.
     const searchParams = new URLSearchParams({
       page: params.page.toString(),
-      limit: params.limit.toString(),
+      page_size: params.limit.toString(),
       ...(params.sort_by && { sort_by: params.sort_by }),
       ...(params.sort_order && { sort_order: params.sort_order }),
     });

@@ -75,6 +75,9 @@ export function PostsPage() {
   const posts = data.data || [];
   const totalPages = data.meta?.total_pages || 1;
   const total = data.meta?.total || 0;
+  // Echo the page size the backend actually applied (it may clamp 1..100)
+  // instead of assuming the requested value.
+  const pageSize = data.meta?.page_size || 20;
 
   return (
     <div className="space-y-6">
@@ -91,7 +94,7 @@ export function PostsPage() {
             <div>
               <CardTitle>Post List</CardTitle>
               <CardDescription>
-                Showing {formatNumber((page - 1) * 20 + 1)}-{formatNumber(Math.min(page * 20, total))} of {formatNumber(total)} posts
+                Showing {formatNumber((page - 1) * pageSize + 1)}-{formatNumber(Math.min(page * pageSize, total))} of {formatNumber(total)} posts
               </CardDescription>
             </div>
           </div>

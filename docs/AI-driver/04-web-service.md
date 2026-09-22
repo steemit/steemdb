@@ -56,12 +56,20 @@ to v1 (semantics differ from the old endpoints — known debt; prefer 410
 for incompatible ones when touched). `/health`, `/ready`, `/ws`.
 
 Conventions:
-- **Pagination/sort aliases**: block_handler implements the canonical
-  fallback pattern (`page_size`←`limit`, `sort_by`←`sort`,
-  `sort_order`←`order`); account history supports `limit`. accounts/posts
-  handlers lack it (frontend sends the short names — known break).
-  New endpoints: implement the alias set and a sort-field whitelist
-  (`witness_service` is the whitelist pattern).
+- **Pagination/sort aliases**: every collection listing (blocks, accounts,
+  posts; account history) accepts the canonical `page`/`page_size`/
+  `sort_by`/`sort_order` plus the short aliases `limit`/`sort`/`order`
+  (canonical wins; shared parsing in `internal/api/params.go`). accounts
+  additionally supports `search=` — a case-insensitive, QuoteMeta-escaped
+  name-prefix filter (same matcher as `/accounts/search`). posts rejects
+  `search` with 400: it has no text-search semantics, tag-scoped listings
+  live on `/posts/daily?tag=`. Sort keys are whitelisted to index-backed
+  fields (`accountSortField`/`postSortField`, following the
+  `witnessSortField` pattern — balance is deliberately not sortable on
+  accounts, no index). New endpoints: implement the alias set and a
+  sort-field whitelist. (History: before 2026-09 only blocks had the
+  aliases; the frontend's short names were silently dropped on
+  accounts/posts — the sort/search/page-size triple break.)
 - **User input into `$regex` must be `regexp.QuoteMeta`'d**; `sort_by`
   must be whitelisted.
 - **Counting large collections**: `EstimatedDocumentCount` for empty
