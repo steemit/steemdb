@@ -1,7 +1,6 @@
 package steem
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -20,30 +19,38 @@ import (
 // Per-attempt RPC timeout. The steemgosdk methods take no context, so a hung
 // node (TCP half-open, stalled response) can only be bounded by wrapping each
 // attempt with its own timer — see callWithAttemptTimeout. The timeout is
-// deliberately PER ATTEMPT, not a shared budget across retries: a single
-// shared budget would be consumed entirely by the first hung node, defeating
-// the node-rotation retry design (we would never reach a healthy node).
-// Worst case per logical call is therefore attempts*timeout + backoff
-// (4*10s + 6s = 46s) — bounded, instead of the previous behavior where the
-// 10s ctx only covered the backoff sleeps and a hung node stalled the caller
-// until the SDK-internal HTTP timeout fired (30s per attempt, ~126s total,
-// or forever if the SDK ever regresses).
+// deliberately PER ATTEMPT, not a shared budget across retries: a wall-clock
+// budget started at call entry is consumed entirely by the first hung node
+// (each attempt may take the full timeout), and the loop then exits after a
+// single attempt — defeating the node-rotation retry design. Worst case per
+// logical call is therefore attempts*timeout + backoff (4*10s + 6s = 46s):
+// bounded by construction, with no shared budget needed, because attempts are
+// bounded by rpcAttemptTimeout and the backoff sleeps sum to only
+// 1+2+3 = 3*rpcBackoffUnit on their own.
 const rpcAttemptTimeout = 10 * time.Second
 
-// Backoff between retries: attempt n waits (n+1)*rpcBackoffUnit, capped by
-// rpcBackoffBudget overall (the budget only guards the sleeps; attempts are
-// bounded by rpcAttemptTimeout).
+// Backoff between retries: attempt n waits (n+1)*rpcBackoffUnit, so the sleeps
+// sum to 1+2+3 = 6s in production. The sleeps are deliberately NOT capped by
+// a shared budget or context: an rpcCall-wide deadline would also cover the
+// attempts themselves (each up to rpcAttemptTimeout), the first hung node
+// would exhaust it, and the retry loop would exit early with a bare
+// context.DeadlineExceeded after a single attempt — exactly the bug this
+// shape removed. There is no parent context to honor anyway: the SDK calls
+// take no context, so the only cancellation point that exists is the caller
+// giving up on us.
 const (
-	rpcMaxRetries    = 3
-	rpcBackoffUnit   = 1 * time.Second
-	rpcBackoffBudget = 10 * time.Second
+	rpcMaxRetries  = 3
+	rpcBackoffUnit = 1 * time.Second
 )
 
 // ErrAttemptTimeout is returned when a single RPC attempt does not complete
 // within rpcAttemptTimeout. The abandoned attempt keeps running in the
-// background until the SDK call returns on its own (steemutil's jsonrpc2
-// carries a 30s http.Client timeout); the buffered result channel makes the
-// wrapper goroutine exit cleanly then, so abandoned attempts do not leak.
+// background until the SDK call finishes on its own (its http.Client has a
+// 15s timeout per HTTP attempt plus a bounded internal retry); the buffered
+// result channel lets the wrapper goroutine exit cleanly then, so abandoned
+// attempts do not leak. When a retry loop exhausts its attempts, the
+// returned error wraps ErrAttemptTimeout and names the node that hung, so a
+// stalled node is distinguishable from any other deadline.
 var ErrAttemptTimeout = errors.New("steem rpc: attempt timed out")
 
 type Client struct {
@@ -82,11 +89,13 @@ func NewClient(nodes []string, logger utils.Logger) *Client {
 	}
 }
 
-// getCurrentAPI returns the current API instance
-func (c *Client) getCurrentAPI() *sdkapi.API {
+// currentNodeAndAPI returns the name and API instance of the node the next
+// attempt will hit, read together under one lock so a timeout error can name
+// the node that was actually called.
+func (c *Client) currentNodeAndAPI() (string, *sdkapi.API) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	return c.apis[c.currentNode]
+	return c.nodes[c.currentNode], c.apis[c.currentNode]
 }
 
 // switchNode switches to the next available node
@@ -124,21 +133,24 @@ func callWithAttemptTimeout[T any](timeout time.Duration, fn func() (T, error)) 
 // rpcCall executes one logical RPC: up to rpcMaxRetries+1 attempts, each
 // bounded by c.attemptTimeout (per attempt — see rpcAttemptTimeout for why
 // this is not one shared budget), rotating to the next node after every
-// failure and backing off (attempt+1)*backoffUnit between attempts, with the
-// sleeps capped by rpcBackoffBudget. It is a free function (not a method)
+// failure and sleeping (attempt+1)*backoffUnit between attempts (1+2+3 =
+// 6 units total — small enough that the sleeps need no cap). Worst-case wall
+// time is attempts*timeout + 6 units. It is a free function (not a method)
 // because Go does not allow methods to declare type parameters.
 func rpcCall[T any](c *Client, method string, call func(*sdkapi.API) (T, error), extra ...zap.Field) (T, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), rpcBackoffBudget)
-	defer cancel()
-
 	var lastErr error
 	for attempt := 0; attempt <= rpcMaxRetries; attempt++ {
-		api := c.getCurrentAPI()
+		node, api := c.currentNodeAndAPI()
 		result, err := callWithAttemptTimeout(c.attemptTimeout, func() (T, error) {
 			return call(api)
 		})
 		if err == nil {
 			return result, nil
+		}
+		if errors.Is(err, ErrAttemptTimeout) {
+			// Name the node that hung so operators can tell a stalled node
+			// apart from any other deadline.
+			err = fmt.Errorf("%w (node %s)", ErrAttemptTimeout, node)
 		}
 
 		lastErr = err
@@ -152,14 +164,13 @@ func rpcCall[T any](c *Client, method string, call func(*sdkapi.API) (T, error),
 		// Switch to next node on error
 		c.switchNode()
 
-		// Wait before retry (except on last attempt)
+		// Wait before retry (except on last attempt). A plain Sleep,
+		// deliberately not guarded by any shared deadline: a budget started
+		// at call entry is spent by the first hung attempt (each attempt may
+		// take the full attemptTimeout) and would cut the retry loop down to
+		// a single attempt.
 		if attempt < rpcMaxRetries {
-			select {
-			case <-ctx.Done():
-				var zero T
-				return zero, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * c.backoffUnit):
-			}
+			time.Sleep(time.Duration(attempt+1) * c.backoffUnit)
 		}
 	}
 

@@ -116,8 +116,9 @@ exits right after); `writePump` does not watch the service context.
   readiness without using them.
 - `steem.timeout`/retry and WS tuning knobs in config.yaml are not wired
   (values hardcoded in `pkg/steem/client.go` — 10s per-attempt timeout,
-  4 attempts with node rotation each failure, backoff 1-3s capped by a
-  10s budget). The env override coverage above reaches them too
+  4 attempts with node rotation each failure, backoff 1-3s with no shared
+  budget; worst case ~46s per logical call). The env override coverage
+  above reaches them too
   (`STEEM_TIMEOUT`, `STEEM_RETRY_ATTEMPTS`), but only `steem.nodes` is
   consumed (`cmd/web/main.go`) — the knobs stay dead until the client
   reads the config.
