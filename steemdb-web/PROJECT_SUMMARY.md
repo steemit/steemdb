@@ -1,5 +1,11 @@
 # SteemDB Web Service - Project Summary
 
+> **Historical snapshot — not maintained.** This file records the project
+> state at initialization time and is kept as a historical record. Structure
+> and feature claims below have drifted from the codebase. Do not use this
+> file as a development reference: the code is the source of truth — see
+> `README.md`.
+
 ## 🎯 Project Overview
 
 Successfully initialized the SteemDB Web Service project with a modern Go-based architecture, providing a solid foundation for the blockchain explorer web application.

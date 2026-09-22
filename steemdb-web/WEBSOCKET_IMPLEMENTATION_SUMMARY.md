@@ -1,5 +1,12 @@
 # WebSocket Service Implementation Summary
 
+> **Historical snapshot — not maintained.** This file records the WebSocket
+> service state at implementation time and is kept as a historical record.
+> Details below (channel names, buffering, replay behavior) have drifted from
+> the codebase in later PRs. Do not use this file as a development reference:
+> the code is the source of truth — see `internal/services/websocket_service.go`
+> and `README.md`.
+
 ## Overview
 
 Successfully implemented a comprehensive WebSocket service to replace the Python Live service, providing real-time blockchain data streaming to web clients.

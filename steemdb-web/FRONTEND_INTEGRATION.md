@@ -1,5 +1,13 @@
 # Frontend Integration Implementation
 
+> **Historical snapshot — not maintained.** This file records how the frontend
+> was first integrated into the `steemdb-web` Docker image and is kept as a
+> historical record. Paths and compose details below have drifted from the
+> repository (e.g. compose files live at the repo root, not in
+> `steemdb-web/`). Do not use this file as a development reference: the code
+> is the source of truth — see `Dockerfile`, `docker/nginx/`, and the root
+> compose files.
+
 ## Overview
 
 This document describes the implementation of integrating `steemdb-frontend` into the `steemdb-web` Docker image using Nginx + Supervisord architecture.

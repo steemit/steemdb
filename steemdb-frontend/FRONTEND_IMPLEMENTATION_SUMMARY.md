@@ -1,5 +1,13 @@
 # SteemDB Frontend Implementation Summary
 
+> **Historical snapshot — not maintained.** This file records the state of the
+> frontend at initial implementation time and is kept as a historical record.
+> Dependency versions, directory layout, and feature lists below have drifted
+> from the codebase (e.g. D3.js was later removed in favor of Recharts, and
+> some utility functions listed here no longer exist). Do not use this file
+> as a development reference: the code is the source of truth — see
+> `README.md` and the actual sources under `src/`.
+
 ## Overview
 
 Successfully implemented a modern React frontend application using Vite, TypeScript, Tailwind CSS, and other cutting-edge technologies to create a responsive and feature-rich blockchain explorer interface.
