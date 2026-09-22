@@ -49,7 +49,7 @@ steemdb-web/
 ├── cmd/web/                # Main application entry point
 ├── internal/
 │   ├── api/               # API handlers and routes (routes.go)
-│   ├── database/          # MongoDB/Redis connections and index setup
+│   ├── database/          # MongoDB/Redis connections only; index authority lives in steemdb-sync
 │   ├── models/            # Data models and structures
 │   └── services/          # Business logic services (incl. websocket_service.go)
 ├── pkg/
@@ -85,8 +85,7 @@ steemdb-web/
 
 3. **Configure the application**
    ```bash
-   cp configs/config.yaml configs/local.yaml
-   # Edit configs/local.yaml with your settings
+   # Edit configs/config.yaml with your settings
    ```
 
 4. **Start the services**
@@ -95,7 +94,7 @@ steemdb-web/
    docker-compose up -d mongo redis
    
    # Start the web service (from steemdb-web/)
-   go run cmd/web/main.go configs/local.yaml
+   go run cmd/web/main.go configs/config.yaml
    ```
 
 5. **Verify the installation**

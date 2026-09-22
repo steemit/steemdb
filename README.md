@@ -124,7 +124,7 @@ Modern React-based frontend application with full feature parity to legacy syste
 ### Prerequisites
 
 - **Docker** 20.10+ and **Docker Compose** 2.0+
-- **Go** 1.23+ (for development)
+- **Go** 1.23+ for steemdb-web, 1.25+ for steemdb-sync (for development)
 - **Node.js** 18+ and **pnpm** 8+ (for frontend development)
 - **MongoDB** (included via Docker Compose: 4.4 in the dev stack, 6.0 in the production stack)
 - **Redis** 7+ (included via Docker Compose)

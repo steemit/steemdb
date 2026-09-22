@@ -73,12 +73,12 @@ steemdb-frontend/
 
 3. **Open in browser**
    ```
-   http://localhost:5173
+   http://localhost:3000
    ```
 
 ### Development
 
-The development server runs on `http://localhost:5173` with hot module replacement (HMR) enabled.
+The development server runs on `http://localhost:3000` with hot module replacement (HMR) enabled.
 
 **Available Scripts:**
 
