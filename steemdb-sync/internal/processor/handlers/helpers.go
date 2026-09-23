@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// validAccountName matches on-chain Steem account names: 3-16 chars,
+// lowercase letters/digits plus '.' and '-', starting with a letter.
+// Same rule as the frontend isValidSteemUsername.
+var validAccountName = regexp.MustCompile(`^[a-z][a-z0-9.-]{2,15}$`)
+
+// IsValidAccountName reports whether name is a syntactically valid Steem
+// account name. custom_json payloads (e.g. id="follow") carry arbitrary
+// user-supplied strings, so names from them must be validated before they
+// can become account documents.
+func IsValidAccountName(name string) bool {
+	return validAccountName.MatchString(name)
+}
 
 // MongoInserter provides upsert helpers for business collections.
 // All handlers share one inserter (thread-safe: mongo client is concurrency-safe).
@@ -259,8 +273,10 @@ func (m *MongoInserter) UpsertOneByFilter(ctx context.Context, collection string
 // QueueAccountDirty marks an account as needing refresh by setting _dirty: true.
 // This is the lazy-update pattern from legacy sync.py: handlers don't fetch full
 // account state, they just flag it. A separate worker periodically refreshes dirty accounts.
+// Names failing IsValidAccountName are dropped: custom_json payloads are
+// user-controlled and must not be able to create account documents.
 func (m *MongoInserter) QueueAccountDirty(ctx context.Context, accountName string) error {
-	if accountName == "" {
+	if !IsValidAccountName(accountName) {
 		return nil
 	}
 	m.mu.Lock()

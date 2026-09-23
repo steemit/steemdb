@@ -412,8 +412,8 @@ func accountSummaryFromMap(m bson.M) models.AccountSummary {
 		// The refresher round-trips RPC values through JSON, so integer
 		// counts land as BSON doubles; mapFloat coerces them tolerantly.
 		CommentCount: int(mapFloat(m, "comment_count")),
-		LastPost:     mapTime(m, "last_post"),
-		Created:      mapTime(m, "created"),
+		LastPost:     mapTimePtr(m, "last_post"),
+		Created:      mapTimePtr(m, "created"),
 	}
 }
 
@@ -444,10 +444,12 @@ func mapFloat(m bson.M, key string) float64 {
 	return 0
 }
 
-// mapTime extracts a datetime field, falling back to the zero time
-func mapTime(m bson.M, key string) time.Time {
-	if t, ok := m[key].(time.Time); ok {
-		return t
+// mapTimePtr extracts a datetime field, returning nil when the field is
+// missing or holds the zero time so stub accounts never serialize
+// "0001-01-01T00:00:00Z" (a truthy string the frontend cannot filter out).
+func mapTimePtr(m bson.M, key string) *time.Time {
+	if t, ok := m[key].(time.Time); ok && !t.IsZero() {
+		return &t
 	}
-	return time.Time{}
+	return nil
 }

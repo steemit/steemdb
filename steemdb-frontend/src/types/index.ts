@@ -145,7 +145,7 @@ export interface Operation {
 export interface Account {
   id: number;
   name: string;
-  created: string;
+  created?: string;
   reputation: string;
   post_count: number;
   comment_count: number;
@@ -155,7 +155,7 @@ export interface Account {
   vesting_shares: string;
   delegated_vesting_shares: string;
   received_vesting_shares: string;
-  last_post: string;
+  last_post?: string;
   last_vote_time: string;
   witness_votes: string[];
   json_metadata: string;

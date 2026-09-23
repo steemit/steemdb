@@ -56,15 +56,15 @@ type Account struct {
 
 // AccountSummary represents a simplified account view for lists
 type AccountSummary struct {
-	Name          string    `json:"name"`
-	Reputation    int64     `json:"reputation"`
-	VestingShares float64   `json:"vesting_shares"`
-	Balance       float64   `json:"balance"`
-	SBDBalance    float64   `json:"sbd_balance"`
-	PostCount     int       `json:"post_count"`
-	CommentCount  int       `json:"comment_count"`
-	LastPost      time.Time `json:"last_post"`
-	Created       time.Time `json:"created"`
+	Name          string     `json:"name"`
+	Reputation    int64      `json:"reputation"`
+	VestingShares float64    `json:"vesting_shares"`
+	Balance       float64    `json:"balance"`
+	SBDBalance    float64    `json:"sbd_balance"`
+	PostCount     int        `json:"post_count"`
+	CommentCount  int        `json:"comment_count"`
+	LastPost      *time.Time `json:"last_post,omitempty"`
+	Created       *time.Time `json:"created,omitempty"`
 }
 
 // AccountStats represents account statistics
