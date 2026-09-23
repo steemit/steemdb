@@ -1,11 +1,10 @@
 import { Link, useLocation } from 'react-router-dom';
-import { 
-  Home, 
-  Blocks, 
-  Users, 
-  Shield, 
-  BarChart3, 
-  Activity,
+import {
+  Home,
+  Blocks,
+  Users,
+  Shield,
+  BarChart3,
   Star,
   Settings,
   X,
@@ -25,7 +24,6 @@ const navigation = [
   { name: 'Labs', href: '/labs', icon: FlaskConical },
   { name: 'Blocks', href: '/blocks', icon: Blocks },
   { name: 'Statistics', href: '/stats', icon: BarChart3 },
-  { name: 'Live Feed', href: '/live', icon: Activity },
 ];
 
 export function Sidebar() {

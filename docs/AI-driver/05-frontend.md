@@ -7,10 +7,11 @@ recharts. ~7k lines. Dev: `pnpm install && pnpm run dev` (proxies to
 
 ## Structure
 
-- `src/App.tsx` — all 20 routes registered under `<Layout/>` (Header +
-  Sidebar + Outlet). Pages: Dashboard, Blocks(+detail), Accounts(+detail),
+- `src/App.tsx` — all routes registered under `<Layout/>` (Header +
+  Sidebar + Outlet). Pages: Dashboard (the former LiveFeed page was merged
+  into it; `/live` redirects to `/`), Blocks(+detail), Accounts(+detail),
   Posts(+detail), Labs index + 9 subpages, Witnesses(+detail), Statistics,
-  LiveFeed, Settings, 404 catch-all.
+  Settings, 404 catch-all.
 - `src/lib/api.ts` — hand-rolled fetch client, single ApiClient with 35
   methods (Proxy-bound exports). `src/lib/websocket.ts` — WS client
   (reconnect, subscription Set, event emitter). `src/lib/utils.ts` —
@@ -25,10 +26,13 @@ recharts. ~7k lines. Dev: `pnpm install && pnpm run dev` (proxies to
    (correct), global staleTime 5min / gcTime 10min. Override staleTime to
    ~0 for block-feed-like pages (Blocks currently doesn't — known staleness
    bug).
-2. **Dashboard/LiveFeed**: REST preload (`getDashboard`) + WebSocket
+2. **Dashboard**: REST preload (`getDashboard`) + WebSocket
    incremental writes into `useBlockchainStore`; 10s fallback polling only
    when disconnected AND data empty (too narrow — dashboard can freeze
-   after WS gives up reconnecting; known).
+   after WS gives up reconnecting; known). Its activity stream subscribes
+   to `blocks`/`props`/`state`/`operation` and renders live WS items
+   followed by the store's `latestBlocks` (deduplicated by block number),
+   so it is populated even before the first live event.
 
 ## Hard rules for anything touching Steem values
 
