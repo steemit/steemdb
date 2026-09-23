@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
@@ -20,7 +20,6 @@ import { BenefactorsPage } from './pages/labs/Benefactors';
 import { PendingPage } from './pages/labs/Pending';
 import { WitnessesPage, WitnessDetailPage } from './pages/Witnesses';
 import { StatisticsPage } from './pages/Statistics';
-import { LiveFeedPage } from './pages/LiveFeed';
 import { SettingsPage } from './pages/Settings';
 import { useThemeStore, useWebSocketStore } from './store';
 import { wsClient } from './lib/websocket';
@@ -110,7 +109,8 @@ function App() {
             <Route path="witnesses" element={<WitnessesPage />} />
             <Route path="witnesses/:id" element={<WitnessDetailPage />} />
             <Route path="stats" element={<StatisticsPage />} />
-            <Route path="live" element={<LiveFeedPage />} />
+            {/* Live Feed was merged into the Dashboard; keep /live working. */}
+            <Route path="live" element={<Navigate to="/" replace />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<div>Page not found</div>} />
           </Route>

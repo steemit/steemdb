@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Blocks, Users, Shield, TrendingUp, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -6,7 +6,7 @@ import { NetworkPerformance } from '../components/dashboard/NetworkPerformance';
 import { RewardPool } from '../components/dashboard/RewardPool';
 import { GlobalProperties } from '../components/dashboard/GlobalProperties';
 import { useBlockchainStore, useWebSocketStore } from '../store';
-import type { BlockSummary, BlockchainProps, StateData } from '../types';
+import type { BlockData, BlockchainProps, OperationData, StateData } from '../types';
 import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
 import { wsClient } from '../lib/websocket';
 import { getDashboard } from '../lib/api';
@@ -47,51 +47,117 @@ function StatCard({ title, value, description, icon, trend }: StatCardProps) {
   );
 }
 
-interface RecentBlockProps {
-  block: BlockSummary;
+interface FeedItem {
+  id: string;
+  type: 'block' | 'operation';
+  timestamp: Date | string;
+  data: BlockData | OperationData;
 }
 
-function RecentBlock({ block }: RecentBlockProps) {
-  return (
-    <div className="flex items-center justify-between p-3 border rounded-lg">
-      <div className="flex items-center space-x-3">
-        <div className="flex items-center justify-center w-8 h-8 bg-primary/10 rounded-full">
-          <Blocks className="h-4 w-4 text-primary" />
+function FeedItemRow({ item }: { item: FeedItem }) {
+  if (item.type === 'block') {
+    const block = item.data as BlockData;
+    return (
+      <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/50">
+        <div className="flex-shrink-0">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+            <Blocks className="h-5 w-5 text-primary" />
+          </div>
         </div>
-        <div>
-          <div className="font-medium">Block #{formatNumber(block.number)}</div>
-          <div className="text-sm text-muted-foreground">
-            by @{block.witness}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-medium">Block #{formatNumber(block.number)}</div>
+              <div className="text-sm text-muted-foreground">
+                by @{block.witness}
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatTimeAgo(item.timestamp)}
+            </div>
+          </div>
+          <div className="mt-2 flex items-center space-x-4 text-sm text-muted-foreground">
+            <span>{block.transactions || 0} transactions</span>
+            <span>{block.operations || 0} operations</span>
           </div>
         </div>
       </div>
-      <div className="text-right">
-        <div className="text-sm font-medium">
-          {block.transactions ?? block.transaction_count ?? 0} txs,{' '}
-          {block.operations ?? block.operation_count ?? 0} ops
+    );
+  }
+
+  const op = item.data as OperationData;
+  return (
+    <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/50">
+      <div className="flex-shrink-0">
+        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+          <Activity className="h-5 w-5 text-blue-500" />
         </div>
-        <div className="text-xs text-muted-foreground">
-          {formatTimeAgo(block.timestamp)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-medium capitalize">{op.type || 'Operation'}</div>
+            {op.accounts && op.accounts.length > 0 && (
+              <div className="text-sm text-muted-foreground">
+                {op.accounts.map((acc: string) => `@${acc}`).join(', ')}
+              </div>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {formatTimeAgo(item.timestamp)}
+          </div>
         </div>
+        {op.block && (
+          <div className="mt-2 text-sm text-muted-foreground">
+            Block #{formatNumber(op.block)}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export function Dashboard() {
-  const { 
-    props, 
-    stats, 
-    latestBlocks, 
+  const {
+    props,
+    stats,
+    latestBlocks,
     networkPerformance,
     rewardPool,
-    setProps, 
-    setStats, 
+    setProps,
+    setStats,
     setLatestBlocks,
     setNetworkPerformance,
     setRewardPool
   } = useBlockchainStore();
   const { state: wsState } = useWebSocketStore();
+  // Items received live over the WebSocket while this page is mounted.
+  const [liveItems, setLiveItems] = useState<FeedItem[]>([]);
+
+  // The activity stream is the live items followed by the blocks already in
+  // the store (REST preload / WS replay), deduplicated by id — derived at
+  // render time so the stream is populated even before the first live event.
+  const feedItems = useMemo(() => {
+    const items = [...liveItems];
+    const existing = new Set(liveItems.map((item) => item.id));
+    for (const block of latestBlocks) {
+      const id = `block-${block.number}`;
+      if (existing.has(id)) continue;
+      items.push({
+        id,
+        type: 'block',
+        timestamp: block.timestamp,
+        data: {
+          number: block.number,
+          timestamp: block.timestamp,
+          witness: block.witness,
+          transactions: block.transactions ?? block.transaction_count ?? 0,
+          operations: block.operations ?? block.operation_count ?? 0,
+        },
+      });
+    }
+    return items.slice(0, 100);
+  }, [liveItems, latestBlocks]);
 
   // Fetch dashboard data from REST API as fallback
   const fetchDashboardData = useCallback(async () => {
@@ -123,7 +189,37 @@ export function Dashboard() {
     });
 
     const unsubscribeBlocks = wsClient.on('blocks', (message) => {
-      useBlockchainStore.getState().addBlock(message.data as BlockSummary);
+      const block = message.data as BlockData;
+      useBlockchainStore.getState().addBlock(block);
+      setLiveItems((prev) => {
+        // The server replays recent blocks on (re)connect; skip items the
+        // stream already shows.
+        if (prev.some((item) => item.id === `block-${block.number}`)) {
+          return prev;
+        }
+        return [
+          {
+            id: `block-${block.number}`,
+            type: 'block' as const,
+            timestamp: new Date(),
+            data: block,
+          },
+          ...prev,
+        ].slice(0, 100);
+      });
+    });
+
+    const unsubscribeOps = wsClient.on('operation', (message) => {
+      const op = message.data as OperationData;
+      setLiveItems((prev) => [
+        {
+          id: `op-${op.block}-${op.type}-${Date.now()}-${Math.random()}`,
+          type: 'operation' as const,
+          timestamp: new Date(),
+          data: op,
+        },
+        ...prev.slice(0, 99), // Keep last 100 items
+      ]);
     });
 
     const unsubscribeState = wsClient.on('state', (message) => {
@@ -144,6 +240,7 @@ export function Dashboard() {
     wsClient.subscribe('props');
     wsClient.subscribe('blocks');
     wsClient.subscribe('state');
+    wsClient.subscribe('operation');
 
     // Fallback: If WebSocket is disconnected and no data, fetch from REST API
     // every 10 seconds. Reads the live store state to avoid stale closures.
@@ -158,10 +255,12 @@ export function Dashboard() {
     return () => {
       unsubscribeProps();
       unsubscribeBlocks();
+      unsubscribeOps();
       unsubscribeState();
       wsClient.unsubscribe('props');
       wsClient.unsubscribe('blocks');
       wsClient.unsubscribe('state');
+      wsClient.unsubscribe('operation');
       clearInterval(fallbackInterval);
     };
   }, [wsState, fetchDashboardData, setProps, setStats]);
@@ -278,28 +377,37 @@ export function Dashboard() {
         <GlobalProperties data={props || undefined} />
       </div>
 
-      {/* Recent Blocks */}
+      {/* Activity Stream (merged from the former Live Feed page) */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Blocks</CardTitle>
+          <CardTitle>Activity Stream</CardTitle>
           <CardDescription>
-            Latest blocks produced on the Steem blockchain
+            {wsState === 'connected'
+              ? 'Real-time blocks and operations from the blockchain'
+              : 'Connect to WebSocket to see live updates'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {latestBlocks.length > 0 ? (
-              latestBlocks.slice(0, 5).map((block) => (
-                <RecentBlock key={block.number} block={block} />
-              ))
-            ) : (
-              <div className="text-center py-6 text-muted-foreground">
-                <Blocks className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>No recent blocks available</p>
-                <p className="text-sm">Connect to see live data</p>
-              </div>
-            )}
-          </div>
+          {wsState !== 'connected' && feedItems.length === 0 ? (
+            <div className="text-center py-12">
+              <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+              <p className="text-muted-foreground">WebSocket disconnected</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Connect to see live blockchain activity
+              </p>
+            </div>
+          ) : feedItems.length === 0 ? (
+            <div className="text-center py-12">
+              <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+              <p className="text-muted-foreground">Waiting for activity...</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[600px] overflow-y-auto">
+              {feedItems.map((item) => (
+                <FeedItemRow key={item.id} item={item} />
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
