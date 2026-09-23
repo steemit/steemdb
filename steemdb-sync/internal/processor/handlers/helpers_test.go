@@ -165,3 +165,50 @@ func TestGetField(t *testing.T) {
 		t.Errorf("GetField(missing) = %v, want nil", v)
 	}
 }
+
+func TestIsValidAccountName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"simple", "alice", true},
+		{"with digits", "ab1", true},
+		{"with dash and dot", "a.b-c", true},
+		{"max length", "abcdefghijklmnop", true},
+		{"min length", "ab1", true},
+		{"empty", "", false},
+		{"newline only", "\n", false},
+		{"whitespace", " ", false},
+		{"html injection", "\"><i>", false},
+		{"quoted name", "\"steemit-health\"", false},
+		{"leading hash", "#52", false},
+		{"hash with space", "#52 fyrstikken", false},
+		{"too short", "ab", false},
+		{"too long", "abcdefghijklmnopq", false},
+		{"uppercase", "Alice", false},
+		{"leading dash", "-abc", false},
+		{"leading dot", ".abc", false},
+		{"trailing space", "alice ", false},
+		{"unicode", "账号", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsValidAccountName(tt.input); got != tt.want {
+				t.Errorf("IsValidAccountName(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestQueueAccountDirtyRejectsInvalidNames(t *testing.T) {
+	// Zero-value inserter has no db handle: QueueAccountDirty must return
+	// before touching the database for invalid names.
+	m := &MongoInserter{}
+	for _, name := range []string{"", "\n", "\"><i>", "#52 fyrstikken"} {
+		if err := m.QueueAccountDirty(nil, name); err != nil {
+			t.Errorf("QueueAccountDirty(%q) = %v, want nil", name, err)
+		}
+	}
+}

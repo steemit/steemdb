@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Search, ArrowUpDown, Star } from 'lucide-react';
@@ -14,6 +14,7 @@ export function AccountsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>((searchParams.get('order') as 'asc' | 'desc') || 'asc');
@@ -22,6 +23,19 @@ export function AccountsPage() {
     queryKey: ['accounts', page, search, sortBy, sortOrder],
     queryFn: () => getAccounts({ page, limit: 20, search, sort: sortBy, order: sortOrder }),
   });
+
+  // Debounce the search box: the input updates local state on every
+  // keystroke, and only the settled value reaches the URL/query after a
+  // pause, so typing no longer fires a request per character.
+  useEffect(() => {
+    if (searchInput === search) return;
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+      setSearchParams({ page: '1', sort: sortBy, order: sortOrder, ...(searchInput && { search: searchInput }) });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [searchInput, search, sortBy, sortOrder, setSearchParams]);
 
   const handleSort = (field: string) => {
     if (sortBy === field) {
@@ -36,12 +50,6 @@ export function AccountsPage() {
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
     setSearchParams({ page: newPage.toString(), sort: sortBy, order: sortOrder, ...(search && { search }) });
-  };
-
-  const handleSearch = (value: string) => {
-    setSearch(value);
-    setPage(1);
-    setSearchParams({ page: '1', sort: sortBy, order: sortOrder, ...(value && { search: value }) });
   };
 
   if (isLoading) {
@@ -104,8 +112,8 @@ export function AccountsPage() {
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search accounts..."
-                  value={search}
-                  onChange={(e) => handleSearch(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
                   className="pl-8"
                 />
               </div>
