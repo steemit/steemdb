@@ -205,7 +205,7 @@ export function Dashboard() {
             data: block,
           },
           ...prev,
-        ].slice(0, 100);
+        ].slice(0, 100); // Keep last 100 items
       });
     });
 
@@ -218,7 +218,7 @@ export function Dashboard() {
           timestamp: new Date(),
           data: op,
         },
-        ...prev.slice(0, 99), // Keep last 100 items
+        ...prev.slice(0, 99),
       ]);
     });
 
@@ -391,7 +391,11 @@ export function Dashboard() {
           {wsState !== 'connected' && feedItems.length === 0 ? (
             <div className="text-center py-12">
               <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <p className="text-muted-foreground">WebSocket disconnected</p>
+              <p className="text-muted-foreground">
+                {wsState === 'disconnected' || wsState === 'error'
+                  ? 'WebSocket disconnected'
+                  : 'Connecting to live data...'}
+              </p>
               <p className="text-sm text-muted-foreground mt-2">
                 Connect to see live blockchain activity
               </p>
