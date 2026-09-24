@@ -14,6 +14,7 @@ import (
 	"github.com/steemit/steemdb-sync/internal/config"
 	"github.com/steemit/steemdb-sync/internal/model"
 	"github.com/steemit/steemdb-sync/internal/mongo"
+	"github.com/steemit/steemdb-sync/internal/processor/handlers"
 	"github.com/steemit/steemdb-sync/internal/rpc"
 )
 
@@ -48,7 +49,7 @@ func main() {
 		dryRun     bool
 	)
 	flag.StringVar(&configPath, "config", "configs/config.yaml", "Path to configuration file")
-	flag.StringVar(&mode, "mode", "blocks", "Repair mode: blocks (missing block repair) or backfill-accounts (populate operations.accounts)")
+	flag.StringVar(&mode, "mode", "blocks", "Repair mode: blocks (missing block repair), backfill-accounts (populate operations.accounts) or cleanup-accounts (delete account documents with invalid names)")
 	flag.Uint64Var(&startBlock, "start", 0, "Start block number (0 = from block 1)")
 	flag.Uint64Var(&endBlock, "end", 0, "End block number (0 = use max_block from meta)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run mode (scan only, don't repair)")
@@ -80,8 +81,50 @@ func main() {
 		log.Printf("Backfill complete: %d operations updated", updated)
 		return
 	}
+	// Cleanup mode: one-time deletion of account documents whose _id is not a
+	// valid Steem account name (garbage queued from user-controlled
+	// custom_json payloads before name validation existed). Destructive, so
+	// it runs as a dry run unless -dry-run=false is passed explicitly.
+	if mode == "cleanup-accounts" {
+		dryRunSet := false
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "dry-run" {
+				dryRunSet = true
+			}
+		})
+		if !dryRunSet {
+			dryRun = true
+		}
+
+		invalid, err := mongoClient.ListInvalidAccountIDs(ctx, handlers.IsValidAccountName)
+		if err != nil {
+			log.Fatalf("Failed to scan account ids: %v", err)
+		}
+		log.Printf("Invalid account documents: %d", len(invalid))
+		for i, id := range invalid {
+			if i >= 20 {
+				log.Printf("  ... and %d more", len(invalid)-20)
+				break
+			}
+			log.Printf("  invalid _id: %q", id)
+		}
+
+		if len(invalid) == 0 || dryRun {
+			if len(invalid) > 0 {
+				log.Println("Dry run mode: exiting without deletion (pass -dry-run=false explicitly to delete)")
+			}
+			return
+		}
+
+		deleted, err := mongoClient.DeleteAccountsByIDs(ctx, invalid, 1000)
+		if err != nil {
+			log.Fatalf("Deletion failed after %d deletes: %v", deleted, err)
+		}
+		log.Printf("Cleanup complete: %d account documents deleted", deleted)
+		return
+	}
 	if mode != "blocks" {
-		log.Fatalf("Unknown mode: %s (supported: blocks, backfill-accounts)", mode)
+		log.Fatalf("Unknown mode: %s (supported: blocks, backfill-accounts, cleanup-accounts)", mode)
 	}
 
 	// Determine scan range

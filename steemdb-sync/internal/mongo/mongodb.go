@@ -522,6 +522,61 @@ func (c *Client) BackfillOperationAccounts(ctx context.Context, batchSize int) (
 	}
 }
 
+// ListInvalidAccountIDs scans the account collection (projection: _id only)
+// and returns the _id values of every document whose name fails the given
+// validity check. These are stub documents created when user-controlled
+// custom_json payloads were queued for refresh without account-name
+// validation; they can never resolve on chain, so they only pollute the
+// accounts list. _id is decoded as interface{} because a non-string _id is
+// itself invalid and must be caught too.
+func (c *Client) ListInvalidAccountIDs(ctx context.Context, valid func(string) bool) ([]interface{}, error) {
+	cursor, err := c.db.Collection("account").Find(ctx, bson.M{},
+		options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to scan account ids")
+	}
+	defer cursor.Close(ctx)
+
+	var invalid []interface{}
+	for cursor.Next(ctx) {
+		var doc struct {
+			ID interface{} `bson:"_id"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			return invalid, errors.Wrap(err, "failed to decode account id")
+		}
+		name, ok := doc.ID.(string)
+		if !ok || !valid(name) {
+			invalid = append(invalid, doc.ID)
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return invalid, errors.Wrap(err, "failed to iterate account ids")
+	}
+	return invalid, nil
+}
+
+// DeleteAccountsByIDs removes account documents by _id in batches and
+// returns the number of deleted documents.
+func (c *Client) DeleteAccountsByIDs(ctx context.Context, ids []interface{}, batchSize int) (int64, error) {
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	var total int64
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		res, err := c.db.Collection("account").DeleteMany(ctx, bson.M{"_id": bson.M{"$in": ids[i:end]}})
+		if err != nil {
+			return total, errors.Wrap(err, "failed to delete invalid accounts")
+		}
+		total += res.DeletedCount
+	}
+	return total, nil
+}
+
 // BulkUpsertBlocks performs bulk upsert of blocks
 func (c *Client) BulkUpsertBlocks(ctx context.Context, blocks []*model.Block) error {
 	if len(blocks) == 0 {

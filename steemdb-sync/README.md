@@ -21,7 +21,7 @@ funds). Both run as resident services in the production compose.
 - `cmd/live_sync`: RPC-based live block synchronization service
 - `cmd/processor`: Derives read-side collections from the raw operations stream
 - `cmd/refresher`: Background refreshers (witnesses, stats, clients, funds; replaces legacy history.py + witnesses.py)
-- `cmd/repair`: Tool for scanning and repairing missing blocks
+- `cmd/repair`: Tool for scanning and repairing missing blocks, plus one-time data maintenance modes (backfill-accounts, cleanup-accounts)
 
 ## Ingest Endpoint Security
 
@@ -190,6 +190,8 @@ go build -o ../bin/repair ./cmd/repair
 ../bin/repair -config configs/config.yaml -start 1000 -end 2000  # Repair specific range
 ../bin/repair -config configs/config.yaml -dry-run               # Scan only, don't repair
 ../bin/repair -config configs/config.yaml -mode backfill-accounts # Populate operations.accounts index
+../bin/repair -config configs/config.yaml -mode cleanup-accounts  # List account documents with invalid names (dry run by default)
+../bin/repair -config configs/config.yaml -mode cleanup-accounts -dry-run=false # Actually delete them
 ```
 
 ## Metrics
