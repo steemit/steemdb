@@ -48,6 +48,12 @@ type MongoInserter struct {
 	// dirtyAccounts coalesces QueueAccountDirty marks to one update per
 	// account per window.
 	dirtyAccounts map[string]struct{}
+	// createdAccounts coalesces QueueAccountCreate marks. Only
+	// account-creation ops (account_create, account_create_with_delegation,
+	// create_claimed_account, pow/pow2 mining) may create account documents
+	// (docs/rules/account-doc-creation.md); everything else only dirty-marks
+	// documents that already exist.
+	createdAccounts map[string]struct{}
 	// bulkWrite performs one unordered bulk write against a collection. It
 	// is a field so tests can simulate write failures without a live
 	// MongoDB (SetBulkWriteHook); production always uses the driver.
@@ -111,6 +117,7 @@ func (m *MongoInserter) BeginBatch(bufferLimit int) {
 	m.bufferLimit = bufferLimit
 	m.buckets = make(map[string]*writeBucket)
 	m.dirtyAccounts = make(map[string]struct{})
+	m.createdAccounts = make(map[string]struct{})
 }
 
 // EndBatch disables batch mode and discards unflushed buffers. Used on
@@ -121,6 +128,7 @@ func (m *MongoInserter) EndBatch() {
 	m.batchMode = false
 	m.buckets = nil
 	m.dirtyAccounts = nil
+	m.createdAccounts = nil
 }
 
 // FlushAll writes all buffered models and coalesced dirty-account marks.
@@ -167,24 +175,37 @@ func (m *MongoInserter) flushBucketLocked(ctx context.Context, coll string) erro
 	return nil
 }
 
-// flushDirtyLocked applies coalesced account dirty marks. Caller holds mu.
+// flushDirtyLocked applies coalesced account dirty/create marks. Caller holds mu.
 // Same failure contract as flushBucketLocked: the marks are kept on error so
 // the next flush retries them (the write is an idempotent $set).
+//
+// Upsert flags are the account-doc-creation rule in code form
+// (docs/rules/account-doc-creation.md): dirty marks never create documents
+// (upsert=false — a dirty mark for a name not yet in the collection is a
+// no-op; the account will be created by its creation op or by
+// discover-accounts), creation marks upsert the stub with _dirty set.
 func (m *MongoInserter) flushDirtyLocked(ctx context.Context) error {
-	if len(m.dirtyAccounts) == 0 {
+	if len(m.dirtyAccounts) == 0 && len(m.createdAccounts) == 0 {
 		return nil
 	}
-	models := make([]mongo.WriteModel, 0, len(m.dirtyAccounts))
+	models := make([]mongo.WriteModel, 0, len(m.dirtyAccounts)+len(m.createdAccounts))
 	for name := range m.dirtyAccounts {
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"_id": name}).
+			SetUpdate(bson.M{"$set": bson.M{"_dirty": true}}).
+			SetUpsert(false))
+	}
+	for name := range m.createdAccounts {
 		models = append(models, mongo.NewUpdateOneModel().
 			SetFilter(bson.M{"_id": name}).
 			SetUpdate(bson.M{"$set": bson.M{"_dirty": true}}).
 			SetUpsert(true))
 	}
 	if err := m.bulkWrite(ctx, "account", models); err != nil {
-		return fmt.Errorf("bulk write account dirty (%d models): %w", len(models), err)
+		return fmt.Errorf("bulk write account dirty/create (%d models): %w", len(models), err)
 	}
 	m.dirtyAccounts = make(map[string]struct{})
+	m.createdAccounts = make(map[string]struct{})
 	return nil
 }
 
@@ -275,7 +296,36 @@ func (m *MongoInserter) UpsertOneByFilter(ctx context.Context, collection string
 // account state, they just flag it. A separate worker periodically refreshes dirty accounts.
 // Names failing IsValidAccountName are dropped: custom_json payloads are
 // user-controlled and must not be able to create account documents.
+//
+// The mark NEVER creates a document (upsert=false): per
+// docs/rules/account-doc-creation.md only account-creation ops may create
+// account documents. A dirty mark for a name not yet in the collection is a
+// no-op — that account reaches the collection through its creation op
+// (QueueAccountCreate) or the discover-accounts repair.
 func (m *MongoInserter) QueueAccountDirty(ctx context.Context, accountName string) error {
+	if !IsValidAccountName(accountName) {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.batchMode {
+		_, err := m.db.Collection("account").UpdateOne(ctx,
+			bson.M{"_id": accountName},
+			bson.M{"$set": bson.M{"_dirty": true}},
+			options.Update().SetUpsert(false))
+		return err
+	}
+	m.dirtyAccounts[accountName] = struct{}{}
+	return nil
+}
+
+// QueueAccountCreate marks an account as needing refresh AND creates the stub
+// document when missing (upsert=true, {_id, _dirty: true}; the
+// AccountRefresher later fills it via get_accounts). Reserved for
+// account-creation ops (account_create, account_create_with_delegation,
+// create_claimed_account, pow/pow2 mining) — the only operations allowed to
+// create account documents (docs/rules/account-doc-creation.md).
+func (m *MongoInserter) QueueAccountCreate(ctx context.Context, accountName string) error {
 	if !IsValidAccountName(accountName) {
 		return nil
 	}
@@ -288,7 +338,7 @@ func (m *MongoInserter) QueueAccountDirty(ctx context.Context, accountName strin
 			options.Update().SetUpsert(true))
 		return err
 	}
-	m.dirtyAccounts[accountName] = struct{}{}
+	m.createdAccounts[accountName] = struct{}{}
 	return nil
 }
 

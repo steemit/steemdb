@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/steemit/steemdb-sync/internal/model"
@@ -160,15 +159,13 @@ func (h *CustomJSONHandler) handleFollow(ctx context.Context, op *model.Operatio
 		return fmt.Errorf("failed to upsert follow: %w", err)
 	}
 
-	// Queue both accounts for refresh
-	if err := h.inserter.QueueAccountDirty(ctx, follower); err != nil {
-		log.Printf("[CustomJSON] Failed to queue account dirty (follower=%s): %v", follower, err)
-	}
-	if follower != following {
-		if err := h.inserter.QueueAccountDirty(ctx, following); err != nil {
-			log.Printf("[CustomJSON] Failed to queue account dirty (following=%s): %v", following, err)
-		}
-	}
+	// No account dirty marks here. Follow/unfollow changes no field of the
+	// chain account_object (follower counts live in the follow_api/hivemind
+	// domain, not in get_accounts), and the payload's following field is a
+	// user-controlled string the chain does not validate as an account —
+	// dirty-marking it was the sole source of phantom account stubs
+	// (docs/rules/account-doc-creation.md). The raw event record above is
+	// kept; current-state follow statistics belong to hivemind.
 
 	return nil
 }

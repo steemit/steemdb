@@ -60,7 +60,7 @@ buffer limit 5000/collection, `PROCESSOR_BUFFER_LIMIT`):
    window (no dispatch, no cursor advance — retry until ingest/repair lands
    the header), and ops whose block header is missing are never dispatched
    (holding beats dispatching with a zero timestamp).
-2. Dispatch per op (panic-safe per op) over 17 registered op types. Ops that fail their
+2. Dispatch per op (panic-safe per op) over 20 registered op types. Ops that fail their
    handler are collected by op id; dispatch continues past them (one bad op
    never stops the block).
 3. Writes split in three classes (see 02); comment family is entirely

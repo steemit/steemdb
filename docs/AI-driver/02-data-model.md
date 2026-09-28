@@ -62,7 +62,7 @@ fields.
 | `follow` / `reblog` | CustomJSONHandler | filter-upsert `{_block, follower, following}` / `{_block, permlink, account}` | Pattern B; currently zero web readers |
 | `witness_vote` | WitnessVoteHandler | filter-upsert `{_ts, account, witness}` | filter contains `_ts` — same-block vote+unvote is the canonical Pattern-B conflict case |
 | `comment` | CommentHandler (+comment_options, author_reward writeback) + **comment_rescanner** (get_content snapshots) | `{author}/{permlink}` | the only collection on the unbuffered direct-write bypass (diff read-modify-write + matched semantics); `last_applied_op` dedup marker; dynamic fields (active_votes/depth/payout/…) only exist after rescan; `json_metadata` stays a raw string when the chain data is invalid (poison for rigid decoders) |
-| `account` | handlers (`_dirty` stubs: `{_id, _dirty:true}`) + **account_refresher** (full docs, `$unset _dirty`) | web everywhere | stub→full two-phase protocol; `scanned` = last refresh time |
+| `account` | creation ops (stub upsert `{_id, _dirty:true}` via `QueueAccountCreate`; dirty marks via `QueueAccountDirty` never upsert — `docs/rules/account-doc-creation.md`) + **account_refresher** (full docs, `$unset _dirty`) | web everywhere | stub→full two-phase protocol; `scanned` = last refresh time |
 
 ### Snapshot layer (refresher)
 
