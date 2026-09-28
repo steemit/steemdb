@@ -165,7 +165,16 @@ func (h *PowHandler) Handle(ctx context.Context, op *model.Operation, blockTS ti
 		return fmt.Errorf("failed to upsert pow %s: %w", id, err)
 	}
 
-	// Legacy does NOT queue_update_account for pow
+	// Mining created the worker account when it did not exist
+	// (steem_evaluator pow_apply / pow2_evaluator create<account_object>).
+	// QueueAccountCreate covers both cases: upserting a stub for a mined-new
+	// account, or just dirty-marking an existing one. Intentional deviation
+	// from legacy sync.py, which never refreshed pow workers and so never
+	// discovered mined accounts (docs/rules/account-doc-creation.md).
+	if err := h.inserter.QueueAccountCreate(ctx, workerAccount); err != nil {
+		return fmt.Errorf("failed to queue account create (worker=%s): %w", workerAccount, err)
+	}
+
 	return nil
 }
 

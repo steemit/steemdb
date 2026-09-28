@@ -72,6 +72,11 @@ func main() {
 	dispatcher.Register("comment", handlers.NewCommentHandler(inserter))
 	dispatcher.Register("comment_options", handlers.NewCommentOptionsHandler(inserter))
 
+	// Account-creation ops (docs/rules/account-doc-creation.md)
+	dispatcher.Register("account_create", handlers.NewAccountCreateHandler(inserter))
+	dispatcher.Register("account_create_with_delegation", handlers.NewAccountCreateHandler(inserter))
+	dispatcher.Register("create_claimed_account", handlers.NewAccountCreateHandler(inserter))
+
 	// Batch 4 handlers (remaining op_types)
 	dispatcher.Register("convert", handlers.NewConvertHandler(inserter))
 	dispatcher.Register("transfer_to_vesting", handlers.NewVestingDepositHandler(inserter))
