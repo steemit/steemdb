@@ -117,8 +117,8 @@ func TestAccountStubsCheck(t *testing.T) {
 	if f.Healthy {
 		t.Error("expected unhealthy with phantom stubs present")
 	}
-	if f.RepairMode != "" {
-		t.Errorf("RepairMode = %q, want empty (no repair mode yet)", f.RepairMode)
+	if f.RepairMode != "verify-accounts" {
+		t.Errorf("RepairMode = %q, want verify-accounts", f.RepairMode)
 	}
 }
 

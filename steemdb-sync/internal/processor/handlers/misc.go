@@ -147,7 +147,7 @@ func NewPowHandler(inserter *MongoInserter) *PowHandler {
 func (h *PowHandler) Handle(ctx context.Context, op *model.Operation, blockTS time.Time) error {
 	v := op.OpValue
 
-	workerAccount := extractWorkerAccount(v)
+	workerAccount := ExtractWorkerAccount(v)
 	id := fmt.Sprintf("%d-%s", op.BlockNum, workerAccount)
 
 	doc := bson.M{
@@ -178,10 +178,10 @@ func (h *PowHandler) Handle(ctx context.Context, op *model.Operation, blockTS ti
 	return nil
 }
 
-// extractWorkerAccount gets the worker account from a pow/pow2 operation.
+// ExtractWorkerAccount gets the worker account from a pow/pow2 operation.
 // pow2: work is a list [props, {input: {worker_account: ...}}]
 // pow:  work is a map, worker_account is a top-level field
-func extractWorkerAccount(v map[string]interface{}) string {
+func ExtractWorkerAccount(v map[string]interface{}) string {
 	// Check if work is a list (pow2 format)
 	if work, ok := v["work"].([]interface{}); ok && len(work) >= 2 {
 		if inner, ok := work[1].(map[string]interface{}); ok {

@@ -48,12 +48,14 @@ func main() {
 		startBlock uint64
 		endBlock   uint64
 		dryRun     bool
+		batchSize  int
 	)
 	flag.StringVar(&configPath, "config", "configs/config.yaml", "Path to configuration file")
-	flag.StringVar(&mode, "mode", "check", "Mode: check (run all data health checks, read-only — always start here), blocks (missing block repair), backfill-accounts (populate operations.accounts) or cleanup-accounts (delete account documents with invalid names)")
+	flag.StringVar(&mode, "mode", "check", "Mode: check (run all data health checks, read-only — always start here), blocks (missing block repair), verify-accounts (ONE-OFF: delete account documents never created on chain, using the local op stream — no RPC), backfill-accounts (ONE-OFF: populate operations.accounts) or cleanup-accounts (ONE-OFF: delete account documents with invalid names). ONE-OFF modes patch historical data for bugs whose ingest path is already fixed; they are not expected to be needed again once their health check is green.")
 	flag.Uint64Var(&startBlock, "start", 0, "Start block number (0 = from block 1)")
 	flag.Uint64Var(&endBlock, "end", 0, "End block number (0 = use max_block from meta)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run mode (scan only, don't repair)")
+	flag.IntVar(&batchSize, "batch", 500, "Batch size for verify-accounts (inner loop over account _ids)")
 	flag.Parse()
 
 	// Load configuration
@@ -85,6 +87,38 @@ func main() {
 		}
 		log.Printf("Some checks FAILED — run only the repair modes named above, then re-run -mode=check to verify.")
 		os.Exit(1)
+	}
+
+	// verify-accounts mode: ONE-OFF phantom-account cleanup. Destructive, so
+	// it runs as a dry run unless -dry-run=false is passed explicitly (same
+	// guard as cleanup-accounts).
+	if mode == "verify-accounts" {
+		dryRunSet := false
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "dry-run" {
+				dryRunSet = true
+			}
+		})
+		if !dryRunSet {
+			dryRun = true
+		}
+
+		res, err := verifyAccounts(ctx, newMongoVerifySource(mongoClient.Database()), batchSize, dryRun, log.Default())
+		if err != nil {
+			log.Fatalf("verify-accounts failed: %v", err)
+		}
+		log.Printf("verify-accounts complete: checked %d account ids, %d phantom (never created on chain)", res.Checked, res.Phantom)
+		for _, id := range res.Samples {
+			log.Printf("  phantom _id: %q", id)
+		}
+		if dryRun {
+			if res.Phantom > 0 {
+				log.Println("Dry run mode: exiting without deletion (pass -dry-run=false explicitly to delete)")
+			}
+			return
+		}
+		log.Printf("Deletion complete: %d account documents deleted", res.Deleted)
+		return
 	}
 
 	// Backfill mode: one-time migration that populates operations.accounts
@@ -141,7 +175,7 @@ func main() {
 		return
 	}
 	if mode != "blocks" {
-		log.Fatalf("Unknown mode: %s (supported: check, blocks, backfill-accounts, cleanup-accounts)", mode)
+		log.Fatalf("Unknown mode: %s (supported: check, blocks, verify-accounts, backfill-accounts, cleanup-accounts)", mode)
 	}
 
 	// Determine scan range

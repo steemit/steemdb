@@ -211,7 +211,7 @@ func (c *invalidAccountIDsCheck) Run(ctx context.Context) (*Finding, error) {
 type accountStubsCheck struct{ store HealthStore }
 
 func (c *accountStubsCheck) Name() string       { return "phantom-account-stubs" }
-func (c *accountStubsCheck) RepairMode() string { return "" }
+func (c *accountStubsCheck) RepairMode() string { return "verify-accounts" }
 
 func (c *accountStubsCheck) Run(ctx context.Context) (*Finding, error) {
 	n, err := c.store.CountAccountStubs(ctx)
@@ -219,9 +219,10 @@ func (c *accountStubsCheck) Run(ctx context.Context) (*Finding, error) {
 		return nil, err
 	}
 	f := &Finding{
-		Name:    c.Name(),
-		Healthy: n == 0,
-		Summary: fmt.Sprintf("account stub docs (no name field, not on chain): %d", n),
+		Name:       c.Name(),
+		RepairMode: c.RepairMode(),
+		Healthy:    n == 0,
+		Summary:    fmt.Sprintf("account stub docs (no name field, not on chain): %d", n),
 	}
 	if !f.Healthy {
 		f.Details = append(f.Details,

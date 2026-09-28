@@ -124,8 +124,10 @@ paired check** (`docs/rules/repair-health-checks.md`). Current checks:
 `block-continuity` (count-vs-span smoke test → `blocks`),
 `operations-accounts-backfill` (sampled old/recent ranges →
 `backfill-accounts`), `invalid-account-ids` (→ `cleanup-accounts`),
-`phantom-account-stubs` (no repair mode yet — chain-nonexistent dirty stubs
-that head-of-line block the AccountRefresher).
+`phantom-account-stubs` (→ `verify-accounts`: ONE-OFF local-only cleanup —
+builds the created-accounts set from the op stream (3 creation ops +
+pow/pow2 workers + genesis seed), streams account _ids alphabetically up to
+a startup landmark, deletes ids never created on chain; zero RPC).
 
 Scanner walks 1..maxBlock marking missing headers and zero-op blocks;
 repair re-fetches via RPC. Repair shares live_sync's exact ingest
