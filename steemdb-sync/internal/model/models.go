@@ -35,7 +35,11 @@ type Operation struct {
 	OpValue  map[string]interface{} `bson:"op_value" json:"op_value"`
 	Virtual  bool                   `bson:"virtual" json:"virtual"`
 	Source   string                 `bson:"source" json:"source"` // "plugin" or "rpc"
-	Accounts []string               `bson:"accounts,omitempty" json:"accounts,omitempty"`
+	// Accounts is always persisted (no omitempty): ops that involve no
+	// account store an explicit empty array, keeping the
+	// operations-accounts-backfill health check green for zero-account ops
+	// (hardfork etc.) on freshly ingested data.
+	Accounts []string `bson:"accounts" json:"accounts,omitempty"`
 }
 
 // Meta represents synchronization metadata

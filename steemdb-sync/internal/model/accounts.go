@@ -23,6 +23,8 @@ var accountFields = []string{
 	"witness",
 	"delegator",
 	"delegatee",
+	"current_owner",
+	"open_owner",
 	"comment_author",
 	"parent_author",
 	"recovering_account",
