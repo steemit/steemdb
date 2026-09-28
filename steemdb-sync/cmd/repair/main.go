@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/steemit/steemutil/protocol"
@@ -49,7 +50,7 @@ func main() {
 		dryRun     bool
 	)
 	flag.StringVar(&configPath, "config", "configs/config.yaml", "Path to configuration file")
-	flag.StringVar(&mode, "mode", "blocks", "Repair mode: blocks (missing block repair), backfill-accounts (populate operations.accounts) or cleanup-accounts (delete account documents with invalid names)")
+	flag.StringVar(&mode, "mode", "check", "Mode: check (run all data health checks, read-only — always start here), blocks (missing block repair), backfill-accounts (populate operations.accounts) or cleanup-accounts (delete account documents with invalid names)")
 	flag.Uint64Var(&startBlock, "start", 0, "Start block number (0 = from block 1)")
 	flag.Uint64Var(&endBlock, "end", 0, "End block number (0 = use max_block from meta)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run mode (scan only, don't repair)")
@@ -69,6 +70,22 @@ func main() {
 	defer mongoClient.Close(context.Background())
 
 	ctx := context.Background()
+
+	// Check mode: run every registered health check (read-only) and report
+	// which repair modes are actually needed. Each FAIL line names the mode
+	// that fixes it; re-run after repairing to verify. Exit code 1 when any
+	// check fails so scripts can gate on it. Every new repair mode must
+	// register its check here (docs/rules/repair-health-checks.md).
+	if mode == "check" {
+		log.Printf("Data health check starting...")
+		_, allHealthy := checker.RunHealthChecks(ctx, checker.DefaultChecks(checker.NewMongoHealthStore(mongoClient)), log.Default())
+		if allHealthy {
+			log.Printf("All checks passed — no repair needed.")
+			return
+		}
+		log.Printf("Some checks FAILED — run only the repair modes named above, then re-run -mode=check to verify.")
+		os.Exit(1)
+	}
 
 	// Backfill mode: one-time migration that populates operations.accounts
 	// for data ingested before the field existed.
@@ -124,7 +141,7 @@ func main() {
 		return
 	}
 	if mode != "blocks" {
-		log.Fatalf("Unknown mode: %s (supported: blocks, backfill-accounts, cleanup-accounts)", mode)
+		log.Fatalf("Unknown mode: %s (supported: check, blocks, backfill-accounts, cleanup-accounts)", mode)
 	}
 
 	// Determine scan range

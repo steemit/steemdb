@@ -81,6 +81,24 @@ func TestExtractAccounts(t *testing.T) {
 			want: []string{"henry"},
 		},
 		{
+			name: "delegate_vesting_shares has delegator and delegatee",
+			op: map[string]interface{}{
+				"delegator":      "helen",
+				"delegatee":      "ivan",
+				"vesting_shares": "100.000000 VESTS",
+			},
+			want: []string{"helen", "ivan"},
+		},
+		{
+			name: "fill_order has current_owner and open_owner",
+			op: map[string]interface{}{
+				"current_owner":   "judy",
+				"open_owner":      "kyle",
+				"current_orderid": 7,
+			},
+			want: []string{"judy", "kyle"},
+		},
+		{
 			name: "nil op_value returns nil",
 			op:   nil,
 			want: nil,

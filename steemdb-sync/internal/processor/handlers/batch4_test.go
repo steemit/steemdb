@@ -57,6 +57,66 @@ func TestVestingDepositHandler_AssetParsing(t *testing.T) {
 	}
 }
 
+// --- WithdrawVestingHandler ---
+
+func TestWithdrawVestingHandler_QueuesDirty(t *testing.T) {
+	// Power-down start/stop must flag the account for refresh, otherwise the
+	// account collection keeps a stale vesting_withdraw_rate schedule.
+	m := NewMongoInserter(nil)
+	m.BeginBatch(10)
+	defer m.EndBatch()
+
+	h := NewWithdrawVestingHandler(m)
+	op := makeOp("withdraw_vesting", 100, map[string]interface{}{
+		"account":        "alice",
+		"vesting_shares": "0.000000 VESTS",
+	})
+	if err := h.Handle(context.Background(), op, time.Now()); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if _, ok := m.dirtyAccounts["alice"]; !ok {
+		t.Fatal("withdraw_vesting must queue the account dirty")
+	}
+	if len(m.dirtyAccounts) != 1 {
+		t.Fatalf("dirtyAccounts = %d entries, want 1", len(m.dirtyAccounts))
+	}
+}
+
+func TestWithdrawVestingHandler_RouteQueuesBoth(t *testing.T) {
+	m := NewMongoInserter(nil)
+	m.BeginBatch(10)
+	defer m.EndBatch()
+
+	h := NewWithdrawVestingHandler(m)
+	op := makeOp("set_withdraw_vesting_route", 100, map[string]interface{}{
+		"from_account": "alice",
+		"to_account":   "bob",
+		"percent":      10000,
+		"auto_vest":    true,
+	})
+	if err := h.Handle(context.Background(), op, time.Now()); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	for _, name := range []string{"alice", "bob"} {
+		if _, ok := m.dirtyAccounts[name]; !ok {
+			t.Fatalf("set_withdraw_vesting_route must queue %s dirty", name)
+		}
+	}
+
+	// Self-route must not double-mark.
+	m2 := NewMongoInserter(nil)
+	m2.BeginBatch(10)
+	defer m2.EndBatch()
+	h2 := NewWithdrawVestingHandler(m2)
+	op.OpValue["to_account"] = "alice"
+	if err := h2.Handle(context.Background(), op, time.Now()); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(m2.dirtyAccounts) != 1 {
+		t.Fatalf("self-route dirtyAccounts = %d entries, want 1", len(m2.dirtyAccounts))
+	}
+}
+
 // --- BenefactorRewardHandler ---
 
 func TestBenefactorRewardHandler_AssetParsing(t *testing.T) {

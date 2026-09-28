@@ -46,7 +46,7 @@ Four-stage pipeline:
    **ops → transactions → blocks → meta.max_block** (the last is the commit
    point). Compensates two condenser quirks (see 03).
 3. **Processor** (`cmd/processor`): the only consumer of `operations`.
-   Windowed (default 64 blocks) dispatch to 16 handlers writing derived
+   Windowed (default 64 blocks) dispatch over 17 registered op types writing derived
    collections; `status.processor_height` advances only after the whole
    window flushes — that is the commit point. A missing block header at the
    window head (or ops whose header is absent) holds the window instead of

@@ -60,7 +60,7 @@ buffer limit 5000/collection, `PROCESSOR_BUFFER_LIMIT`):
    window (no dispatch, no cursor advance — retry until ingest/repair lands
    the header), and ops whose block header is missing are never dispatched
    (holding beats dispatching with a zero timestamp).
-2. Dispatch per op (panic-safe per op) to 16 handlers. Ops that fail their
+2. Dispatch per op (panic-safe per op) over 17 registered op types. Ops that fail their
    handler are collected by op id; dispatch continues past them (one bad op
    never stops the block).
 3. Writes split in three classes (see 02); comment family is entirely
@@ -115,6 +115,17 @@ a truncated non-empty list would delete live witnesses; funds inserts a
 duplicate snapshot on every restart.
 
 ## cmd/repair + internal/checker — gap filler
+
+`-mode=check` (default, read-only, exit 1 on failure) runs every registered
+health check in `checker.DefaultChecks` and names the repair mode each FAIL
+maps to — always the first command on an unfamiliar database, and the
+verification step after any repair. **Every new repair mode must register its
+paired check** (`docs/rules/repair-health-checks.md`). Current checks:
+`block-continuity` (count-vs-span smoke test → `blocks`),
+`operations-accounts-backfill` (sampled old/recent ranges →
+`backfill-accounts`), `invalid-account-ids` (→ `cleanup-accounts`),
+`phantom-account-stubs` (no repair mode yet — chain-nonexistent dirty stubs
+that head-of-line block the AccountRefresher).
 
 Scanner walks 1..maxBlock marking missing headers and zero-op blocks;
 repair re-fetches via RPC. Repair shares live_sync's exact ingest

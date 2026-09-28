@@ -34,10 +34,11 @@
 #                the replay completes. The working cold-start stack (mongo
 #                with auth, steemd replaying block_log, ingest endpoint
 #                loopback-published) lives in steemdb-sync/test/docker-compose/.
-#   repair       gap-repair / rescan maintenance binary. Both binaries are
-#                built into the steemdb-sync image; run ad hoc, e.g.:
+#   repair       health-check / gap-repair / rescan maintenance binary. Both
+#                binaries are built into the steemdb-sync image; run ad hoc:
 #                  docker compose -f docker-compose.production.yml run --rm \
 #                    processor /app/repair -config /app/configs/config.yaml
+#                (default -mode=check is read-only; pass -mode=blocks to repair)
 #
 # Cold-start order (all-in-one box) — DATA HANDOFF IS A MANUAL STEP. The
 # cold-start stack (steemdb-sync/test/docker-compose/) brings its OWN mongo
