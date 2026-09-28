@@ -22,6 +22,15 @@ Verified against `steem` (`libraries/chain/steem_evaluator.cpp`,
 create an account. Steem accounts are never deleted, so the set of created
 accounts equals the set of existing accounts.
 
+Treasury note: `steem.dao` is genesis-created **only on testnet**
+(`database.cpp:3031`, `#ifdef IS_TEST_NET`). On mainnet it is a regular
+`account_create` (the name predates HF21, which merely resets its
+authorities) — covered by `AccountCreateHandler` like any other creation.
+
+Genesis accounts have no creation op, so nothing in the op stream can
+introduce them: `discover-accounts` must seed the four genesis names
+explicitly in addition to scanning creation ops.
+
 ## Why this rule exists
 
 `custom_json` follow payloads carry a user-controlled `following` string the

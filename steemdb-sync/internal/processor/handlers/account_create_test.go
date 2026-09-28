@@ -70,6 +70,32 @@ func TestPowHandler_QueuesWorkerCreate(t *testing.T) {
 	}
 }
 
+func TestPowHandler_Pow2QueuesWorkerCreate(t *testing.T) {
+	m := NewMongoInserter(nil)
+	m.BeginBatch(10)
+	defer m.EndBatch()
+
+	h := NewPowHandler(m)
+	// pow2 format: work is a static_variant serialized as [which, value],
+	// worker_account nested at work[1].input.worker_account
+	op := makeOp("pow2", 100, map[string]interface{}{
+		"work": []interface{}{
+			map[string]interface{}{},
+			map[string]interface{}{
+				"input": map[string]interface{}{
+					"worker_account": "minertwo",
+				},
+			},
+		},
+	})
+	if err := h.Handle(context.Background(), op, time.Now()); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if _, ok := m.createdAccounts["minertwo"]; !ok {
+		t.Fatal("pow2 must queue the nested worker for stub creation (mining created the account)")
+	}
+}
+
 func TestFollowHandler_NoAccountMarks(t *testing.T) {
 	m := NewMongoInserter(nil)
 	m.BeginBatch(10)
