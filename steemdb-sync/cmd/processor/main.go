@@ -76,6 +76,8 @@ func main() {
 	dispatcher.Register("convert", handlers.NewConvertHandler(inserter))
 	dispatcher.Register("transfer_to_vesting", handlers.NewVestingDepositHandler(inserter))
 	dispatcher.Register("fill_vesting_withdraw", handlers.NewVestingWithdrawHandler(inserter))
+	dispatcher.Register("withdraw_vesting", handlers.NewWithdrawVestingHandler(inserter))
+	dispatcher.Register("set_withdraw_vesting_route", handlers.NewWithdrawVestingHandler(inserter))
 	dispatcher.Register("comment_benefactor_reward", handlers.NewBenefactorRewardHandler(inserter))
 	dispatcher.Register("custom_json", handlers.NewCustomJSONHandler(inserter))
 	dispatcher.Register("feed_publish", handlers.NewFeedPublishHandler(inserter))
