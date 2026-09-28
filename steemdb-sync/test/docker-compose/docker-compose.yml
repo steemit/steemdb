@@ -29,6 +29,13 @@ services:
       context: ../..
       dockerfile: test/docker-compose/Dockerfile.cold-ingest
     container_name: cold-ingest-service
+    # Explicit command: the prebuilt CI image (steemit/steemdb-sync, from
+    # Dockerfile.sync) defaults to /app/processor — same image, different
+    # binary per service. When this stack runs from the CI image instead of
+    # the local Dockerfile.cold-ingest build (whose default CMD was
+    # cold_ingest), an implicit command silently starts a second processor
+    # and nothing listens on :8080 for the steemd ingest plugin.
+    command: ["/app/cold_ingest", "-config", "/app/configs/config.yaml"]
     ports:
       # Loopback-only host publish: the ingest endpoint is unauthenticated,
       # so it must not be reachable from the LAN/public internet. steemd

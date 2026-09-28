@@ -159,6 +159,10 @@ services:
     build:
       context: ./steemdb-sync
       dockerfile: Dockerfile.sync
+    # Explicit command: one image runs several binaries (Dockerfile.sync
+    # CMD happens to be processor, but pin it so a default-CMD change can
+    # never silently start a different binary here).
+    command: ["/app/processor", "-config", "/app/configs/config.yaml"]
     # MONGO_URI is mandatory: the config baked into the image carries the
     # auth'd TEST-stack URI and must be overridden in every deployment.
     environment:
