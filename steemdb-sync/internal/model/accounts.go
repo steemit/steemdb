@@ -21,6 +21,8 @@ var accountFields = []string{
 	"to_account",
 	"producer",
 	"witness",
+	"delegator",
+	"delegatee",
 	"comment_author",
 	"parent_author",
 	"recovering_account",
