@@ -51,7 +51,7 @@ func main() {
 		batchSize  int
 	)
 	flag.StringVar(&configPath, "config", "configs/config.yaml", "Path to configuration file")
-	flag.StringVar(&mode, "mode", "check", "Mode: check (run all data health checks, read-only — always start here), blocks (missing block repair), verify-accounts (ONE-OFF: delete account documents never created on chain, using the local op stream — no RPC), backfill-accounts (ONE-OFF: populate operations.accounts) or cleanup-accounts (ONE-OFF: delete account documents with invalid names). ONE-OFF modes patch historical data for bugs whose ingest path is already fixed; they are not expected to be needed again once their health check is green.")
+	flag.StringVar(&mode, "mode", "check", "Mode: check (run all data health checks, read-only — always start here), blocks (missing block repair), verify-accounts (ONE-OFF: delete account documents never created on chain, using the local op stream — no RPC), discover-accounts (ONE-OFF: insert stubs for created accounts missing from the collection — additive, no RPC), backfill-accounts (ONE-OFF: populate operations.accounts) or cleanup-accounts (ONE-OFF: delete account documents with invalid names). ONE-OFF modes patch historical data for bugs whose ingest path is already fixed; they are not expected to be needed again once their health check is green.")
 	flag.Uint64Var(&startBlock, "start", 0, "Start block number (0 = from block 1)")
 	flag.Uint64Var(&endBlock, "end", 0, "End block number (0 = use max_block from meta)")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run mode (scan only, don't repair)")
@@ -112,6 +112,28 @@ func main() {
 		return
 	}
 
+	// discover-accounts mode: ONE-OFF backfill of account stubs for accounts
+	// created on chain but missing from the collection (creation ops had no
+	// handler before the account-doc-creation rule). Additive only.
+	if mode == "discover-accounts" {
+		res, err := discoverAccounts(ctx, newMongoDiscoverSource(mongoClient.Database()), batchSize, dryRun, log.Default())
+		if err != nil {
+			log.Fatalf("discover-accounts failed: %v", err)
+		}
+		log.Printf("discover-accounts complete: created set %d, existing %d, missing %d, inserted %d",
+			res.CreatedN, res.ExistingN, res.Missing, res.Inserted)
+		if res.AnomalyCount > 0 {
+			log.Printf("WARNING: %d full account docs have no creation op in the local op stream (possible locally missing creation ops) — samples:", res.AnomalyCount)
+			for _, id := range res.AnomalySamples {
+				log.Printf("  anomaly _id: %q", id)
+			}
+		}
+		if dryRun && res.Missing > 0 {
+			log.Println("Dry run mode: exiting without insertion (drop -dry-run to insert)")
+		}
+		return
+	}
+
 	// Backfill mode: one-time migration that populates operations.accounts
 	// for data ingested before the field existed.
 	if mode == "backfill-accounts" {
@@ -158,7 +180,7 @@ func main() {
 		return
 	}
 	if mode != "blocks" {
-		log.Fatalf("Unknown mode: %s (supported: check, blocks, verify-accounts, backfill-accounts, cleanup-accounts)", mode)
+		log.Fatalf("Unknown mode: %s (supported: check, blocks, verify-accounts, discover-accounts, backfill-accounts, cleanup-accounts)", mode)
 	}
 
 	// Determine scan range

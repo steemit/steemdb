@@ -47,6 +47,13 @@ type HealthStore interface {
 	// (no name field) — phantom accounts queued from user-controlled payloads
 	// that do not exist on chain.
 	CountAccountStubs(ctx context.Context) (int64, error)
+	// RecentCreatedNames returns the new_account_name of the most recent
+	// creation ops (account_create / account_create_with_delegation /
+	// create_claimed_account), newest first, capped at limit.
+	RecentCreatedNames(ctx context.Context, limit int) ([]string, error)
+	// CountAccountsMissingByIDs counts how many of the given account names
+	// have no document in the account collection.
+	CountAccountsMissingByIDs(ctx context.Context, ids []string) (int64, error)
 }
 
 // DefaultChecks returns every registered health check. A new repair mode is
@@ -58,6 +65,7 @@ func DefaultChecks(store HealthStore) []HealthCheck {
 		&operationsAccountsCheck{store: store},
 		&invalidAccountIDsCheck{store: store},
 		&accountStubsCheck{store: store},
+		&accountCreationCoverageCheck{store: store},
 	}
 }
 
@@ -236,6 +244,42 @@ func (c *accountStubsCheck) Run(ctx context.Context) (*Finding, error) {
 	return f, nil
 }
 
+// --- account-creation-coverage (repair -mode=discover-accounts) ---
+
+// accountCreationCoverageCheck verifies that recently created accounts are
+// present in the account collection (a stub is enough — the refresher fills
+// it). It samples the newest 1000 creation ops: cheap, index-backed, and —
+// per the paired-check rule — fresh databases must never fail it, which the
+// AccountCreateHandler guarantees post-#90.
+type accountCreationCoverageCheck struct{ store HealthStore }
+
+func (c *accountCreationCoverageCheck) Name() string       { return "account-creation-coverage" }
+func (c *accountCreationCoverageCheck) RepairMode() string { return "discover-accounts" }
+
+func (c *accountCreationCoverageCheck) Run(ctx context.Context) (*Finding, error) {
+	names, err := c.store.RecentCreatedNames(ctx, 1000)
+	if err != nil {
+		return nil, err
+	}
+	f := &Finding{Name: c.Name(), RepairMode: c.RepairMode()}
+	if len(names) == 0 {
+		f.Healthy = true
+		f.Summary = "no creation ops found"
+		return f, nil
+	}
+	missing, err := c.store.CountAccountsMissingByIDs(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	f.Healthy = missing == 0
+	f.Summary = fmt.Sprintf("sampled %d recent creations, %d missing from account collection", len(names), missing)
+	if !f.Healthy {
+		f.Details = append(f.Details,
+			"recent-creation sample; discover-accounts rebuilds the full coverage from the local op stream (inserts stubs, idempotent)")
+	}
+	return f, nil
+}
+
 // --- MongoHealthStore: HealthStore backed by the real MongoDB client ---
 
 // MongoHealthStore implements HealthStore against the production MongoDB.
@@ -300,4 +344,47 @@ func (s *MongoHealthStore) CountAccountStubs(ctx context.Context) (int64, error)
 	return s.client.Database().Collection("account").CountDocuments(ctx, bson.M{
 		"name": bson.M{"$exists": false},
 	})
+}
+
+// RecentCreatedNames implements HealthStore.
+func (s *MongoHealthStore) RecentCreatedNames(ctx context.Context, limit int) ([]string, error) {
+	cur, err := s.client.Database().Collection("operations").Find(ctx,
+		bson.M{"op_type": bson.M{"$in": []string{"account_create", "account_create_with_delegation", "create_claimed_account"}}},
+		options.Find().
+			SetSort(bson.M{"block_num": -1}).
+			SetLimit(int64(limit)).
+			SetProjection(bson.M{"op_value.new_account_name": 1}))
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	names := make([]string, 0, limit)
+	for cur.Next(ctx) {
+		var doc struct {
+			OpValue struct {
+				Name string `bson:"new_account_name"`
+			} `bson:"op_value"`
+		}
+		if err := cur.Decode(&doc); err != nil {
+			return nil, err
+		}
+		if doc.OpValue.Name != "" {
+			names = append(names, doc.OpValue.Name)
+		}
+	}
+	return names, cur.Err()
+}
+
+// CountAccountsMissingByIDs implements HealthStore.
+func (s *MongoHealthStore) CountAccountsMissingByIDs(ctx context.Context, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	present, err := s.client.Database().Collection("account").CountDocuments(ctx, bson.M{
+		"_id": bson.M{"$in": ids},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(ids)) - present, nil
 }
