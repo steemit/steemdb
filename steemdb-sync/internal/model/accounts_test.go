@@ -99,6 +99,30 @@ func TestExtractAccounts(t *testing.T) {
 			want: []string{"judy", "kyle"},
 		},
 		{
+			name: "pow2 appbase map form extracts nested worker",
+			op: map[string]interface{}{
+				"work": map[string]interface{}{
+					"type": "pow2",
+					"value": map[string]interface{}{
+						"input": map[string]interface{}{"worker_account": "miner1"},
+					},
+				},
+			},
+			want: []string{"miner1"},
+		},
+		{
+			name: "pow2 condenser list form extracts nested worker",
+			op: map[string]interface{}{
+				"work": []interface{}{
+					map[string]interface{}{},
+					map[string]interface{}{
+						"input": map[string]interface{}{"worker_account": "miner2"},
+					},
+				},
+			},
+			want: []string{"miner2"},
+		},
+		{
 			name: "nil op_value returns nil",
 			op:   nil,
 			want: nil,
