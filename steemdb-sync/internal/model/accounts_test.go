@@ -114,7 +114,7 @@ func TestExtractAccounts(t *testing.T) {
 			name: "pow2 condenser list form extracts nested worker",
 			op: map[string]interface{}{
 				"work": []interface{}{
-					map[string]interface{}{},
+					float64(0), // static_variant "which" index in real condenser data
 					map[string]interface{}{
 						"input": map[string]interface{}{"worker_account": "miner2"},
 					},

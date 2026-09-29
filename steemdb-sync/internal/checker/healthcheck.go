@@ -316,11 +316,16 @@ func (s *MongoHealthStore) BlockStats(ctx context.Context) (int64, uint32, uint3
 	return count, minDoc.ID, maxDoc.ID, nil
 }
 
-// CountOperationsMissingAccounts implements HealthStore.
+// CountOperationsMissingAccounts implements HealthStore. Matches both stale
+// shapes: the field missing entirely, or pow/pow2 rows with an explicit
+// empty array (pre-fix extraction; the miner is always present for those).
 func (s *MongoHealthStore) CountOperationsMissingAccounts(ctx context.Context, fromBlock, toBlock uint32) (int64, error) {
 	return s.client.Database().Collection("operations").CountDocuments(ctx, bson.M{
 		"block_num": bson.M{"$gte": fromBlock, "$lte": toBlock},
-		"accounts":  bson.M{"$exists": false},
+		"$or": bson.A{
+			bson.M{"accounts": bson.M{"$exists": false}},
+			bson.M{"op_type": bson.M{"$in": []string{"pow", "pow2"}}, "accounts": bson.M{"$size": 0}},
+		},
 	})
 }
 

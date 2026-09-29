@@ -92,6 +92,10 @@ func TestDiscoverAccountsAnomalyReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discoverAccounts: %v", err)
 	}
+	// genesis names are in the created set but not in this fake collection
+	if res.Missing != len(genesisAccounts) {
+		t.Errorf("missing = %d, want %d (genesis accounts)", res.Missing, len(genesisAccounts))
+	}
 	if res.AnomalyCount != 1 || res.AnomalySamples[0] != "ghost-fulldoc" {
 		t.Errorf("anomalies = %d %v, want 1 [ghost-fulldoc]", res.AnomalyCount, res.AnomalySamples)
 	}

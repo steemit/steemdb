@@ -24,6 +24,7 @@ var expectedIndexes = []struct {
 	{"operations", bson.D{{Key: "block_num", Value: 1}}, nil},
 	{"operations", bson.D{{Key: "trx_id", Value: 1}}, nil},
 	{"operations", bson.D{{Key: "op_type", Value: 1}}, nil},
+	{"operations", bson.D{{Key: "op_type", Value: 1}, {Key: "block_num", Value: -1}}, nil},
 	{"operations", bson.D{{Key: "virtual", Value: 1}}, nil},
 	{"operations", bson.D{{Key: "accounts", Value: 1}, {Key: "block_num", Value: -1}}, nil},
 	// Pattern-B write-path indexes (must lead with the handler filter)

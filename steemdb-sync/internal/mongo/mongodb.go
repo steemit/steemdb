@@ -183,6 +183,18 @@ func indexInventory() []indexSpec {
 			model:      mongo.IndexModel{Keys: bson.D{{Key: "op_type", Value: 1}}},
 		},
 		{
+			// checker.RecentCreatedNames (repair -mode=check
+			// account-creation-coverage): op_type equality + latest-first
+			// block_num sort. Without the compound key the query either
+			// top-k sorts ~1.7M creation-op docs or walks the reversed
+			// block_num index filtering on op_type.
+			collection: "operations",
+			model: mongo.IndexModel{Keys: bson.D{
+				{Key: "op_type", Value: 1},
+				{Key: "block_num", Value: -1},
+			}},
+		},
+		{
 			// Web stats: splitting virtual vs user operations.
 			collection: "operations",
 			model:      mongo.IndexModel{Keys: bson.D{{Key: "virtual", Value: 1}}},
@@ -482,7 +494,14 @@ func (c *Client) BackfillOperationAccounts(ctx context.Context, batchSize int) (
 			SetLimit(int64(batchSize)).
 			SetProjection(bson.M{"op_type": 1, "op_value": 1})
 
-		cursor, err := c.operations.Find(ctx, bson.M{"accounts": bson.M{"$exists": false}}, findOptions)
+		// Two stale shapes: field missing entirely (pre-backfill data), or
+		// pow/pow2 rows with an explicit empty array (extracted before the
+		// nested worker_account was covered — the miner is always present
+		// for those ops, so empty means stale).
+		cursor, err := c.operations.Find(ctx, bson.M{"$or": bson.A{
+			bson.M{"accounts": bson.M{"$exists": false}},
+			bson.M{"op_type": bson.M{"$in": []string{"pow", "pow2"}}, "accounts": bson.M{"$size": 0}},
+		}}, findOptions)
 		if err != nil {
 			return total, errors.Wrap(err, "failed to find operations without accounts")
 		}
