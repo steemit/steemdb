@@ -232,7 +232,7 @@ func TestExtractWorkerAccount_PowFormat(t *testing.T) {
 		"worker_account": "miner1",
 		"work":           map[string]interface{}{"nonce": "12345"},
 	}
-	account := extractWorkerAccount(v)
+	account := ExtractWorkerAccount(v)
 	if account != "miner1" {
 		t.Errorf("pow worker_account = %q, want miner1", account)
 	}
@@ -250,7 +250,7 @@ func TestExtractWorkerAccount_Pow2Format(t *testing.T) {
 			},
 		},
 	}
-	account := extractWorkerAccount(v)
+	account := ExtractWorkerAccount(v)
 	if account != "miner2" {
 		t.Errorf("pow2 worker_account = %q, want miner2", account)
 	}
@@ -259,7 +259,7 @@ func TestExtractWorkerAccount_Pow2Format(t *testing.T) {
 func TestExtractWorkerAccount_MissingWork(t *testing.T) {
 	// No work field, no worker_account
 	v := map[string]interface{}{}
-	account := extractWorkerAccount(v)
+	account := ExtractWorkerAccount(v)
 	if account != "" {
 		t.Errorf("missing work: worker_account = %q, want empty", account)
 	}
@@ -271,7 +271,7 @@ func TestExtractWorkerAccount_Pow2Malformed(t *testing.T) {
 		"work":         []interface{}{"just a string"},
 		"worker_account": "fallback",
 	}
-	account := extractWorkerAccount(v)
+	account := ExtractWorkerAccount(v)
 	if account != "fallback" {
 		t.Errorf("malformed pow2 should fall back to top-level: got %q, want fallback", account)
 	}

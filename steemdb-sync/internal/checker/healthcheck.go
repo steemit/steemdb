@@ -203,15 +203,20 @@ func (c *invalidAccountIDsCheck) Run(ctx context.Context) (*Finding, error) {
 
 // --- phantom-account-stubs (no repair mode yet) ---
 
-// accountStubsCheck counts account documents that are dirty-mark stubs of
-// accounts that do not exist on chain (queued from user-controlled
-// custom_json payloads). They poison the AccountRefresher queue: the
-// refresher fetches dirty ids in natural order, RPC never returns phantom
-// accounts, and the same phantoms block the head of the queue forever.
+// accountStubsCheck counts account documents that were never refreshed
+// (stub docs with no name field). Most stubs are real created accounts
+// awaiting their first refresh; the harmful subset is never-created
+// phantoms (queued from user-controlled custom_json payloads before the
+// account-doc-creation rule — docs/rules/account-doc-creation.md), which
+// head-of-line block the AccountRefresher: it fetches dirty ids in natural
+// order, get_accounts never returns phantoms, and the same ids occupy the
+// queue head forever. verify-accounts (dry-run first) reports the exact
+// phantom count and deletes them; the remaining real stubs drain through
+// the normal refresher once the queue unblocks.
 type accountStubsCheck struct{ store HealthStore }
 
 func (c *accountStubsCheck) Name() string       { return "phantom-account-stubs" }
-func (c *accountStubsCheck) RepairMode() string { return "" }
+func (c *accountStubsCheck) RepairMode() string { return "verify-accounts" }
 
 func (c *accountStubsCheck) Run(ctx context.Context) (*Finding, error) {
 	n, err := c.store.CountAccountStubs(ctx)
@@ -219,13 +224,14 @@ func (c *accountStubsCheck) Run(ctx context.Context) (*Finding, error) {
 		return nil, err
 	}
 	f := &Finding{
-		Name:    c.Name(),
-		Healthy: n == 0,
-		Summary: fmt.Sprintf("account stub docs (no name field, not on chain): %d", n),
+		Name:       c.Name(),
+		RepairMode: c.RepairMode(),
+		Healthy:    n == 0,
+		Summary:    fmt.Sprintf("unrefreshed account stub docs (no name field): %d", n),
 	}
 	if !f.Healthy {
 		f.Details = append(f.Details,
-			"stubs starve the AccountRefresher queue (head-of-line blocking); deleting them is safe — they carry no chain data")
+			"most stubs are real accounts awaiting first refresh and drain via the AccountRefresher; never-created phantoms among them block the queue head — run -mode=verify-accounts (dry-run reports the exact phantom count), then re-check")
 	}
 	return f, nil
 }
