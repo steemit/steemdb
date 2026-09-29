@@ -43,11 +43,21 @@ type verifySource interface {
 	// creation op in the operations collection.
 	StreamCreatedNames(ctx context.Context, fn func(name string) error) error
 	// LastAccountID returns the alphabetically last account _id (startup
-	// landmark).
+	// landmark). "" means the collection is empty.
 	LastAccountID(ctx context.Context) (string, error)
-	// StreamAccountIDs invokes fn for every account _id <= landmark in
-	// ascending order.
+	// StreamAccountIDs invokes fn for every STUB account _id (name field
+	// absent) <= landmark in ascending order. Restricting the scan to stubs
+	// is the blast-radius guard (review P1): a full document of a real
+	// account is never a deletion candidate, so an incomplete op stream can
+	// at worst delay a stub's refresh, not destroy account data.
 	StreamAccountIDs(ctx context.Context, landmark string, fn func(id string) error) error
+	// ConfirmNotCreated re-verifies candidates immediately before deletion
+	// (review P2): returns the ids that have NO creation op referencing them
+	// in the operations accounts index. This closes the race where an
+	// account is created while the scan is running — its stub was inserted
+	// by the processor after the created set was built, but its creation op
+	// is already in operations (the processor derives from it).
+	ConfirmNotCreated(ctx context.Context, ids []string) ([]string, error)
 	// DeleteAccounts deletes account documents by _id, returning the count.
 	DeleteAccounts(ctx context.Context, ids []string) (int64, error)
 }
@@ -87,17 +97,31 @@ func verifyAccounts(ctx context.Context, src verifySource, batchSize int, dryRun
 	if err != nil {
 		return nil, fmt.Errorf("failed to read startup landmark: %w", err)
 	}
+	if landmark == "" {
+		logger.Printf("Account collection is empty — nothing to verify")
+		return &verifyResult{CreatedN: len(created)}, nil
+	}
 	logger.Printf("Startup landmark (last account _id): %q", landmark)
 
-	// 3. Outer loop: stream ids alphabetically; inner loop: batches.
+	// 3. Outer loop: stream stub ids alphabetically; inner loop: batches.
+	// Candidates are re-verified against the operations accounts index right
+	// before deletion (review P2) so an account created mid-run is never
+	// deleted.
 	res := &verifyResult{CreatedN: len(created)}
 	batch := make([]string, 0, batchSize)
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
 		}
+		confirmed, err := src.ConfirmNotCreated(ctx, batch)
+		if err != nil {
+			return fmt.Errorf("failed to re-verify candidates: %w", err)
+		}
+		if len(confirmed) != len(batch) {
+			logger.Printf("Re-verification spared %d of %d candidates (creation op appeared since startup)", len(batch)-len(confirmed), len(batch))
+		}
 		if !dryRun {
-			n, err := src.DeleteAccounts(ctx, batch)
+			n, err := src.DeleteAccounts(ctx, confirmed)
 			if err != nil {
 				return fmt.Errorf("failed to delete batch: %w", err)
 			}
@@ -120,7 +144,7 @@ func verifyAccounts(ctx context.Context, src verifySource, batchSize int, dryRun
 			}
 		}
 		if res.Checked%50000 == 0 {
-			logger.Printf("Progress: checked %d account ids, phantom %d", res.Checked, res.Phantom)
+			logger.Printf("Progress: checked %d stub ids, phantom %d", res.Checked, res.Phantom)
 		}
 		return nil
 	})
@@ -202,16 +226,21 @@ func (s *mongoVerifySource) LastAccountID(ctx context.Context) (string, error) {
 	}
 	err := s.db.Collection("account").FindOne(ctx, bson.M{},
 		options.FindOne().SetSort(bson.M{"_id": -1}).SetProjection(bson.M{"_id": 1})).Decode(&doc)
+	if err == mongo.ErrNoDocuments {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
 	return doc.ID, nil
 }
 
-// StreamAccountIDs implements verifySource.
+// StreamAccountIDs implements verifySource. Only STUB documents (name field
+// absent) are streamed — the blast-radius guard: full documents of real
+// accounts are never deletion candidates.
 func (s *mongoVerifySource) StreamAccountIDs(ctx context.Context, landmark string, fn func(id string) error) error {
 	cur, err := s.db.Collection("account").Find(ctx,
-		bson.M{"_id": bson.M{"$lte": landmark}},
+		bson.M{"_id": bson.M{"$lte": landmark}, "name": bson.M{"$exists": false}},
 		options.Find().SetSort(bson.M{"_id": 1}).SetProjection(bson.M{"_id": 1}).SetNoCursorTimeout(true))
 	if err != nil {
 		return err
@@ -229,6 +258,34 @@ func (s *mongoVerifySource) StreamAccountIDs(ctx context.Context, landmark strin
 		}
 	}
 	return cur.Err()
+}
+
+// ConfirmNotCreated implements verifySource. One indexed query per batch:
+// any id referenced by a creation op's accounts field (the multikey index
+// covers new_account_name and pow/pow2's worker_account) is spared.
+func (s *mongoVerifySource) ConfirmNotCreated(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	creationTypes := []string{"account_create", "account_create_with_delegation", "create_claimed_account", "pow", "pow2"}
+	found, err := s.db.Collection("operations").Distinct(ctx, "accounts",
+		bson.M{"op_type": bson.M{"$in": creationTypes}, "accounts": bson.M{"$in": ids}})
+	if err != nil {
+		return nil, err
+	}
+	createdNow := make(map[string]struct{}, len(found))
+	for _, v := range found {
+		if name, ok := v.(string); ok {
+			createdNow[name] = struct{}{}
+		}
+	}
+	confirmed := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := createdNow[id]; !ok {
+			confirmed = append(confirmed, id)
+		}
+	}
+	return confirmed, nil
 }
 
 // DeleteAccounts implements verifySource.

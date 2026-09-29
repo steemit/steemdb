@@ -26,6 +26,12 @@ expect green.
 - **Repairs stay idempotent.** A repair run on healthy data must converge to
   a no-op (upserts, field-existence guards, dry-run defaults for destructive
   modes). The check is the gate; idempotency is the safety net.
+- **A repair may green its check indirectly.** Some repairs unblock a
+  background process instead of fixing the measured value themselves (e.g.
+  verify-accounts deletes the never-created phantoms blocking the
+  AccountRefresher queue head; the phantom-account-stubs check then drains
+  to green over hours as real stubs refresh). In that case the check's
+  details must say so, so nobody re-runs the repair expecting instant green.
 - **Cold-start fixes land together.** When a data bug is fixed, fix the
   ingest/processor path in the same change so new databases never fail the
   check — the repair mode then exists only for legacy data.

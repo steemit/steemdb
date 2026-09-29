@@ -12,7 +12,10 @@ type fakeVerifySource struct {
 	createdNames []string
 	accountIDs   []string
 	landmark     string
-	deleted      []string
+	// referencedNow simulates creation ops that landed after startup
+	// (the mid-run creation race); ConfirmNotCreated spares these.
+	referencedNow map[string]bool
+	deleted       []string
 }
 
 func (f *fakeVerifySource) StreamCreatedNames(ctx context.Context, fn func(name string) error) error {
@@ -49,6 +52,37 @@ func (f *fakeVerifySource) StreamAccountIDs(ctx context.Context, landmark string
 func (f *fakeVerifySource) DeleteAccounts(ctx context.Context, ids []string) (int64, error) {
 	f.deleted = append(f.deleted, ids...)
 	return int64(len(ids)), nil
+}
+
+func (f *fakeVerifySource) ConfirmNotCreated(ctx context.Context, ids []string) ([]string, error) {
+	var confirmed []string
+	for _, id := range ids {
+		if !f.referencedNow[id] {
+			confirmed = append(confirmed, id)
+		}
+	}
+	return confirmed, nil
+}
+
+func TestVerifyAccountsReVerificationSparesMidRunCreations(t *testing.T) {
+	// "newacct" was not in the startup created set, but its creation op
+	// landed while the scan ran — the pre-delete re-verification must spare
+	// it even though it looks like a phantom.
+	src := &fakeVerifySource{
+		createdNames:  []string{"alice"},
+		accountIDs:    []string{"alice", "newacct", "p1"},
+		referencedNow: map[string]bool{"newacct": true},
+	}
+	res, err := verifyAccounts(context.Background(), src, 500, false, log.Default())
+	if err != nil {
+		t.Fatalf("verifyAccounts: %v", err)
+	}
+	if res.Phantom != 2 {
+		t.Errorf("phantom = %d, want 2", res.Phantom)
+	}
+	if res.Deleted != 1 || len(src.deleted) != 1 || src.deleted[0] != "p1" {
+		t.Errorf("deleted = %v, want [p1] only (mid-run created account spared)", src.deleted)
+	}
 }
 
 func TestVerifyAccountsDryRun(t *testing.T) {

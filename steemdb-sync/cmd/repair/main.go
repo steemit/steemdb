@@ -90,24 +90,15 @@ func main() {
 	}
 
 	// verify-accounts mode: ONE-OFF phantom-account cleanup. Destructive, so
-	// it runs as a dry run unless -dry-run=false is passed explicitly (same
-	// guard as cleanup-accounts).
+	// it runs as a dry run unless -dry-run=false is passed explicitly.
 	if mode == "verify-accounts" {
-		dryRunSet := false
-		flag.Visit(func(f *flag.Flag) {
-			if f.Name == "dry-run" {
-				dryRunSet = true
-			}
-		})
-		if !dryRunSet {
-			dryRun = true
-		}
+		dryRun = destructiveDryRun(dryRun)
 
 		res, err := verifyAccounts(ctx, newMongoVerifySource(mongoClient.Database()), batchSize, dryRun, log.Default())
 		if err != nil {
 			log.Fatalf("verify-accounts failed: %v", err)
 		}
-		log.Printf("verify-accounts complete: checked %d account ids, %d phantom (never created on chain)", res.Checked, res.Phantom)
+		log.Printf("verify-accounts complete: checked %d stub ids, %d phantom (never created on chain)", res.Checked, res.Phantom)
 		for _, id := range res.Samples {
 			log.Printf("  phantom _id: %q", id)
 		}
@@ -137,15 +128,7 @@ func main() {
 	// custom_json payloads before name validation existed). Destructive, so
 	// it runs as a dry run unless -dry-run=false is passed explicitly.
 	if mode == "cleanup-accounts" {
-		dryRunSet := false
-		flag.Visit(func(f *flag.Flag) {
-			if f.Name == "dry-run" {
-				dryRunSet = true
-			}
-		})
-		if !dryRunSet {
-			dryRun = true
-		}
+		dryRun = destructiveDryRun(dryRun)
 
 		invalid, err := mongoClient.ListInvalidAccountIDs(ctx, handlers.IsValidAccountName)
 		if err != nil {
@@ -356,4 +339,20 @@ func repairBlock(ctx context.Context, fetcher rpcFetcher, writer blockWriter, bl
 	}
 
 	return len(modelTxs), len(modelOps), nil
+}
+
+// destructiveDryRun forces dry-run for destructive one-off modes unless the
+// operator passed -dry-run explicitly (i.e. typed -dry-run=false). Deletion
+// must never be the default outcome of a bare invocation.
+func destructiveDryRun(dryRun bool) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "dry-run" {
+			set = true
+		}
+	})
+	if !set {
+		return true
+	}
+	return dryRun
 }
