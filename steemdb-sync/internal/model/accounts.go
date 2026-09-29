@@ -69,5 +69,59 @@ func ExtractAccounts(opValue map[string]interface{}) []string {
 		}
 	}
 
+	// pow/pow2 carry the miner account nested inside "work"; the account
+	// fields above only see top-level keys.
+	if worker := ExtractWorkerAccount(opValue); worker != "" {
+		add(worker)
+	}
+
 	return accounts
+}
+
+// ExtractWorkerAccount gets the worker (miner) account from a pow/pow2
+// operation's op_value. Three shapes exist in the wild:
+//
+//   - pow: top-level worker_account field (work is a map of proof data)
+//   - pow2, condenser serialization: work is a list [which, value] with
+//     value.input.worker_account
+//   - pow2, appbase/plugin serialization: work is a map
+//     {type: "pow2"|"equihash_pow", value: {input: {worker_account}}}
+//
+// Returns "" when no worker can be located.
+func ExtractWorkerAccount(v map[string]interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch work := v["work"].(type) {
+	case []interface{}:
+		if len(work) >= 2 {
+			if inner, ok := work[1].(map[string]interface{}); ok {
+				if account := workerFromPowValue(inner); account != "" {
+					return account
+				}
+			}
+		}
+	case map[string]interface{}:
+		if val, ok := work["value"].(map[string]interface{}); ok {
+			if account := workerFromPowValue(val); account != "" {
+				return account
+			}
+		}
+	}
+	// pow (legacy): top-level worker_account.
+	if s, ok := v["worker_account"].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// workerFromPowValue reads value.input.worker_account from an unwrapped
+// pow2 work variant.
+func workerFromPowValue(val map[string]interface{}) string {
+	if input, ok := val["input"].(map[string]interface{}); ok {
+		if account, ok := input["worker_account"].(string); ok {
+			return account
+		}
+	}
+	return ""
 }

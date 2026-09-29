@@ -197,6 +197,7 @@ go build -o ../bin/repair ./cmd/repair
 ../bin/repair -config configs/config.yaml -mode cleanup-accounts -dry-run=false # Actually delete them
 ../bin/repair -config configs/config.yaml -mode verify-accounts   # Report account stubs never created on chain (dry run by default)
 ../bin/repair -config configs/config.yaml -mode verify-accounts -dry-run=false # Delete them (candidates re-verified per batch before deletion)
+../bin/repair -config configs/config.yaml -mode discover-accounts # Insert stubs for created-but-missing accounts (additive)
 ```
 
 ## Metrics

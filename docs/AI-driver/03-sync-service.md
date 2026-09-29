@@ -127,7 +127,10 @@ paired check** (`docs/rules/repair-health-checks.md`). Current checks:
 `phantom-account-stubs` (→ `verify-accounts`: ONE-OFF local-only cleanup —
 builds the created-accounts set from the op stream (3 creation ops +
 pow/pow2 workers + genesis seed), streams account _ids alphabetically up to
-a startup landmark, deletes ids never created on chain; zero RPC).
+a startup landmark, deletes ids never created on chain; zero RPC),
+`account-creation-coverage` (recent-creation sample → `discover-accounts`:
+ONE-OFF additive backfill of stubs for created-but-missing accounts, with a
+side report of full docs lacking any local creation op).
 
 Scanner walks 1..maxBlock marking missing headers and zero-op blocks;
 repair re-fetches via RPC. Repair shares live_sync's exact ingest

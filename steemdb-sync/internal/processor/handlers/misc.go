@@ -179,19 +179,10 @@ func (h *PowHandler) Handle(ctx context.Context, op *model.Operation, blockTS ti
 }
 
 // ExtractWorkerAccount gets the worker account from a pow/pow2 operation.
-// pow2: work is a list [props, {input: {worker_account: ...}}]
-// pow:  work is a map, worker_account is a top-level field
+// Delegates to model.ExtractWorkerAccount, which covers all three
+// serializations: pow top-level field, pow2 condenser list form
+// ([which, value]), and pow2 appbase/plugin map form
+// ({type: ..., value: {input: {worker_account}}}).
 func ExtractWorkerAccount(v map[string]interface{}) string {
-	// Check if work is a list (pow2 format)
-	if work, ok := v["work"].([]interface{}); ok && len(work) >= 2 {
-		if inner, ok := work[1].(map[string]interface{}); ok {
-			if input, ok := inner["input"].(map[string]interface{}); ok {
-				if account, ok := input["worker_account"].(string); ok {
-					return account
-				}
-			}
-		}
-	}
-	// Fallback: top-level worker_account (pow format)
-	return GetString(v, "worker_account")
+	return model.ExtractWorkerAccount(v)
 }

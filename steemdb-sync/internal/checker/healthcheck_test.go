@@ -7,14 +7,16 @@ import (
 )
 
 type fakeHealthStore struct {
-	count         int64
-	minBlock      uint32
-	maxBlock      uint32
-	missingOld    int64
-	missingNew    int64
-	invalidIDs    []string
-	stubCount     int64
-	blockStatsErr error
+	count           int64
+	minBlock        uint32
+	maxBlock        uint32
+	missingOld      int64
+	missingNew      int64
+	invalidIDs      []string
+	stubCount       int64
+	recentCreated   []string
+	presentAccounts map[string]bool
+	blockStatsErr   error
 }
 
 func (f *fakeHealthStore) BlockStats(ctx context.Context) (int64, uint32, uint32, error) {
@@ -34,6 +36,20 @@ func (f *fakeHealthStore) InvalidAccountIDs(ctx context.Context) ([]string, erro
 
 func (f *fakeHealthStore) CountAccountStubs(ctx context.Context) (int64, error) {
 	return f.stubCount, nil
+}
+
+func (f *fakeHealthStore) RecentCreatedNames(ctx context.Context, limit int) ([]string, error) {
+	return f.recentCreated, nil
+}
+
+func (f *fakeHealthStore) CountAccountsMissingByIDs(ctx context.Context, ids []string) (int64, error) {
+	var missing int64
+	for _, id := range ids {
+		if !f.presentAccounts[id] {
+			missing++
+		}
+	}
+	return missing, nil
 }
 
 func TestBlockContinuityCheck(t *testing.T) {
@@ -119,6 +135,29 @@ func TestAccountStubsCheck(t *testing.T) {
 	}
 	if f.RepairMode != "verify-accounts" {
 		t.Errorf("RepairMode = %q, want verify-accounts", f.RepairMode)
+	}
+}
+
+func TestAccountCreationCoverageCheck(t *testing.T) {
+	store := &fakeHealthStore{
+		recentCreated:   []string{"alice", "bob", "carol"},
+		presentAccounts: map[string]bool{"alice": true, "bob": true},
+	}
+	f, err := (&accountCreationCoverageCheck{store: store}).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if f.Healthy {
+		t.Error("expected unhealthy with a missing recent creation")
+	}
+	if f.RepairMode != "discover-accounts" {
+		t.Errorf("RepairMode = %q, want discover-accounts", f.RepairMode)
+	}
+
+	store.presentAccounts["carol"] = true
+	f, _ = (&accountCreationCoverageCheck{store: store}).Run(context.Background())
+	if !f.Healthy {
+		t.Error("expected healthy once all recent creations are present")
 	}
 }
 
