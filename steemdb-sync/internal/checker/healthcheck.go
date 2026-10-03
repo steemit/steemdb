@@ -364,6 +364,7 @@ func (s *MongoHealthStore) RecentCreatedNames(ctx context.Context, limit int) ([
 	}
 	defer cur.Close(ctx)
 	names := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
 	for cur.Next(ctx) {
 		var doc struct {
 			OpValue struct {
@@ -373,7 +374,14 @@ func (s *MongoHealthStore) RecentCreatedNames(ctx context.Context, limit int) ([
 		if err := cur.Decode(&doc); err != nil {
 			return nil, err
 		}
+		// Dedupe: orphan-block ops can record the same creation twice (same
+		// trx_id in an orphaned block and again in the canonical block), and
+		// the coverage check counts distinct accounts, not op records.
 		if doc.OpValue.Name != "" {
+			if _, ok := seen[doc.OpValue.Name]; ok {
+				continue
+			}
+			seen[doc.OpValue.Name] = struct{}{}
 			names = append(names, doc.OpValue.Name)
 		}
 	}
