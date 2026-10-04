@@ -235,6 +235,9 @@ services:
   # Refresher — tickers replacing legacy history.py + witnesses.py: witness
   # snapshots (30s), stats counters (5m), clients aggregation (1h), funds
   # snapshots (1h), optional full account rescan (off by default).
+  # The stats/clients/account-rescan tickers skip while the local data lags
+  # the chain head by >1000 blocks (catch-up gate), so partial-data
+  # aggregations and head-state account snapshots are never written mid-sync.
   # --------------------------------------------------------------------------
   steemdb-refresher:
     build:

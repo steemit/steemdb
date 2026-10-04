@@ -201,7 +201,7 @@ Two compose files cover two different purposes — pick deliberately:
 
 **Available Services (`docker-compose.yml`, dev):**
 - `steemdb-web` - Web API service with Nginx and frontend
-- `steemdb-refresher` - witness/stats/funds/clients snapshots
+- `steemdb-refresher` - witness/stats/funds/clients snapshots (stats/clients/account-rescan skip while the local data lags the chain head by >1000 blocks)
 - `mongo` - MongoDB database
 - `prometheus` / `grafana` - monitoring (scrapes the refresher metrics)
 
@@ -265,7 +265,7 @@ The production stack is the single-box, all-in-one topology described in
 | `steemdb-web` | REST API + WebSocket + Nginx + SPA (only published port) | - |
 | `processor` | `operations` -> derived collections (the only writer of posts/votes/...) | `:9092/metrics` |
 | `live-sync` | RPC catch-up + chain-head follow (started via the `live` profile) | `:9091/metrics` |
-| `steemdb-refresher` | witness/stats/funds/clients snapshots | `:9093/metrics` |
+| `steemdb-refresher` | witness/stats/funds/clients snapshots (stats/clients/account-rescan skip during catch-up) | `:9093/metrics` |
 | `mongo` | raw + derived data (sync side is the writer & index authority) | - |
 
 Shared-Mongo contract: the `steemdb` database is written by the sync side only;

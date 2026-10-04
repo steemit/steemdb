@@ -53,10 +53,14 @@ refresher:
     enabled: true
     interval: "30s"
   # stats: status transactions/operations activity counters (5m)
+  # Skipped while the local data lags the chain head by more than 1000 blocks
+  # (catch-up gate; same semantics as the processor's account refresher)
   stats:
     enabled: true
     interval: "5m"
   # clients: status.clients-snapshot + clients_history (1h)
+  # Skipped during catch-up (see stats note) — the per-day clients_history
+  # row is written once, so a partial-window day would stay wrong forever
   clients:
     enabled: true
     interval: "1h"

@@ -17,10 +17,17 @@ const clientsWindowDays = 90
 // clientsRefresher aggregates client usage from comment.json_metadata.app
 // (legacy history.py update_clients) into status.clients-snapshot (consumed by
 // the web labs/clients endpoint) and clients_history (daily record).
+//
+// Gated by the catch-up rule: the aggregation runs over the comment
+// collection, so a tick during catch-up computes a partial-window figure.
+// The overwrite-based snapshot (clients-snapshot) would self-heal, but the
+// per-day clients_history row is upsert-once — an under-counted day written
+// during catch-up would stay wrong forever.
 type clientsRefresher struct {
 	commentCol *mongo.Collection
 	statusCol  *mongo.Collection
 	historyCol *mongo.Collection
+	gate       *catchupGate
 }
 
 func newClientsRefresher(db *mongo.Database) *clientsRefresher {
@@ -28,10 +35,15 @@ func newClientsRefresher(db *mongo.Database) *clientsRefresher {
 		commentCol: db.Collection("comment"),
 		statusCol:  db.Collection("status"),
 		historyCol: db.Collection("clients_history"),
+		gate:       newCatchupGate(db),
 	}
 }
 
 func (c *clientsRefresher) tick(ctx context.Context) {
+	if skip, reason := c.gate.blocked(ctx); skip {
+		log.Printf("[Refresher:Clients] Skipped: %s", reason)
+		return
+	}
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -clientsWindowDays)
 
