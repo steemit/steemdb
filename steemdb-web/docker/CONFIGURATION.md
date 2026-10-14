@@ -82,6 +82,17 @@ environment:
 
 Note: The Go application uses Viper for configuration, which supports environment variable overrides. Check `pkg/utils/config.go` for supported environment variable names.
 
+### Google Analytics (`GA_ID`)
+
+The frontend SPA carries a Google Analytics (GA4) snippet with a placeholder measurement ID. At container start, `docker-entrypoint.sh` substitutes the `GA_ID` environment variable into `index.html` before starting Nginx.
+
+This is an open-source project, so **no measurement ID is baked into the image or the compose files** — the operator supplies it at runtime:
+
+- unset or empty → tracking disabled (default)
+- set to a `G-XXXXXXXXXX` ID → that ID is used
+
+In the production stack, set `GA_ID` in `.env` (gitignored) or export it before `docker compose up`. Changing `GA_ID` only requires a container restart (`docker compose restart steemdb-web`); no image rebuild is needed.
+
 ## Configuration Updates
 
 ### Hot Reload

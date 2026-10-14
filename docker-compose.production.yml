@@ -111,6 +111,10 @@
 #   web (steemdb-web/pkg/utils/config.go, viper BindEnv/AutomaticEnv):
 #     SERVER_MODE, SERVER_PORT, SERVER_HOST,
 #     DATABASE_MONGODB_URI (alias MONGODB_URI)
+#   web container entrypoint (steemdb-web/docker/docker-entrypoint.sh):
+#     GA_ID — Google Analytics measurement ID injected into the SPA at
+#     container start (open-source image: NO default baked in; set it in
+#     .env or unset/empty disables tracking)
 #
 # Setup: cp .env.production.example .env  (then edit; GRAFANA_ADMIN_PASSWORD
 # is required — the compose refuses to start with the placeholder unset).
@@ -134,6 +138,10 @@ services:
       # switches gin out of debug mode.
       - SERVER_MODE=production
       - DATABASE_MONGODB_URI=${WEB_MONGODB_URI:-mongodb://mongo:27017/}
+      # Google Analytics measurement ID for the SPA (see header comment).
+      # No baked-in default: set GA_ID in .env (gitignored) to enable;
+      # unset or empty disables tracking.
+      - GA_ID=${GA_ID-}
     volumes:
       # Host-side config; edit and `docker compose restart steemdb-web`.
       - ./steemdb-web/configs:/app/configs:ro

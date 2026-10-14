@@ -10,6 +10,9 @@ services:
     environment:
       - SERVER_MODE=production
       - DATABASE_MONGODB_URI=mongodb://mongo:27017/
+      # Google Analytics measurement ID (no default anywhere — set GA_ID on
+      # the host to enable; unset/empty disables tracking).
+      - GA_ID=${GA_ID-}
     volumes:
       # Mount configuration directory from host to container
       # Edit steemdb-web/configs/config.yaml on host to change application settings

@@ -72,12 +72,20 @@ COPY --from=go-builder /app/configs ./configs
 # Copy frontend build artifacts
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 
+# Keep a pristine copy of index.html: the entrypoint re-renders it with the
+# runtime GA_ID env var on every container start (idempotent across restarts).
+RUN cp /usr/share/nginx/html/index.html /app/index.html.tpl
+
 # Copy Nginx configuration
 COPY steemdb-web/docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY steemdb-web/docker/nginx/security-headers.conf /etc/nginx/security-headers.conf
 
 # Copy Supervisord configuration
 COPY steemdb-web/docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy the container entrypoint (GA_ID injection, then supervisord)
+COPY steemdb-web/docker/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Create log directories and set permissions
 RUN chown -R steemdb:steemdb /app /var/log/steemdb-web && \
@@ -91,5 +99,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -f http://localhost/health || exit 1
 
-# Run supervisord
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Run the entrypoint (injects GA_ID into the SPA, then starts supervisord)
+CMD ["/app/docker-entrypoint.sh"]
