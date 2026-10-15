@@ -18,10 +18,17 @@ const lookupPage = 1000
 // history.py did this daily). Default off: the dirty-based AccountRefresher
 // covers active accounts, and a full pass is expensive on public RPC nodes.
 // Field transformation is reused from processor.AccountRefresher.
+//
+// Gated by the catch-up rule, same as the processor's AccountRefresher:
+// get_accounts returns chain-head state, so writing it while replay/catch-up
+// is still filling the database stamps head-state onto accounts whose
+// in-range ops have not landed yet (the exact semantic error
+// processor.AccountRefresher.isCatchingUp exists to prevent).
 type accountRescan struct {
 	cfg       *config.Config
 	rpcClient *rpc.Client
 	refresher *processor.AccountRefresher
+	gate      *catchupGate
 }
 
 func newAccountRescan(cfg *config.Config, mongoClient *mongo.Client, rpcClient *rpc.Client) *accountRescan {
@@ -35,11 +42,20 @@ func newAccountRescan(cfg *config.Config, mongoClient *mongo.Client, rpcClient *
 		log.Printf("[Refresher:AccountRescan] Failed to create account refresher: %v", err)
 		return &accountRescan{}
 	}
-	return &accountRescan{cfg: cfg, rpcClient: rpcClient, refresher: ar}
+	return &accountRescan{
+		cfg:       cfg,
+		rpcClient: rpcClient,
+		refresher: ar,
+		gate:      newCatchupGate(mongoClient.Database()),
+	}
 }
 
 func (a *accountRescan) tick(ctx context.Context) {
 	if a.refresher == nil {
+		return
+	}
+	if skip, reason := a.gate.blocked(ctx); skip {
+		log.Printf("[Refresher:AccountRescan] Skipped: %s", reason)
 		return
 	}
 

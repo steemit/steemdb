@@ -19,10 +19,16 @@ const (
 // the web dashboard (GetNetworkPerformance). Legacy aggregated block_30d
 // transactions; the Go sync has no block_30d and blocks.transaction_count is
 // always 0, so counts are derived from the operations collection by block range.
+//
+// Gated by the catch-up rule: over a partially ingested database these
+// counters are a partial-window figure. The snapshot self-heals on the next
+// post-catch-up tick, but ticking during catch-up is wasted aggregation work
+// (full collection counts over tens of millions of ops), so skip entirely.
 type statsRefresher struct {
 	blocksCol *mongo.Collection
 	opsCol    *mongo.Collection
 	statusCol *mongo.Collection
+	gate      *catchupGate
 }
 
 func newStatsRefresher(db *mongo.Database) *statsRefresher {
@@ -30,10 +36,15 @@ func newStatsRefresher(db *mongo.Database) *statsRefresher {
 		blocksCol: db.Collection("blocks"),
 		opsCol:    db.Collection("operations"),
 		statusCol: db.Collection("status"),
+		gate:      newCatchupGate(db),
 	}
 }
 
 func (s *statsRefresher) tick(ctx context.Context) {
+	if skip, reason := s.gate.blocked(ctx); skip {
+		log.Printf("[Refresher:Stats] Skipped: %s", reason)
+		return
+	}
 	head, err := s.headBlock(ctx)
 	if err != nil {
 		log.Printf("[Refresher:Stats] Failed to read head block: %v", err)
