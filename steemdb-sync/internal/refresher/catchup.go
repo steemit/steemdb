@@ -17,27 +17,45 @@ const coldStartThreshold int64 = 1000
 
 // catchupGate reports whether local-data aggregation tickers must skip.
 //
-// Rationale (the "data grooming waits for catch-up" rule): stats and clients
-// aggregate the ingested data. Over a partially ingested database their output
-// is a partial-window figure — overwrite-based snapshots (status counters)
-// would self-heal on the next post-catch-up tick, but append-only records
-// (clients_history day rows) would keep the under-counted day forever.
+// Two data frontiers exist, so there are two gate variants:
 //
-// Frontier/head semantics mirror processor.AccountRefresher.isCatchingUp:
-//   - frontier = highest block in the blocks collection (what the local data
-//     actually contains),
-//   - head     = live_sync's committed meta.max_block.
+//   - blocked(): the frontier is the ingest frontier (highest block in the
+//     blocks collection). Use for aggregations over ingest-written data
+//     (stats counts the operations collection) and for chain-head RPC
+//     snapshots (account_rescan), which only care how far the local
+//     database is behind the committed head.
+//   - blockedForProcessor(): the frontier is the processor cursor
+//     (status.processor_height). Use for aggregations over
+//     processor-derived collections (clients aggregates comment): those
+//     collections only advance with the processor, which lags the ingest
+//     frontier during cold start — ingest can be fully caught up while the
+//     processor is still days behind, and a tick then computes a
+//     partial-window figure.
+//
+// Rationale (the "data grooming waits for catch-up" rule): over partially
+// ingested data the tickers' output is a partial-window figure —
+// overwrite-based snapshots (status counters) would self-heal on the next
+// post-catch-up tick, but append-only records (clients_history day rows)
+// would keep the under-counted day forever.
+//
+// Head semantics mirror processor.AccountRefresher.isCatchingUp:
+//   - head = live_sync's committed meta.max_block,
+//   - a missing or stale meta (head < frontier) falls back to the frontier's
+//     own ceiling — for the processor variant that is the blocks collection
+//     max, exactly like isCatchingUp.
 //
 // fail-safe: any read error means skip.
 type catchupGate struct {
 	metaCol   *mongo.Collection
 	blocksCol *mongo.Collection
+	statusCol *mongo.Collection
 }
 
 func newCatchupGate(db *mongo.Database) *catchupGate {
 	return &catchupGate{
 		metaCol:   db.Collection("meta"),
 		blocksCol: db.Collection("blocks"),
+		statusCol: db.Collection("status"),
 	}
 }
 
@@ -71,6 +89,57 @@ func (g *catchupGate) blocked(ctx context.Context) (bool, string) {
 			local, head, gap, coldStartThreshold)
 	}
 	return false, ""
+}
+
+// blockedForProcessor reports whether a tick over processor-derived data
+// (e.g. the comment collection that clients aggregates) must skip. The
+// frontier is the processor cursor, not the ingest frontier: during cold
+// start the processor lags behind ingest, so blocked() would open the gate
+// while the derived data is still partial.
+//
+// Mirrors processor.AccountRefresher.isCatchingUp: head = meta.max_block,
+// falling back to the blocks collection max when meta is missing, unreadable,
+// or stale (head < cursor).
+func (g *catchupGate) blockedForProcessor(ctx context.Context) (bool, string) {
+	frontier, err := g.processorHeight(ctx)
+	if err != nil {
+		return true, "failed to read processor cursor"
+	}
+	if frontier == 0 {
+		return true, "processor cursor not established"
+	}
+
+	head, exists, err := g.syncedMaxBlock(ctx)
+	if err != nil || !exists || head < frontier {
+		// Same fallback as processor.AccountRefresher.isCatchingUp: trust
+		// the blocks collection when meta is missing or stale.
+		var fbErr error
+		head, fbErr = g.latestBlock(ctx)
+		if fbErr != nil {
+			return true, "failed to read local data frontier"
+		}
+	}
+
+	if gap := head - frontier; gap > coldStartThreshold {
+		return true, fmt.Sprintf("processor catching up (processor %d, head %d, gap %d > %d)",
+			frontier, head, gap, coldStartThreshold)
+	}
+	return false, ""
+}
+
+// processorHeight returns the processor cursor (0 when not initialized).
+func (g *catchupGate) processorHeight(ctx context.Context) (int64, error) {
+	var doc struct {
+		Value int64 `bson:"value"`
+	}
+	err := g.statusCol.FindOne(ctx, bson.M{"_id": "processor_height"}).Decode(&doc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return doc.Value, nil
 }
 
 // latestBlock returns the highest ingested block number (0 when empty).

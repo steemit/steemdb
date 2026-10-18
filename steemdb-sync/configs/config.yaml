@@ -59,7 +59,8 @@ refresher:
     enabled: true
     interval: "5m"
   # clients: status.clients-snapshot + clients_history (1h)
-  # Skipped during catch-up (see stats note) — the per-day clients_history
+  # Skipped while the processor cursor lags (it aggregates the processor-
+  # derived comment collection; see stats note) — the per-day clients_history
   # row is written once, so a partial-window day would stay wrong forever
   clients:
     enabled: true
