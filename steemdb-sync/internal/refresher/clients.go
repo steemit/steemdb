@@ -17,10 +17,20 @@ const clientsWindowDays = 90
 // clientsRefresher aggregates client usage from comment.json_metadata.app
 // (legacy history.py update_clients) into status.clients-snapshot (consumed by
 // the web labs/clients endpoint) and clients_history (daily record).
+//
+// Gated by the catch-up rule on the processor cursor (blockedForProcessor):
+// the aggregation runs over the comment collection, which is processor-
+// derived and only advances with status.processor_height — that cursor lags
+// the ingest frontier during cold start, so the ingest-frontier gate would
+// open while the comment data is still partial. The overwrite-based snapshot
+// (clients-snapshot) would self-heal, but the per-day clients_history row is
+// written only on its own day — an under-counted day computed during
+// catch-up would stay wrong forever.
 type clientsRefresher struct {
 	commentCol *mongo.Collection
 	statusCol  *mongo.Collection
 	historyCol *mongo.Collection
+	gate       *catchupGate
 }
 
 func newClientsRefresher(db *mongo.Database) *clientsRefresher {
@@ -28,10 +38,15 @@ func newClientsRefresher(db *mongo.Database) *clientsRefresher {
 		commentCol: db.Collection("comment"),
 		statusCol:  db.Collection("status"),
 		historyCol: db.Collection("clients_history"),
+		gate:       newCatchupGate(db),
 	}
 }
 
 func (c *clientsRefresher) tick(ctx context.Context) {
+	if skip, reason := c.gate.blockedForProcessor(ctx); skip {
+		log.Printf("[Refresher:Clients] Skipped: %s", reason)
+		return
+	}
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -clientsWindowDays)
 
