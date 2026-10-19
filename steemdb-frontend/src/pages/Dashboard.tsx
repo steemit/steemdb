@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Activity, Blocks, Users, Shield, TrendingUp, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { NetworkPerformance } from '../components/dashboard/NetworkPerformance';
 import { RewardPool } from '../components/dashboard/RewardPool';
 import { GlobalProperties } from '../components/dashboard/GlobalProperties';
+import { OpSummary } from '../components/dashboard/opSummary';
 import { useBlockchainStore, useWebSocketStore } from '../store';
 import type { BlockData, BlockchainProps, OperationData, StateData } from '../types';
 import { formatNumber, formatTimeAgo, formatCurrency } from '../lib/utils';
@@ -25,12 +27,12 @@ interface StatCardProps {
 function StatCard({ title, value, description, icon, trend }: StatCardProps) {
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
         <div className="text-muted-foreground">{icon}</div>
       </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+      <CardContent className="p-4 pt-0">
+        <div className="text-xl font-bold">{value}</div>
         {description && (
           <p className="text-xs text-muted-foreground">{description}</p>
         )}
@@ -58,25 +60,33 @@ function FeedItemRow({ item }: { item: FeedItem }) {
   if (item.type === 'block') {
     const block = item.data as BlockData;
     return (
-      <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/50">
+      <div className="flex items-center space-x-3 px-3 py-2 border rounded-md hover:bg-accent/50">
         <div className="flex-shrink-0">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-            <Blocks className="h-5 w-5 text-primary" />
+          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
+            <Blocks className="h-3.5 w-3.5 text-primary" />
           </div>
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Block #{formatNumber(block.number)}</div>
-              <div className="text-sm text-muted-foreground">
-                by @{block.witness}
-              </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <Link
+                to={`/blocks/${block.number}`}
+                className="font-medium text-sm text-primary hover:underline"
+              >
+                Block #{formatNumber(block.number)}
+              </Link>
+              <span className="text-xs text-muted-foreground truncate">
+                by{' '}
+                <Link to={`/accounts/${block.witness}`} className="hover:underline">
+                  @{block.witness}
+                </Link>
+              </span>
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground flex-shrink-0">
               {formatTimeAgo(item.timestamp)}
             </div>
           </div>
-          <div className="mt-2 flex items-center space-x-4 text-sm text-muted-foreground">
+          <div className="mt-0.5 flex items-center space-x-3 text-xs text-muted-foreground">
             <span>{block.transactions || 0} transactions</span>
             <span>{block.operations || 0} operations</span>
           </div>
@@ -87,29 +97,27 @@ function FeedItemRow({ item }: { item: FeedItem }) {
 
   const op = item.data as OperationData;
   return (
-    <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-accent/50">
+    <div className="flex items-center space-x-3 px-3 py-2 border rounded-md hover:bg-accent/50">
       <div className="flex-shrink-0">
-        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-          <Activity className="h-5 w-5 text-blue-500" />
+        <div className="w-7 h-7 rounded-full bg-blue-500/10 flex items-center justify-center">
+          <Activity className="h-3.5 w-3.5 text-blue-500" />
         </div>
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-medium capitalize">{op.type || 'Operation'}</div>
-            {op.accounts && op.accounts.length > 0 && (
-              <div className="text-sm text-muted-foreground">
-                {op.accounts.map((acc: string) => `@${acc}`).join(', ')}
-              </div>
-            )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm min-w-0 truncate">
+            <span className="font-medium capitalize">{op.type || 'Operation'}</span>{' '}
+            <OpSummary op={op} />
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground flex-shrink-0">
             {formatTimeAgo(item.timestamp)}
           </div>
         </div>
         {op.block && (
-          <div className="mt-2 text-sm text-muted-foreground">
-            Block #{formatNumber(op.block)}
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            <Link to={`/blocks/${op.block}`} className="hover:underline">
+              Block #{formatNumber(op.block)}
+            </Link>
           </div>
         )}
       </div>
@@ -279,11 +287,11 @@ export function Dashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground">
             Real-time overview of the Steem blockchain
           </p>
@@ -328,11 +336,11 @@ export function Dashboard() {
       {/* Additional Stats */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
-          <CardHeader>
+          <CardHeader className="p-4 pb-2">
             <CardTitle className="text-sm font-medium">SBD Supply</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className="p-4 pt-0">
+            <div className="text-xl font-bold">
               {props ? formatCurrency(props.current_sbd_supply, 'SBD') : '-'}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -342,11 +350,11 @@ export function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="p-4 pb-2">
             <CardTitle className="text-sm font-medium">Vesting Fund</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className="p-4 pt-0">
+            <div className="text-xl font-bold">
               {props ? formatCurrency(props.total_vesting_fund_steem) : '-'}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -356,11 +364,11 @@ export function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="p-4 pb-2">
             <CardTitle className="text-sm font-medium">Reward Fund</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className="p-4 pt-0">
+            <div className="text-xl font-bold">
               {props ? formatCurrency(props.total_reward_fund_steem) : '-'}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -371,7 +379,7 @@ export function Dashboard() {
       </div>
 
       {/* Network Performance, Reward Pool, and Global Properties */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 items-start md:grid-cols-2 lg:grid-cols-3">
         <NetworkPerformance data={networkPerformance || undefined} />
         <RewardPool data={rewardPool || undefined} />
         <GlobalProperties data={props || undefined} />
@@ -406,7 +414,7 @@ export function Dashboard() {
               <p className="text-muted-foreground">Waiting for activity...</p>
             </div>
           ) : (
-            <div className="space-y-3 max-h-[600px] overflow-y-auto">
+            <div className="space-y-1.5 max-h-[600px] overflow-y-auto">
               {feedItems.map((item) => (
                 <FeedItemRow key={item.id} item={item} />
               ))}

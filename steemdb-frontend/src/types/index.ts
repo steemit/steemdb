@@ -491,7 +491,8 @@ export interface OperationData {
   type: string;
   block: number;
   timestamp: string;
-  data: unknown;
+  // Full operation payload (e.g. transfer carries from/to/amount)
+  data: Record<string, unknown>;
   accounts?: string[];
 }
 

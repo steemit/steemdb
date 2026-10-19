@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
@@ -18,7 +18,7 @@ import { FlagsPage } from './pages/labs/Flags';
 import { ClientsPage } from './pages/labs/Clients';
 import { BenefactorsPage } from './pages/labs/Benefactors';
 import { PendingPage } from './pages/labs/Pending';
-import { WitnessesPage, WitnessDetailPage } from './pages/Witnesses';
+import { WitnessesPage } from './pages/Witnesses';
 import { StatisticsPage } from './pages/Statistics';
 import { SettingsPage } from './pages/Settings';
 import { useThemeStore, useWebSocketStore } from './store';
@@ -80,6 +80,13 @@ function useWebSocketConnection() {
   }, [setState, setLastMessage]);
 }
 
+// The standalone witness detail page was merged into the account detail
+// page; keep old /witnesses/:id links working.
+function WitnessRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/accounts/${id}`} replace />;
+}
+
 function App() {
   useThemeEffect();
   useWebSocketConnection();
@@ -107,7 +114,7 @@ function App() {
             <Route path="labs/benefactors" element={<BenefactorsPage />} />
             <Route path="labs/pending" element={<PendingPage />} />
             <Route path="witnesses" element={<WitnessesPage />} />
-            <Route path="witnesses/:id" element={<WitnessDetailPage />} />
+            <Route path="witnesses/:id" element={<WitnessRedirect />} />
             <Route path="stats" element={<StatisticsPage />} />
             {/* Live Feed was merged into the Dashboard; keep /live working. */}
             <Route path="live" element={<Navigate to="/" replace />} />

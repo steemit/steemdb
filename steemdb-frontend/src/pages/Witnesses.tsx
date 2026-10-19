@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, ArrowUpDown, Star, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
+import { ChevronRight, ArrowUpDown, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { getWitnesses, getWitness } from '../lib/api';
-import { formatNumber, formatDate, formatCurrency, getAvatarUrl } from '../lib/utils';
-import { useFavoritesStore } from '../store';
+import { getWitnesses } from '../lib/api';
+import { formatNumber, getAvatarUrl } from '../lib/utils';
 
 export function WitnessesPage() {
   const navigate = useNavigate();
@@ -116,7 +115,7 @@ export function WitnessesPage() {
                     <tr
                       key={witness.owner}
                       className="border-b hover:bg-accent/50 cursor-pointer"
-                      onClick={() => navigate(`/witnesses/${witness.owner}`)}
+                      onClick={() => navigate(`/accounts/${witness.owner}`)}
                     >
                       <td className="p-3">
                         <div className="flex items-center space-x-3">
@@ -199,179 +198,6 @@ export function WitnessesPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-export function WitnessDetailPage() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const witnessName = searchParams.get('id') || window.location.pathname.split('/').pop() || '';
-  const { addWitness, removeWitness, isWitnessFavorite } = useFavoritesStore();
-  const isFavorite = isWitnessFavorite(witnessName);
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['witness', witnessName],
-    queryFn: () => getWitness(witnessName),
-    enabled: !!witnessName,
-  });
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="text-center py-12">
-          <div className="text-muted-foreground">Loading witness details...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !data?.success || !data.data) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center text-muted-foreground">
-              Witness not found or failed to load.
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const witness = data.data;
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <Button variant="ghost" onClick={() => navigate('/witnesses')} className="mb-2">
-            ← Back to Witnesses
-          </Button>
-          <div className="flex items-center space-x-4">
-            <img
-              src={getAvatarUrl(witness.owner)}
-              alt={witness.owner}
-              className="w-16 h-16 rounded-full"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${witness.owner}&background=random`;
-              }}
-            />
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-3xl font-bold tracking-tight">@{witness.owner}</h1>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
-                    if (isFavorite) {
-                      removeWitness(witness.owner);
-                    } else {
-                      addWitness(witness.owner);
-                    }
-                  }}
-                >
-                  <Star className={`h-4 w-4 ${isFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-                </Button>
-              </div>
-              <p className="text-muted-foreground">Witness details and statistics</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Witness Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Votes</span>
-              <span className="font-medium">{formatNumber(parseFloat(witness.votes || '0'))}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Total Missed</span>
-              <div className="flex items-center space-x-2">
-                {witness.total_missed === 0 ? (
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-red-500" />
-                )}
-                <span className="font-medium">{formatNumber(witness.total_missed || 0)}</span>
-              </div>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Last Confirmed Block</span>
-              <span className="font-medium">#{formatNumber(witness.last_confirmed_block_num || 0)}</span>
-            </div>
-            {witness.url && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">URL</span>
-                <a
-                  href={witness.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-primary hover:underline flex items-center space-x-1"
-                >
-                  <span>Visit</span>
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Technical Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Running Version</span>
-              <Badge variant="outline">{witness.running_version || 'N/A'}</Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Hardfork Version</span>
-              <Badge variant="outline">{witness.hardfork_version_vote || 'N/A'}</Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Last ASlot</span>
-              <span className="font-medium">{formatNumber(witness.last_aslot || 0)}</span>
-            </div>
-            {witness.created && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Created</span>
-                <span className="font-medium text-sm">{formatDate(witness.created)}</span>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {witness.props && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Witness Properties</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Account Creation Fee</span>
-                <span className="font-medium">{formatCurrency(witness.props.account_creation_fee)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Maximum Block Size</span>
-                <span className="font-medium">{formatNumber(witness.props.maximum_block_size || 0)} bytes</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">SBD Interest Rate</span>
-                {/* sbd_interest_rate is stored in basis points (10000 = 100%) */}
-                <span className="font-medium">{(witness.props.sbd_interest_rate || 0) / 100}%</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
     </div>
   );
 }
