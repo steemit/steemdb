@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, Activity, Users, Blocks, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { getGlobalStats, getBlockchainProps, getAccountGrowthData, getBlockProductionData, getTransactionVolumeData, getWitnessVotingData } from '../lib/api';
-import { formatNumber, formatCurrency } from '../lib/utils';
+import { getAccountGrowthData, getBlockProductionData, getTransactionVolumeData, getWitnessVotingData } from '../lib/api';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 import type { ReactNode } from 'react';
@@ -62,16 +61,6 @@ function ChartCard({
 }
 
 export function StatisticsPage() {
-  const { data: statsData } = useQuery({
-    queryKey: ['global-stats'],
-    queryFn: () => getGlobalStats(),
-  });
-
-  const { data: propsData } = useQuery({
-    queryKey: ['blockchain-props'],
-    queryFn: () => getBlockchainProps(),
-  });
-
   const accountGrowth = useQuery({
     queryKey: ['account-growth'],
     queryFn: () => getAccountGrowthData(30),
@@ -92,63 +81,16 @@ export function StatisticsPage() {
     queryFn: () => getWitnessVotingData(30),
   });
 
-  const stats = statsData?.data;
-  const props = propsData?.data;
-
+  // This page is charts-only by design: current-state numbers (supply, head
+  // block, account count, ...) already live on the Dashboard — duplicating
+  // them here drifted the two pages apart.
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Statistics</h1>
-          <p className="text-muted-foreground">Blockchain statistics and analytics</p>
+          <p className="text-muted-foreground">Historical blockchain trends and analytics</p>
         </div>
-      </div>
-
-      {/* Overview Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Accounts</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats ? formatNumber(stats.accounts) : '-'}</div>
-            <p className="text-xs text-muted-foreground">Registered users</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Blocks</CardTitle>
-            <Blocks className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats ? formatNumber(stats.blocks ?? 0) : "-"}</div>
-            <p className="text-xs text-muted-foreground">Processed blocks</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats ? formatNumber(stats.transactions ?? 0) : "-"}</div>
-            <p className="text-xs text-muted-foreground">All transactions</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Virtual Supply</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{props ? formatCurrency(props.virtual_supply) : '-'}</div>
-            <p className="text-xs text-muted-foreground">Total STEEM supply</p>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Charts */}
@@ -235,51 +177,6 @@ export function StatisticsPage() {
           </ResponsiveContainer>
         </ChartCard>
       </div>
-
-      {/* Additional Stats */}
-      {props && (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Supply Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Current Supply</span>
-                <span className="font-medium">{formatCurrency(props.current_supply)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">SBD Supply</span>
-                <span className="font-medium">{formatCurrency(props.current_sbd_supply, 'SBD')}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Vesting Fund</span>
-                <span className="font-medium">{formatCurrency(props.total_vesting_fund_steem)}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Network Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Head Block</span>
-                <span className="font-medium">#{formatNumber(props.head_block_number)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Last Irreversible Block</span>
-                <span className="font-medium">#{formatNumber(props.last_irreversible_block_num)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Maximum Block Size</span>
-                <span className="font-medium">{formatNumber(props.maximum_block_size)} bytes</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
