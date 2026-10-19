@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, Search, ArrowUpDown, Star } from 'lucide-react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { ChevronRight, Search, ArrowUpDown, Star, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { getAccounts, getAccount, getAccountHistory } from '../lib/api';
+import { getAccounts, getAccount, getAccountHistory, getWitness } from '../lib/api';
 import { formatNumber, formatTimeAgo, formatDate, formatCurrency, formatReputation, getAvatarUrl, formatVests } from '../lib/utils';
 import { useFavoritesStore } from '../store';
 
@@ -251,6 +251,16 @@ export function AccountDetailPage() {
     enabled: !!accountName,
   });
 
+  // Witness data for accounts that are also block producers. Non-witness
+  // accounts 404 here — fail silently and just hide the witness section.
+  const { data: witnessData } = useQuery({
+    queryKey: ['witness', accountName],
+    queryFn: () => getWitness(accountName),
+    enabled: !!accountName,
+    retry: false,
+  });
+  const witness = witnessData?.success && witnessData.data ? witnessData.data : undefined;
+
 
   if (accountLoading) {
     return (
@@ -297,6 +307,7 @@ export function AccountDetailPage() {
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-3xl font-bold tracking-tight">@{account.name}</h1>
+                {witness && <Badge variant="success">Witness</Badge>}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -395,6 +406,92 @@ export function AccountDetailPage() {
         </Card>
       </div>
 
+      {witness && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Witness</CardTitle>
+            <CardDescription>Block producer details for this account</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-x-8 gap-y-2 md:grid-cols-2">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Votes</span>
+                <span className="font-medium">{formatNumber(parseFloat(witness.votes || '0'))}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total Missed</span>
+                <span className="font-medium flex items-center space-x-2">
+                  {witness.total_missed === 0 ? (
+                    <CheckCircle className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-500" />
+                  )}
+                  <span>{formatNumber(witness.total_missed || 0)}</span>
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Last Confirmed Block</span>
+                <Link
+                  to={`/blocks/${witness.last_confirmed_block_num}`}
+                  className="font-medium text-primary hover:underline"
+                >
+                  #{formatNumber(witness.last_confirmed_block_num || 0)}
+                </Link>
+              </div>
+              {witness.url && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">URL</span>
+                  <a
+                    href={witness.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-primary hover:underline flex items-center space-x-1"
+                  >
+                    <span>Visit</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Running Version</span>
+                <Badge variant="outline">{witness.running_version || 'N/A'}</Badge>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Hardfork Version</span>
+                <Badge variant="outline">{witness.hardfork_version_vote || 'N/A'}</Badge>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Last ASlot</span>
+                <span className="font-medium">{formatNumber(witness.last_aslot || 0)}</span>
+              </div>
+              {witness.created && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Created</span>
+                  <span className="font-medium text-sm">{formatDate(witness.created)}</span>
+                </div>
+              )}
+              {witness.props && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Account Creation Fee</span>
+                    <span className="font-medium">{formatCurrency(witness.props.account_creation_fee)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Maximum Block Size</span>
+                    <span className="font-medium">{formatNumber(witness.props.maximum_block_size || 0)} bytes</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">SBD Interest Rate</span>
+                    {/* sbd_interest_rate is stored in basis points (10000 = 100%) */}
+                    <span className="font-medium">{(witness.props.sbd_interest_rate || 0) / 100}%</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {account.witness_votes && account.witness_votes.length > 0 && (
         <Card>
           <CardHeader>
@@ -406,7 +503,7 @@ export function AccountDetailPage() {
               {account.witness_votes.map((witness) => (
                 <button
                   key={witness}
-                  onClick={() => navigate(`/witnesses/${witness}`)}
+                  onClick={() => navigate(`/accounts/${witness}`)}
                   className="text-sm text-primary hover:underline"
                 >
                   @{witness}

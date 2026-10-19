@@ -86,19 +86,19 @@ export function RewardPool({ data }: RewardPoolProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Coins className="h-5 w-5" />
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Coins className="h-4 w-4" />
           Reward Pool
         </CardTitle>
         <CardDescription>Reward distribution parameters</CardDescription>
       </CardHeader>
-      <CardContent>
-        <dl className="space-y-3">
+      <CardContent className="p-4 pt-0">
+        <dl className="space-y-1">
           {Object.entries(data)
             .filter(([key]) => !['_id', 'id', 'name'].includes(key))
             .map(([key, value]) => (
-              <div key={key} className="flex items-start justify-between border-b pb-2 last:border-0">
+              <div key={key} className="flex items-start justify-between border-b py-1 last:border-0">
                 <dt className="text-sm font-medium text-muted-foreground pr-4">
                   {formatKeyName(key)}
                 </dt>

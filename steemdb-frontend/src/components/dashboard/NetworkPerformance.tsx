@@ -29,69 +29,69 @@ export function NetworkPerformance({ data }: NetworkPerformanceProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Activity className="h-5 w-5" />
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Activity className="h-4 w-4" />
           Network Performance
         </CardTitle>
         <CardDescription>Transaction and operation metrics</CardDescription>
       </CardHeader>
-      <CardContent>
-        <dl className="space-y-4">
+      <CardContent className="p-4 pt-0">
+        <dl className="space-y-1">
           {/* Transactions per second */}
-          <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center justify-between border-b py-1">
             <dt className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <TrendingUp className="h-4 w-4" />
               Transactions per second (24h)
             </dt>
-            <dd className="text-lg font-semibold">
+            <dd className="text-sm font-semibold">
               {formatRate(data.transactions_per_sec_24h)} tx/sec
             </dd>
           </div>
 
-          <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center justify-between border-b py-1">
             <dt className="text-sm font-medium text-muted-foreground">
               Transactions per second (1h)
             </dt>
-            <dd className="text-lg font-semibold">
+            <dd className="text-sm font-semibold">
               {formatRate(data.transactions_per_sec_1h)} tx/sec
             </dd>
           </div>
 
           {/* Transactions totals */}
-          <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center justify-between border-b py-1">
             <dt className="text-sm font-medium text-muted-foreground">
               Transactions over 24h
             </dt>
-            <dd className="text-base font-medium">
+            <dd className="text-sm font-medium">
               {formatNumber(data.transactions_24h)} txs
             </dd>
           </div>
 
-          <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center justify-between border-b py-1">
             <dt className="text-sm font-medium text-muted-foreground">
               Transactions over 1h
             </dt>
-            <dd className="text-base font-medium">
+            <dd className="text-sm font-medium">
               {formatNumber(data.transactions_1h)} txs
             </dd>
           </div>
 
           {/* Operations totals */}
-          <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center justify-between border-b py-1">
             <dt className="text-sm font-medium text-muted-foreground">
               Operations over 24h
             </dt>
-            <dd className="text-base font-medium">
+            <dd className="text-sm font-medium">
               {formatNumber(data.operations_24h)} ops
             </dd>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between py-1">
             <dt className="text-sm font-medium text-muted-foreground">
               Operations over 1h
             </dt>
-            <dd className="text-base font-medium">
+            <dd className="text-sm font-medium">
               {formatNumber(data.operations_1h)} ops
             </dd>
           </div>

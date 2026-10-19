@@ -143,7 +143,7 @@ export function Sidebar() {
                     {favoriteWitnesses.slice(0, 5).map((witness) => (
                       <Link
                         key={witness}
-                        to={`/witnesses/${witness}`}
+                        to={`/accounts/${witness}`}
                         className="block px-2 py-1 text-xs text-muted-foreground hover:text-foreground rounded"
                         onClick={() => setSidebarOpen(false)}
                       >

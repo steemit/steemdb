@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Globe } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { formatKeyName, formatCurrency, formatScientificNotation } from '../../lib/utils';
@@ -16,7 +17,11 @@ const EXCLUDED_FIELDS = [
   'reversible_blocks',
 ];
 
+// Collapsed by default so the card stays as short as its neighbors.
+const DEFAULT_VISIBLE = 10;
+
 export function GlobalProperties({ data }: GlobalPropertiesProps) {
+  const [expanded, setExpanded] = useState(false);
   if (!data) {
     return (
       <Card>
@@ -105,30 +110,39 @@ export function GlobalProperties({ data }: GlobalPropertiesProps) {
     return String(value);
   };
 
+  const entries = Object.entries(data).filter(([key]) => !EXCLUDED_FIELDS.includes(key));
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Globe className="h-5 w-5" />
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Globe className="h-4 w-4" />
           Global Properties
         </CardTitle>
         <CardDescription>Blockchain configuration and state</CardDescription>
       </CardHeader>
-      <CardContent>
-        <dl className="space-y-3">
-          {Object.entries(data)
-            .filter(([key]) => !EXCLUDED_FIELDS.includes(key))
-            .map(([key, value]) => (
-              <div key={key} className="flex items-start justify-between border-b pb-2 last:border-0">
-                <dt className="text-sm font-medium text-muted-foreground pr-4">
-                  {formatKeyName(key)}
-                </dt>
-                <dd className="text-sm font-medium text-right break-all">
-                  {formatValue(key, value)}
-                </dd>
-              </div>
-            ))}
+      <CardContent className="p-4 pt-0">
+        <dl className="space-y-1">
+          {(expanded ? entries : entries.slice(0, DEFAULT_VISIBLE)).map(([key, value]) => (
+            <div key={key} className="flex items-start justify-between border-b py-1 last:border-0">
+              <dt className="text-sm font-medium text-muted-foreground pr-4">
+                {formatKeyName(key)}
+              </dt>
+              <dd className="text-sm font-medium text-right break-all">
+                {formatValue(key, value)}
+              </dd>
+            </div>
+          ))}
         </dl>
+        {entries.length > DEFAULT_VISIBLE && (
+          <button
+            type="button"
+            className="mt-2 text-xs text-primary hover:underline"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? 'Show less' : `Show all ${entries.length} properties`}
+          </button>
+        )}
       </CardContent>
     </Card>
   );
