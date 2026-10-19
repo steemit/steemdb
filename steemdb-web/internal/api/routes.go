@@ -13,7 +13,7 @@ import (
 )
 
 // SetupRoutes configures all API routes
-func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Client, logger utils.Logger) {
+func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Client, logger utils.Logger, config *utils.Config) {
 	// Initialize services
 	accountService := services.NewAccountService(db, logger)
 	blockService := services.NewBlockService(db, steemClient, logger)
@@ -36,6 +36,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 	searchHandler := NewSearchHandler(searchService, logger)
 	chartsHandler := NewChartsHandler(chartsService, logger)
 	legacyHandler := NewLegacyHandler(steemClient, logger)
+	metaHandler := NewMetaHandler(&config.Analytics)
 
 	// API v1 routes - register first to avoid conflicts with legacy routes
 	v1 := router.Group("/api/v1")
@@ -122,6 +123,10 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 			charts.GET("/transactions/volume", chartsHandler.GetTransactionVolume)
 			charts.GET("/witnesses/voting", chartsHandler.GetWitnessVoting)
 		}
+
+		// SPA bootstrap endpoint: client-side app config (analytics
+		// selection). See MetaHandler.GetMeta.
+		v1.GET("/meta", metaHandler.GetMeta)
 
 		// Status endpoint
 		v1.GET("/status", func(c *gin.Context) {
