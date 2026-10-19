@@ -25,14 +25,15 @@ type Config struct {
 	Log       LogConfig       `yaml:"log"`
 }
 
-// LiveSyncConfig contains live_sync settings. Catch-up (gap larger than
-// follow_threshold) fetches in parallel chunks; near the chain head the loop
-// degrades to single-block following.
+// LiveSyncConfig contains live_sync settings. The follower targets the last
+// irreversible block (LIB): gaps beyond follow_threshold are processed in
+// chunkSize batches; smaller gaps are fetched in a single call.
 type LiveSyncConfig struct {
-	// ChunkSize is the block count of one batch-fetch unit during catch-up.
+	// ChunkSize is the block count of one batch-fetch unit when the gap to
+	// the last irreversible block exceeds follow_threshold.
 	// Env: LIVE_SYNC_CHUNK_SIZE
 	ChunkSize int `yaml:"chunk_size"`
-	// FollowThreshold: gaps up to this size are handled by the follow loop.
+	// FollowThreshold: gaps up to this size are fetched in a single call.
 	// Env: LIVE_SYNC_FOLLOW_THRESHOLD
 	FollowThreshold int `yaml:"follow_threshold"`
 	// RPCConcurrency bounds the SDK v2 worker pool (per range call).

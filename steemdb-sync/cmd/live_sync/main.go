@@ -30,11 +30,10 @@ import (
 // Concurrency and chunk defaults come from the SDK integration baseline
 // (93 blocks/s at concurrency 32 for get_block; ops double the call count).
 const (
-	defaultChunkSize       = 256
+	defaultChunkSize       = 100
 	defaultFollowThreshold = 100
 	defaultConcurrency     = 32
-	followPollInterval     = 2 * time.Second
-	headRefreshInterval    = 15 * time.Second
+	followPollInterval     = 3 * time.Second
 	retrySleep             = 3 * time.Second
 )
 
@@ -95,10 +94,13 @@ func main() {
 	}
 }
 
-// run is the main loop: batch catch-up while the gap exceeds the follow
-// threshold, single-block following near the chain head. The commit point of
-// a batch chunk (and of a followed block) is meta.max_block; all writes are
-// idempotent upserts, so a crash simply replays the uncommitted chunk.
+// run is the main loop: a single batching rule over the last irreversible
+// block (LIB). Gaps beyond the follow threshold are processed in chunkSize
+// batches; a gap within the threshold is fetched in one call; caught up means
+// sleep and poll again. LIB targeting makes every ingested block final and
+// guarantees its account_history entry exists. The commit point of a batch is
+// meta.max_block; all writes are idempotent upserts, so a crash simply
+// replays the uncommitted chunk.
 func run(ctx context.Context, api *sdkv2.API, mongoClient *mongo.Client, chunkSize, followThreshold int) error {
 	// Resume point: the higher of meta.max_block and the blocks collection's
 	// highest block. A replay populates the blocks collection without ever
@@ -123,56 +125,45 @@ func run(ctx context.Context, api *sdkv2.API, mongoClient *mongo.Client, chunkSi
 	log.Printf("[LiveSync] Starting from block %d (chunk=%d, follow_threshold=%d)",
 		nextBlock, chunkSize, followThreshold)
 
-	var head int64
-	headAt := time.Time{}
-
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		// Refresh the chain head periodically (and once at startup).
-		if headAt.IsZero() || time.Since(headAt) > headRefreshInterval {
-			props, err := api.GetDynamicGlobalProperties(ctx)
-			if err != nil {
-				log.Printf("[LiveSync] Failed to get chain head: %v (retrying)", err)
-				time.Sleep(retrySleep)
-				continue
-			}
-			head = int64(props.HeadBlockNumber)
-			headAt = time.Now()
+		// Refresh the chain target every loop: the target is the last
+		// irreversible block, so every block we ingest is final and its
+		// account_history entry exists (both the orphan-block and the
+		// fresh-block empty-ops failure modes require following too close
+		// to the head — LIB distance eliminates both).
+		props, err := api.GetDynamicGlobalProperties(ctx)
+		if err != nil {
+			log.Printf("[LiveSync] Failed to get chain state: %v (retrying)", err)
+			time.Sleep(retrySleep)
+			continue
 		}
+		lib := int64(props.LastIrreversibleBlockNum)
 
-		if head-nextBlock+1 > int64(followThreshold) {
-			end := nextBlock + int64(chunkSize)
-			if end > head+1 {
-				end = head + 1
-			}
-			processed, err := syncChunk(ctx, api, mongoClient, nextBlock, end)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return err
-				}
-				log.Printf("[LiveSync] Chunk %d-%d failed: %v (retrying)", nextBlock, end-1, err)
-				time.Sleep(retrySleep)
-				continue
-			}
-			nextBlock = processed
+		gap := lib - nextBlock + 1
+		if gap <= 0 {
+			// Caught up to LIB — wait for the next block(s). Typically the
+			// next iteration fetches just 1-2 blocks.
+			time.Sleep(followPollInterval)
 			continue
 		}
 
-		processed, err := followBlock(ctx, api, mongoClient, nextBlock)
+		// One batching rule for all distances: gaps beyond the threshold are
+		// processed in chunkSize batches; a gap within the threshold is
+		// fetched in a single call.
+		end := lib + 1
+		if gap > int64(followThreshold) {
+			end = nextBlock + int64(chunkSize)
+		}
+		processed, err := syncChunk(ctx, api, mongoClient, nextBlock, end)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
-			if errors.Is(err, sdkv2.ErrBlockNotFound) {
-				// Chain head reached — wait for new blocks.
-				time.Sleep(followPollInterval)
-				headAt = time.Time{} // force head refresh on next loop
-				continue
-			}
-			log.Printf("[LiveSync] Block %d failed: %v (retrying)", nextBlock, err)
+			log.Printf("[LiveSync] Chunk %d-%d failed: %v (retrying)", nextBlock, end-1, err)
 			time.Sleep(retrySleep)
 			continue
 		}
@@ -223,6 +214,16 @@ func syncChunk(ctx context.Context, api *sdkv2.API, mongoClient *mongo.Client, f
 			return from, fmt.Errorf("convert block %d: %w", wb.BlockNum, err)
 		}
 		modelBlocks = append(modelBlocks, modelBlock)
+
+		// Guard against empty ops from account_history: every block carries
+		// at least producer_reward, so an empty ops list means the node's AH
+		// index has not recorded the block yet — fail the chunk and retry
+		// instead of writing a header whose operations would never exist
+		// (the 19-day ops-gap incident). Never triggers at LIB distance,
+		// where AH indexing is complete by construction.
+		if len(opsAll[wb.BlockNum]) == 0 && len(opsVirt[wb.BlockNum]) == 0 {
+			return from, fmt.Errorf("block %d returned no ops (account_history not yet indexed; retrying)", wb.BlockNum)
+		}
 
 		for i := range wb.Block.Transactions {
 			modelTx, err := rpc.ConvertTransaction(&wb.Block.Transactions[i], uint32(wb.BlockNum), int32(i))
@@ -281,59 +282,6 @@ func upsertOpsInBatches(ctx context.Context, mongoClient *mongo.Client, ops []*m
 		}
 	}
 	return nil
-}
-
-// followBlock fetches a single block near the chain head, upserts it, and
-// commits meta.max_block. ErrBlockNotFound means the chain head is reached.
-func followBlock(ctx context.Context, api *sdkv2.API, mongoClient *mongo.Client, blockNum int64) (int64, error) {
-	block, err := api.GetBlock(ctx, uint(blockNum))
-	if err != nil {
-		return blockNum, err
-	}
-	opsAll, err := api.GetOpsInBlock(ctx, uint(blockNum), false)
-	if err != nil {
-		return blockNum, err
-	}
-	opsVirt, err := api.GetOpsInBlock(ctx, uint(blockNum), true)
-	if err != nil {
-		return blockNum, err
-	}
-
-	modelBlock, err := rpc.ConvertBlock(block, uint32(blockNum))
-	if err != nil {
-		return blockNum, fmt.Errorf("convert block %d: %w", blockNum, err)
-	}
-	var modelTxs []*model.Transaction
-	for i := range block.Transactions {
-		modelTx, err := rpc.ConvertTransaction(&block.Transactions[i], uint32(blockNum), int32(i))
-		if err != nil {
-			log.Printf("[LiveSync] Convert transaction %d in block %d failed: %v", i, blockNum, err)
-			continue
-		}
-		modelTxs = append(modelTxs, modelTx)
-	}
-	modelOps := rpc.ConvertBlockOps(uint32(blockNum), opsAll, opsVirt)
-
-	// Same crash-consistency order as syncChunk: ops/txs before the block header.
-	if len(modelOps) > 0 {
-		if err := mongoClient.BulkUpsertOperations(ctx, modelOps); err != nil {
-			return blockNum, fmt.Errorf("upsert operations: %w", err)
-		}
-	}
-	if len(modelTxs) > 0 {
-		if err := mongoClient.BulkUpsertTransactions(ctx, modelTxs); err != nil {
-			return blockNum, fmt.Errorf("upsert transactions: %w", err)
-		}
-	}
-	if err := mongoClient.BulkUpsertBlocks(ctx, []*model.Block{modelBlock}); err != nil {
-		return blockNum, fmt.Errorf("upsert block: %w", err)
-	}
-
-	if err := mongoClient.UpdateMaxBlock(ctx, uint32(blockNum)); err != nil {
-		return blockNum, fmt.Errorf("update max block: %w", err)
-	}
-	metrics.UpdateCurrentBlock(uint32(blockNum))
-	return blockNum + 1, nil
 }
 
 // convertBlockOps used to live here; the shared implementation (op id

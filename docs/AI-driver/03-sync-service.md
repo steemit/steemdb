@@ -32,9 +32,15 @@ cd steemdb-sync && go build -o ../bin/cold_ingest ./cmd/cold_ingest
 
 ## cmd/live_sync — real-time follower
 
-- Resume point: `max(meta.max_block, highest block in blocks)`. Behind by
-  > follow_threshold (100) → chunked concurrent fetch (256/chunk); near head
-  → single-block follow. Same loop, no mode switch.
+- Resume point: `max(meta.max_block, highest block in blocks)`. The target
+  is always the **last irreversible block** (never the head): every ingested
+  block is final, and its account_history entry exists — this eliminates both
+  orphan-block pollution and the fresh-block empty-ops failure mode (the
+  19-day ops-gap incident, where single-block following wrote headers for
+  blocks whose AH entries were not indexed yet). One batching rule: gap >
+  follow_threshold (100) → chunkSize (100) batches; smaller gap → one call.
+  A block returning zero ops fails the chunk for retry (AH-lag guard — every
+  block carries at least producer_reward).
 - **Per-chunk write order is the crash-consistency contract:
   ops → transactions → blocks → meta.max_block.** The comment in
   `cmd/live_sync/main.go` says exactly why: a block header must never land
