@@ -130,9 +130,10 @@ type MonitoringConfig struct {
 // self-hosted Umami) on the client. Adding a provider never requires
 // touching the deployment pipeline.
 type AnalyticsConfig struct {
-	Provider string `mapstructure:"provider"` // "none" | "ga" | "umami"
-	GAID     string `mapstructure:"ga_id"`    // GA4 measurement ID (G-...)
-	UmamiURL string `mapstructure:"umami_url"` // base URL of a self-hosted Umami
+	Provider       string `mapstructure:"provider"`         // "" (unset) | "none" | "ga" | "umami"
+	GAID           string `mapstructure:"ga_id"`            // GA4 measurement ID (G-...)
+	UmamiURL       string `mapstructure:"umami_url"`        // base URL of a self-hosted Umami
+	UmamiWebsiteID string `mapstructure:"umami_website_id"` // Umami website UUID (data-website-id)
 }
 
 // LoadConfig loads configuration from file
@@ -164,11 +165,16 @@ func LoadConfig(configPath string) (*Config, error) {
 	viper.BindEnv("server.host", "SERVER_HOST")
 	viper.BindEnv("database.mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
 
-	// Analytics: keep the operator surface flat (GA_ID, UMAMI_URL) instead
-	// of nested ANALYTICS_GA_ID / ANALYTICS_UMAMI_URL. ANALYTICS_PROVIDER
-	// resolves through AutomaticEnv + the dot->underscore replacer above.
+	// Analytics: keep the operator surface flat (GA_ID, UMAMI_URL,
+	// UMAMI_WEBSITE_ID) instead of nested ANALYTICS_* names. The provider
+	// key is bound WITHOUT a "none" default on purpose: an unset
+	// ANALYTICS_PROVIDER ("" after unmarshal) must stay distinguishable
+	// from an explicit "none", because Normalize() applies the legacy
+	// GA_ID-only fallback (pre-/api/v1/meta behavior) only to the former.
+	viper.BindEnv("analytics.provider")
 	viper.BindEnv("analytics.ga_id", "GA_ID")
 	viper.BindEnv("analytics.umami_url", "UMAMI_URL")
+	viper.BindEnv("analytics.umami_website_id", "UMAMI_WEBSITE_ID")
 
 	// Read config file (will be overridden by environment variables if set)
 	if err := viper.ReadInConfig(); err != nil {
@@ -246,9 +252,9 @@ func setDefaults() {
 	viper.SetDefault("metrics.port", 9090)
 	viper.SetDefault("metrics.path", "/metrics")
 
-	// Analytics defaults: tracking is opt-in and fails closed — an unset
-	// or unknown provider disables the SPA snippet entirely.
-	viper.SetDefault("analytics.provider", "none")
+	// No analytics defaults here: analytics.provider is registered via
+	// BindEnv in LoadConfig (see the comment there). Tracking is opt-in
+	// and fails closed in (*AnalyticsConfig).Normalize.
 }
 
 // gaIDPattern is the GA4 measurement ID format ("G-" + alphanumerics). It
@@ -256,30 +262,58 @@ func setDefaults() {
 // gtag, so behavior is unchanged for any ID that worked before.
 var gaIDPattern = regexp.MustCompile(`^G-[A-Z0-9]+$`)
 
+// umamiWebsiteIDPattern is the Umami website ID format: a UUID, as issued
+// per website by the Umami dashboard. The SPA sets it as the script tag's
+// data-website-id attribute — Umami's tracker attributes events by that
+// attribute, NOT by the requesting hostname.
+var umamiWebsiteIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 // Normalize validates the raw analytics config and fails closed: an unknown
 // provider, or a provider missing (or misformatted) credentials, degrades to
 // "none" so the SPA never loads a broken half-configured snippet.
+//
+// Compatibility: before the /api/v1/meta endpoint existed, setting a valid
+// GA_ID alone enabled Google Analytics (the container entrypoint injected
+// it into index.html). An *unset* provider ("") keeps honoring that so
+// existing operators keep tracking after upgrading; an explicit "none" is
+// a hard off.
 func (a *AnalyticsConfig) Normalize() {
 	a.Provider = strings.ToLower(strings.TrimSpace(a.Provider))
 	a.GAID = sanitizeID(a.GAID)
-	a.UmamiURL = strings.TrimSpace(a.UmamiURL)
+	a.UmamiURL = strings.TrimRight(strings.TrimSpace(a.UmamiURL), "/")
+	a.UmamiWebsiteID = strings.ToLower(strings.TrimSpace(a.UmamiWebsiteID))
 
 	switch a.Provider {
 	case "ga":
 		if !gaIDPattern.MatchString(a.GAID) {
-			a.Provider = "none"
-			a.GAID = ""
+			a.degrade()
+			return
 		}
-	case "umami":
-		if !isValidAnalyticsURL(a.UmamiURL) {
-			a.Provider = "none"
-			a.UmamiURL = ""
-		}
-	default:
-		a.Provider = "none"
-		a.GAID = ""
 		a.UmamiURL = ""
+		a.UmamiWebsiteID = ""
+	case "umami":
+		if !isValidAnalyticsURL(a.UmamiURL) || !umamiWebsiteIDPattern.MatchString(a.UmamiWebsiteID) {
+			a.degrade()
+			return
+		}
+		a.GAID = ""
+	case "": // provider unset: legacy GA_ID-only compatibility
+		if gaIDPattern.MatchString(a.GAID) {
+			a.Provider = "ga"
+		} else {
+			a.degrade()
+		}
+	default: // explicit "none" or anything unknown: tracking off
+		a.degrade()
 	}
+}
+
+// degrade disables tracking entirely, dropping every provider credential.
+func (a *AnalyticsConfig) degrade() {
+	a.Provider = "none"
+	a.GAID = ""
+	a.UmamiURL = ""
+	a.UmamiWebsiteID = ""
 }
 
 // sanitizeID keeps only the characters GA measurement IDs may contain

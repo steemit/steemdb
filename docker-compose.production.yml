@@ -112,10 +112,11 @@
 #     SERVER_MODE, SERVER_PORT, SERVER_HOST,
 #     DATABASE_MONGODB_URI (alias MONGODB_URI)
 #   web analytics (steemdb-web/pkg/utils/config.go, viper BindEnv/AutomaticEnv):
-#     ANALYTICS_PROVIDER ("none" default | "ga" | "umami"), GA_ID, UMAMI_URL
-#     — served to the SPA via GET /api/v1/meta (no snippet in the static
-#     HTML); no default baked in, unknown or under-configured providers
-#     fail closed to "none"
+#     ANALYTICS_PROVIDER ("ga" | "umami"; unset/empty -> legacy: GA enabled
+#     iff valid GA_ID; explicit "none" = off), GA_ID, UMAMI_URL,
+#     UMAMI_WEBSITE_ID — served to the SPA via GET /api/v1/meta (no snippet
+#     in the static HTML); no default baked in, unknown or under-configured
+#     providers fail closed to "none"
 #
 # Setup: cp .env.production.example .env  (then edit; GRAFANA_ADMIN_PASSWORD
 # is required — the compose refuses to start with the placeholder unset).
@@ -140,12 +141,15 @@ services:
       - SERVER_MODE=production
       - DATABASE_MONGODB_URI=${WEB_MONGODB_URI:-mongodb://mongo:27017/}
       # Web analytics for the SPA, served via GET /api/v1/meta (see header
-      # comment). No baked-in default: set ANALYTICS_PROVIDER=ga (+ GA_ID)
-      # or ANALYTICS_PROVIDER=umami (+ UMAMI_URL) in .env to enable;
-      # anything missing/malformed disables tracking (fails closed).
-      - ANALYTICS_PROVIDER=${ANALYTICS_PROVIDER-none}
+      # comment). No baked-in default: set ANALYTICS_PROVIDER=ga (+ GA_ID),
+      # or ANALYTICS_PROVIDER=umami (+ UMAMI_URL + UMAMI_WEBSITE_ID) in .env
+      # to enable; ANALYTICS_PROVIDER unset keeps the legacy behavior (GA on
+      # iff GA_ID is a valid G-... ID); anything missing/malformed disables
+      # tracking (fails closed).
+      - ANALYTICS_PROVIDER=${ANALYTICS_PROVIDER-}
       - GA_ID=${GA_ID-}
       - UMAMI_URL=${UMAMI_URL-}
+      - UMAMI_WEBSITE_ID=${UMAMI_WEBSITE_ID-}
     volumes:
       # Host-side config; edit and `docker compose restart steemdb-web`.
       - ./steemdb-web/configs:/app/configs:ro

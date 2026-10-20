@@ -43,11 +43,13 @@ export interface SearchResult {
 
 // MetaAnalytics mirrors the backend analytics selection served by
 // GET /api/v1/meta (steemdb-web/internal/api/meta_handler.go). The SPA loads
-// the matching third-party script (src/lib/analytics.ts); see there.
+// the matching third-party script (src/lib/analytics.ts); see there. Only
+// the selected provider's credential is ever present.
 export interface MetaAnalytics {
   provider: 'ga' | 'umami';
   id?: string; // ga: GA4 measurement ID (G-...)
-  url?: string; // umami: base URL of the self-hosted instance
+  url?: string; // umami: base URL of the self-hosted instance (path preserved)
+  website_id?: string; // umami: website UUID, set as the tracker's data-website-id
 }
 
 // MetaInfo mirrors the raw GET /api/v1/meta body (like /v1/health, not the
@@ -226,9 +228,7 @@ class ApiClient {
   // fetch instead of going through request<T>, which would mis-type the
   // result as ApiResponse<MetaInfo> (cf. /v1/health's raw body).
   async getMeta(): Promise<MetaInfo> {
-    const response = await fetch(`${this.baseUrl}/v1/meta`, {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const response = await fetch(`${this.baseUrl}/v1/meta`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }

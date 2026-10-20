@@ -8,7 +8,7 @@
  * module loads the matching third-party script on the client:
  *
  *   - "ga"    -> Google Analytics 4 (gtag)
- *   - "umami" -> self-hosted Umami (<base>/script.js)
+ *   - "umami" -> self-hosted Umami (<base>/script.js + data-website-id)
  *   - absent  -> no tracking
  *
  * Analytics must never break the app: a failed /api/v1/meta fetch, a
@@ -43,8 +43,13 @@ export async function initAnalytics(): Promise<void> {
   try {
     if (a.provider === 'ga' && a.id && gaIDPattern.test(a.id)) {
       loadGoogleTag(a.id);
-    } else if (a.provider === 'umami' && a.url && /^https?:\/\//.test(a.url)) {
-      loadUmami(a.url);
+    } else if (
+      a.provider === 'umami' &&
+      a.url &&
+      a.website_id &&
+      /^https?:\/\//.test(a.url)
+    ) {
+      loadUmami(a.url, a.website_id);
     }
     // Unknown/misconfigured provider: silently no-op. The server already
     // fails closed to "none"; this is defense in depth.
@@ -67,17 +72,22 @@ function loadGoogleTag(id: string): void {
   const s = document.createElement('script');
   s.async = true;
   s.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(id)}`;
+  s.onerror = () => console.warn('Analytics: failed to load the Google tag (gtag.js)');
   document.head.appendChild(s);
   w.gtag('js', new Date());
   w.gtag('config', id);
 }
 
-// Self-hosted Umami: script.js lives at the instance root and identifies the
-// site by the requesting hostname.
-function loadUmami(baseURL: string): void {
-  const u = new URL(baseURL);
+// Self-hosted Umami: script.js lives at the instance's base URL (any
+// configured path is preserved, so instances behind a subpath reverse
+// proxy work). The tracker attributes events via the script tag's
+// data-website-id attribute — it does NOT identify the site by hostname,
+// so the website UUID from the Umami dashboard is mandatory.
+function loadUmami(baseURL: string, websiteID: string): void {
   const s = document.createElement('script');
   s.defer = true;
-  s.src = `${u.origin}/script.js`;
+  s.src = `${baseURL.replace(/\/+$/, '')}/script.js`;
+  s.setAttribute('data-website-id', websiteID);
+  s.onerror = () => console.warn(`Analytics: failed to load the Umami tracker from ${baseURL}`);
   document.head.appendChild(s);
 }

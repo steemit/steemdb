@@ -71,19 +71,42 @@ func TestMetaServesGoogleAnalytics(t *testing.T) {
 	}
 }
 
-// TestMetaServesUmami verifies the umami shape: provider + base url, and no
-// ga id field.
+// TestMetaServesUmami verifies the umami shape: provider + base url +
+// website UUID (the tracker's data-website-id), and no ga id field.
 func TestMetaServesUmami(t *testing.T) {
-	code, body := doMetaRequest(t, &utils.AnalyticsConfig{Provider: "umami", UmamiURL: "https://umami.example.com"})
+	code, body := doMetaRequest(t, &utils.AnalyticsConfig{
+		Provider:       "umami",
+		UmamiURL:       "https://umami.example.com",
+		UmamiWebsiteID: "94db1cb1-74f4-4a40-ad6c-9623636803c4",
+	})
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body: %s)", code, body)
 	}
-	for _, want := range []string{`"provider":"umami"`, `"url":"https://umami.example.com"`, `"analytics":`} {
+	for _, want := range []string{
+		`"provider":"umami"`,
+		`"url":"https://umami.example.com"`,
+		`"website_id":"94db1cb1-74f4-4a40-ad6c-9623636803c4"`,
+		`"analytics":`,
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q, got: %s", want, body)
 		}
 	}
 	if strings.Contains(body, `"id"`) {
 		t.Errorf("umami body must not carry an id field, got: %s", body)
+	}
+}
+
+// TestMetaSkipsUnknownProvider is the handler-level fail-closed guard:
+// production configs are normalized in main, but a provider value that is
+// neither "ga" nor "umami" must yield no analytics key at all — never a
+// half-shaped object with an arbitrary url.
+func TestMetaSkipsUnknownProvider(t *testing.T) {
+	code, body := doMetaRequest(t, &utils.AnalyticsConfig{Provider: "matomo", UmamiURL: "https://evil.example.com"})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", code, body)
+	}
+	if strings.Contains(body, "analytics") {
+		t.Errorf("unknown provider must not be served, got: %s", body)
 	}
 }
