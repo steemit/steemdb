@@ -41,8 +41,9 @@ Four-stage pipeline:
    the plugin retries 5×3s on failure. Empty blocks land as block-only docs
    via a ticker sweep. Exits at target height.
 2. **Live sync** (`cmd/live_sync`, steemgosdk v2): resumes from
-   `max(meta.max_block, highest block)`; chunked concurrent catch-up, then
-   single-block follow at head. Per-chunk write order is fixed:
+   `max(meta.max_block, highest block)`; targets the last irreversible
+   block — chunked concurrent catch-up and near-LIB fetching use the same
+   batch path (no single-block mode). Per-chunk write order is fixed:
    **ops → transactions → blocks → meta.max_block** (the last is the commit
    point). Compensates two condenser quirks (see 03).
 3. **Processor** (`cmd/processor`): the only consumer of `operations`.
