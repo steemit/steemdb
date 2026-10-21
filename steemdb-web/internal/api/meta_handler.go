@@ -31,23 +31,29 @@ func NewMetaHandler(analytics *utils.AnalyticsConfig) *MetaHandler {
 //
 // The response is small and vendor-neutral. `analytics` is omitted (rather
 // than sent as {"provider":"none"}) when tracking is disabled, so a client
-// treats "absent" and "none" identically. The GA measurement ID is public
-// by design (Google Analytics 4 IDs are not secrets); the Umami base URL is
-// only sent when an absolute http(s) URL is configured — validation happens
-// in (*utils.AnalyticsConfig).Normalize, which fails closed to "none".
+// treats "absent" and "none" identically. Only the credentials of the
+// selected provider are sent — "ga" carries the measurement ID (public by
+// design, Google Analytics 4 IDs are not secrets), "umami" carries the
+// instance base URL (validated to an absolute http(s) URL) and the website
+// UUID — validation happens in (*utils.AnalyticsConfig).Normalize, which
+// fails closed to "none"; the switch below fails closed again for any
+// value that somehow skipped normalization.
 func (h *MetaHandler) GetMeta(c *gin.Context) {
 	resp := gin.H{
 		"service": "steemdb-web",
 		"version": "1.0.0",
 	}
-	if a := h.analytics; a != nil && a.Provider != "none" {
-		analytics := gin.H{"provider": a.Provider}
-		if a.Provider == "ga" {
-			analytics["id"] = a.GAID
-		} else {
-			analytics["url"] = a.UmamiURL
+	if a := h.analytics; a != nil {
+		var analytics gin.H
+		switch a.Provider {
+		case "ga":
+			analytics = gin.H{"provider": "ga", "id": a.GAID}
+		case "umami":
+			analytics = gin.H{"provider": "umami", "url": a.UmamiURL, "website_id": a.UmamiWebsiteID}
 		}
-		resp["analytics"] = analytics
+		if analytics != nil {
+			resp["analytics"] = analytics
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }
