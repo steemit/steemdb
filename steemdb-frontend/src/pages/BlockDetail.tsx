@@ -3,115 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/Card';
+import { DefinitionTable } from '../components/ui/DefinitionTable';
 import { getBlock, getBlockVirtualOps } from '../lib/api';
 import type { Block, BlockOperation, BlockTransaction, VirtualOperation } from '../types';
-import { formatNumber, formatTimeAgo } from '../lib/utils';
-
-// Pretty operation names, ported from the legacy app/helpers/OpName.php map.
-// Types without an entry fall back to the raw op_type string.
-const OP_NAMES: Record<string, string> = {
-  account_create: 'Account Create',
-  account_update: 'Account Update',
-  account_witness_proxy: 'Witness Proxy',
-  account_witness_vote: 'Witness Vote',
-  author_reward: 'Author Reward',
-  cancel_transfer_from_savings: 'Cancel Savings Withdrawal',
-  comment: 'Post',
-  comment_reward: 'Post Reward',
-  convert: 'Convert',
-  curate_reward: 'Curate Reward',
-  curation_reward: 'Curation Reward',
-  delete_comment: 'Post Delete',
-  feed_publish: 'Feed Publish',
-  fill_order: 'Fill Order',
-  fill_vesting_withdraw: 'Power Down',
-  interest: 'SBD Interest',
-  limit_order_create: 'Limit Order Create',
-  limit_order_cancel: 'Limit Order Cancel',
-  pow: 'Mining',
-  pow2: 'Mining',
-  transfer: 'Transfer',
-  transfer_to_savings: 'Transfer to Savings',
-  transfer_from_savings: 'Transfer from Savings',
-  transfer_to_vesting: 'Power Up',
-  vote: 'Vote',
-  witness_update: 'Witness Update',
-};
-
-function opDisplayName(opType: string): string {
-  return OP_NAMES[opType] ?? opType;
-}
-
-// Keys whose values are Steem account names, rendered as links.
-const ACCOUNT_KEYS = new Set([
-  'account',
-  'approver',
-  'author',
-  'creator',
-  'current_owner',
-  'delegator',
-  'delegatee',
-  'from',
-  'new_owner',
-  'owner',
-  'publisher',
-  'recoverer',
-  'requester',
-  'to',
-  'voter',
-  'witness',
-]);
-
-function isPrimitive(value: unknown): value is string | number | boolean {
-  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
-}
-
-function ValueCell({ value, accountKey }: { value: unknown; accountKey?: string }) {
-  if (value === null || value === undefined || value === '') {
-    return <span className="text-muted-foreground">—</span>;
-  }
-  if (isPrimitive(value)) {
-    if (accountKey && ACCOUNT_KEYS.has(accountKey) && typeof value === 'string') {
-      return (
-        <Link to={`/accounts/${value}`} className="text-primary hover:underline">
-          {value}
-        </Link>
-      );
-    }
-    return <span className="break-all">{String(value)}</span>;
-  }
-  // Arrays and objects render as pretty JSON, like the legacy definition table.
-  return (
-    <pre className="max-h-64 overflow-auto rounded bg-muted p-2 text-xs leading-relaxed">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
-}
-
-// DefinitionTable mirrors the legacy _elements/definition_table view: a
-// two-column key/value table with the key column visually distinct.
-function DefinitionTable({ data, extra }: { data: Record<string, unknown>; extra?: [string, unknown][] }) {
-  const entries: [string, unknown][] = [...Object.entries(data), ...(extra ?? [])];
-  if (entries.length === 0) {
-    return <div className="py-4 text-center text-sm text-muted-foreground">No data</div>;
-  }
-  return (
-    <table className="w-full table-fixed text-sm">
-      <tbody>
-        {entries.map(([key, value]) => (
-          <tr key={key} className="border-b last:border-b-0">
-            <td className="w-1/3 bg-muted/50 px-3 py-2 align-top font-medium text-muted-foreground">
-              <small>{key}</small>
-            </td>
-            <td className="px-3 py-2 align-top">
-              <ValueCell value={value} accountKey={key} />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
+import { formatNumber, formatTimeAgo, opDisplayName } from '../lib/utils';
 
 // OperationRow renders one operation of the Operations tab: a header with the
 // operation name / relative time / block link, and a collapsible definition
@@ -160,7 +55,14 @@ function TransactionsTab({ transactions }: { transactions: BlockTransaction[] })
         <div key={tx.transaction_id || index} className="rounded-md border">
           <div className="border-b bg-muted/50 px-3 py-2 text-sm">
             <span className="font-medium">Transaction #{index}</span>
-            <span className="ml-2 break-all font-mono text-xs text-muted-foreground">{tx.transaction_id}</span>
+            {tx.transaction_id && (
+              <Link
+                to={`/tx/${tx.transaction_id}`}
+                className="ml-2 break-all font-mono text-xs text-primary hover:underline"
+              >
+                {tx.transaction_id}
+              </Link>
+            )}
           </div>
           <DefinitionTable
             data={{
