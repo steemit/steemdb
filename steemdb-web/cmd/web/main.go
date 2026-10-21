@@ -46,6 +46,12 @@ func main() {
 	logger.Info("Loaded configuration",
 		utils.String("mongodb_uri", config.Database.MongoDB.URI))
 
+	// Canonicalize the optional analytics config: unknown providers and
+	// missing/misformatted credentials fail closed to "none", so the SPA
+	// never loads a broken half-configured snippet (served via /api/v1/meta).
+	config.Analytics.Normalize()
+	logger.Info("Analytics configuration", utils.String("provider", config.Analytics.Provider))
+
 	// Initialize MongoDB
 	mongodb, err := database.NewMongoDB(config.Database.MongoDB, logger)
 	if err != nil {
@@ -112,7 +118,7 @@ func main() {
 	}
 
 	// Setup API routes
-	api.SetupRoutes(router, mongodb, steemClient, logger)
+	api.SetupRoutes(router, mongodb, steemClient, logger, config)
 
 	// Create HTTP server
 	server := &http.Server{

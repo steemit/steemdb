@@ -5,24 +5,9 @@
     <link rel="icon" type="image/png" href="/steemdb.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="SteemDB - Steem blockchain explorer and analytics platform" />
-    <!-- Google Analytics (GA4). The container entrypoint replaces __GA_ID__
-         with the GA_ID env var at startup; the raw placeholder (local dev)
-         fails the format check below, so GA stays disabled there. -->
-    <script>
-      (function () {
-        var GA_ID = '__GA_ID__';
-        if (!/^G-[A-Z0-9]+$/i.test(GA_ID)) return;
-        var s = document.createElement('script');
-        s.async = true;
-        s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(GA_ID);
-        document.head.appendChild(s);
-        window.dataLayer = window.dataLayer || [];
-        function gtag() { window.dataLayer.push(arguments); }
-        window.gtag = gtag;
-        gtag('js', new Date());
-        gtag('config', GA_ID);
-      })();
-    </script>
+    <!-- Web analytics (if any) is loaded by src/lib/analytics.ts from the
+         backend's /api/v1/meta — no third-party snippet belongs here: the
+         image ships tracking-free and the operator opts in at runtime. -->
     <title>SteemDB</title>
   </head>
   <body>

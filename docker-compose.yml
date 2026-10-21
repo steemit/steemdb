@@ -10,9 +10,14 @@ services:
     environment:
       - SERVER_MODE=production
       - DATABASE_MONGODB_URI=mongodb://mongo:27017/
-      # Google Analytics measurement ID (no default anywhere — set GA_ID on
-      # the host to enable; unset/empty disables tracking).
+      # Web analytics, served to the SPA via GET /api/v1/meta (the static
+      # HTML carries no snippet). ANALYTICS_PROVIDER: "none" (default),
+      # "ga" (also set GA_ID, e.g. G-XXXX) or "umami" (also set UMAMI_URL
+      # to the base URL of your self-hosted Umami). Unknown providers or a
+      # missing/malformed credential fail closed to "none" (no tracking).
+      - ANALYTICS_PROVIDER=${ANALYTICS_PROVIDER-none}
       - GA_ID=${GA_ID-}
+      - UMAMI_URL=${UMAMI_URL-}
     volumes:
       # Mount configuration directory from host to container
       # Edit steemdb-web/configs/config.yaml on host to change application settings

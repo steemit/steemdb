@@ -41,6 +41,23 @@ export interface SearchResult {
   url: string;
 }
 
+// MetaAnalytics mirrors the backend analytics selection served by
+// GET /api/v1/meta (steemdb-web/internal/api/meta_handler.go). The SPA loads
+// the matching third-party script (src/lib/analytics.ts); see there.
+export interface MetaAnalytics {
+  provider: 'ga' | 'umami';
+  id?: string; // ga: GA4 measurement ID (G-...)
+  url?: string; // umami: base URL of the self-hosted instance
+}
+
+// MetaInfo mirrors the raw GET /api/v1/meta body (like /v1/health, not the
+// {success, data} envelope). `analytics` is absent when tracking is off.
+export interface MetaInfo {
+  service: string;
+  version: string;
+  analytics?: MetaAnalytics;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -203,6 +220,21 @@ class ApiClient {
     return this.request<{ status: string; timestamp: number }>('/v1/health');
   }
 
+  // SPA bootstrap endpoint (analytics selection). /v1/meta returns the raw
+  // JSON body (service/version + optional analytics), NOT the {success,
+  // data} envelope the other /v1/* endpoints use — so this does a plain
+  // fetch instead of going through request<T>, which would mis-type the
+  // result as ApiResponse<MetaInfo> (cf. /v1/health's raw body).
+  async getMeta(): Promise<MetaInfo> {
+    const response = await fetch(`${this.baseUrl}/v1/meta`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return (await response.json()) as MetaInfo;
+  }
+
   // Post/Comment endpoints
   async getPosts(params: PaginationParams & { sort_by?: string; sort_order?: 'asc' | 'desc' }): Promise<ApiResponse<Post[]>> {
     // Canonical backend params: page_size/sort_by/sort_order (the handler
@@ -359,4 +391,5 @@ export const {
   getClients,
   getBenefactors,
   getPending,
+  getMeta,
 } = boundClient;

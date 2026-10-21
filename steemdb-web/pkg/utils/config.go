@@ -2,7 +2,9 @@ package utils
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ type Config struct {
 	Log        LogConfig        `mapstructure:"log"`
 	Metrics    MetricsConfig    `mapstructure:"metrics"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+	Analytics  AnalyticsConfig  `mapstructure:"analytics"`
 }
 
 // ServerConfig holds server configuration
@@ -118,6 +121,20 @@ type MonitoringConfig struct {
 	RecoveryTimeout     time.Duration `mapstructure:"recovery_timeout"`
 }
 
+// AnalyticsConfig holds the optional third-party web analytics selection.
+//
+// The web service deliberately keeps no analytics snippet in the static HTML
+// (the previous mechanism sed-replaced a placeholder in index.html on every
+// container start). It only serves this config via GET /api/v1/meta, and
+// the SPA loads the matching third-party script (Google Analytics gtag or
+// self-hosted Umami) on the client. Adding a provider never requires
+// touching the deployment pipeline.
+type AnalyticsConfig struct {
+	Provider string `mapstructure:"provider"` // "none" | "ga" | "umami"
+	GAID     string `mapstructure:"ga_id"`    // GA4 measurement ID (G-...)
+	UmamiURL string `mapstructure:"umami_url"` // base URL of a self-hosted Umami
+}
+
 // LoadConfig loads configuration from file
 func LoadConfig(configPath string) (*Config, error) {
 	viper.SetConfigFile(configPath)
@@ -146,6 +163,12 @@ func LoadConfig(configPath string) (*Config, error) {
 	viper.BindEnv("server.port", "SERVER_PORT")
 	viper.BindEnv("server.host", "SERVER_HOST")
 	viper.BindEnv("database.mongodb.uri", "DATABASE_MONGODB_URI", "MONGODB_URI")
+
+	// Analytics: keep the operator surface flat (GA_ID, UMAMI_URL) instead
+	// of nested ANALYTICS_GA_ID / ANALYTICS_UMAMI_URL. ANALYTICS_PROVIDER
+	// resolves through AutomaticEnv + the dot->underscore replacer above.
+	viper.BindEnv("analytics.ga_id", "GA_ID")
+	viper.BindEnv("analytics.umami_url", "UMAMI_URL")
 
 	// Read config file (will be overridden by environment variables if set)
 	if err := viper.ReadInConfig(); err != nil {
@@ -222,4 +245,64 @@ func setDefaults() {
 	viper.SetDefault("metrics.enabled", true)
 	viper.SetDefault("metrics.port", 9090)
 	viper.SetDefault("metrics.path", "/metrics")
+
+	// Analytics defaults: tracking is opt-in and fails closed — an unset
+	// or unknown provider disables the SPA snippet entirely.
+	viper.SetDefault("analytics.provider", "none")
+}
+
+// gaIDPattern is the GA4 measurement ID format ("G-" + alphanumerics). It
+// mirrors the guard the old inline index.html script used before loading
+// gtag, so behavior is unchanged for any ID that worked before.
+var gaIDPattern = regexp.MustCompile(`^G-[A-Z0-9]+$`)
+
+// Normalize validates the raw analytics config and fails closed: an unknown
+// provider, or a provider missing (or misformatted) credentials, degrades to
+// "none" so the SPA never loads a broken half-configured snippet.
+func (a *AnalyticsConfig) Normalize() {
+	a.Provider = strings.ToLower(strings.TrimSpace(a.Provider))
+	a.GAID = sanitizeID(a.GAID)
+	a.UmamiURL = strings.TrimSpace(a.UmamiURL)
+
+	switch a.Provider {
+	case "ga":
+		if !gaIDPattern.MatchString(a.GAID) {
+			a.Provider = "none"
+			a.GAID = ""
+		}
+	case "umami":
+		if !isValidAnalyticsURL(a.UmamiURL) {
+			a.Provider = "none"
+			a.UmamiURL = ""
+		}
+	default:
+		a.Provider = "none"
+		a.GAID = ""
+		a.UmamiURL = ""
+	}
+}
+
+// sanitizeID keeps only the characters GA measurement IDs may contain
+// (alphanumerics and dashes), mirroring the `tr -cd 'A-Za-z0-9-'` the old
+// container entrypoint applied. Defense in depth: the format check in
+// Normalize is authoritative, this only scrubs hostiles from operator input.
+func sanitizeID(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// isValidAnalyticsURL accepts only absolute http(s) URLs with a host: the
+// SPA loads <url>/script.js from it, and anything else (relative paths,
+// javascript: and other schemes) would be a client-side injection vector.
+func isValidAnalyticsURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
