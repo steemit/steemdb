@@ -30,6 +30,27 @@ cd steemdb-sync && go build -o ../bin/cold_ingest ./cmd/cold_ingest
   whose ops are still being retried, which can hand the processor a
   "header without ops" window (see failure chain below).
 
+### Ingest plugin: cold-start only, no finality checks
+
+The steemd ingest plugin (`steem` repo, `ingest_plugin` branch, PR #3708)
+hooks `post_apply_operation`/`post_apply_block` and pushes at apply time.
+Two finality hazards make it unsuitable for following the live head:
+
+1. **Mempool double-push**: `post_apply_operation` fires both when a
+   transaction enters the mempool (recorded with `trx_index=-1` against the
+   then-head block) and when it is included in a block. Every real op gets
+   written twice with different coordinates. Replay from `block_log` never
+   touches the mempool, so cold starts are unaffected.
+2. **No fork retraction**: the plugin registers no `switching_forks`/rewind
+   handler, so ops from a branch that loses a micro-fork stay in the
+   database alongside the canonical re-inclusion.
+
+**Rule: use the plugin only for cold-start replay up to an irreversible
+height** (the replay target is far behind the head by construction). For
+live following use live_sync (targets LIB since #97). If the plugin is ever
+needed for live following again, it first needs buffer-at-apply +
+flush-on-`on_irreversible_block` rework.
+
 ## cmd/live_sync — real-time follower
 
 - Resume point: `max(meta.max_block, highest block in blocks)`. The target

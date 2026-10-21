@@ -46,6 +46,18 @@ convert at the boundary in one function, never per-callsite.
 Malformed chain patches crashed the processor; now recovered per-op.
 **Lesson**: chain data is hostile input; wrap third-party parsers.
 
+### 6. live_sync head-following + AH-lag empty ops (PRs #93, #97)
+Single-block follow near the head wrote block headers for seconds-old
+blocks whose account_history entries were not yet indexed
+(`get_ops_in_block` returns empty, no error) — a 19-day ops gap
+(558k blocks) while blocks/transactions kept landing. Also surfaced:
+duplicate creation ops from the same trx in two blocks (orphan pushes).
+**Lessons**: (a) never trust "empty ops" from a fresh block — every block
+carries at least producer_reward, so empty means not-yet-indexed, retry;
+(b) follow LIB, not the head; (c) blocks/transactions advancing while
+operations stand still is a detectable stall pattern — add a coverage
+health check rather than eyeballing block progress.
+
 ## Review-confirmed defect patterns (2026-09 five-pass review)
 
 Each pattern below occurred ≥2 times independently — they are systemic,
