@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, Search, Moon, Sun, Monitor, User, Box, ArrowLeftRight, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -18,28 +18,23 @@ export function Header() {
   const [searching, setSearching] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
-  // Debounced search: fires 300ms after typing stops, minimum 2 characters.
-  // All state updates happen inside the timer callback (never synchronously
-  // in the effect body).
-  useEffect(() => {
+  // Explicit search only: nothing fires while typing. The query runs when
+  // the user presses Enter or clicks the search button.
+  const performSearch = async () => {
     const q = searchQuery.trim();
-    const timer = setTimeout(async () => {
-      if (q.length < 2) {
-        setResults([]);
-        setSearching(false);
-        setDropdownOpen(false);
-        return;
-      }
-
-      setSearching(true);
-      const response = await apiClient.search(q);
-      setResults(response.success && response.data ? response.data : []);
+    if (q.length < 2) {
+      setResults([]);
       setSearching(false);
-      setDropdownOpen(true);
-    }, 300);
+      setDropdownOpen(false);
+      return;
+    }
 
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+    setSearching(true);
+    setDropdownOpen(true);
+    const response = await apiClient.search(q);
+    setResults(response.success && response.data ? response.data : []);
+    setSearching(false);
+  };
 
   const handleSelect = (result: SearchResult) => {
     setDropdownOpen(false);
@@ -151,16 +146,29 @@ export function Header() {
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') {
                         setSearchQuery('');
+                        setResults([]);
                         setDropdownOpen(false);
                         toggleSearch();
                       }
-                      if (e.key === 'Enter' && results.length > 0) {
-                        handleSelect(results[0]);
+                      if (e.key === 'Enter') {
+                        if (dropdownOpen && !searching && results.length > 0) {
+                          handleSelect(results[0]);
+                        } else {
+                          performSearch();
+                        }
                       }
                     }}
                     className="w-full"
                     autoFocus
                   />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={performSearch}
+                    title="Search"
+                  >
+                    <Search className="h-4 w-4" />
+                  </Button>
                   {dropdownOpen && (searching || results.length > 0 || searchQuery.trim().length >= 2) && (
                     <div className="absolute top-10 right-0 w-80 max-h-80 overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md">
                       {searching && (
