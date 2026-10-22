@@ -191,3 +191,38 @@ export function formatKeyName(key: string): string {
 export function formatRate(value: number): string {
   return value.toFixed(3);
 }
+
+// Pretty operation names, ported from the legacy app/helpers/OpName.php map.
+// Types without an entry fall back to the raw op_type string.
+export const OP_NAMES: Record<string, string> = {
+  account_create: 'Account Create',
+  account_update: 'Account Update',
+  account_witness_proxy: 'Witness Proxy',
+  account_witness_vote: 'Witness Vote',
+  author_reward: 'Author Reward',
+  cancel_transfer_from_savings: 'Cancel Savings Withdrawal',
+  comment: 'Post',
+  comment_reward: 'Post Reward',
+  convert: 'Convert',
+  curate_reward: 'Curate Reward',
+  curation_reward: 'Curation Reward',
+  delete_comment: 'Post Delete',
+  feed_publish: 'Feed Publish',
+  fill_order: 'Fill Order',
+  fill_vesting_withdraw: 'Power Down',
+  interest: 'SBD Interest',
+  limit_order_create: 'Limit Order Create',
+  limit_order_cancel: 'Limit Order Cancel',
+  pow: 'Mining',
+  pow2: 'Mining',
+  transfer: 'Transfer',
+  transfer_to_savings: 'Transfer to Savings',
+  transfer_from_savings: 'Transfer from Savings',
+  transfer_to_vesting: 'Power Up',
+  vote: 'Vote',
+  witness_update: 'Witness Update',
+};
+
+export function opDisplayName(opType: string): string {
+  return OP_NAMES[opType] ?? opType;
+}

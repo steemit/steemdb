@@ -4,6 +4,7 @@ import type {
   Block,
   BlockSummary,
   AccountOperation,
+  TransactionDetail,
   AccountGrowthPoint,
   BlockProductionPoint,
   TransactionVolumePoint,
@@ -128,6 +129,11 @@ class ApiClient {
 
   async getBlockVirtualOps(blockNumber: number): Promise<ApiResponse<VirtualOperation[]>> {
     return this.request<VirtualOperation[]>(`/v1/blocks/${blockNumber}/virtual-ops`);
+  }
+
+  // Transaction endpoint (raw condenser_api.get_transaction result)
+  async getTransaction(txId: string): Promise<ApiResponse<TransactionDetail>> {
+    return this.request<TransactionDetail>(`/v1/tx/${txId}`);
   }
 
   async getBlocks(params: PaginationParams): Promise<ApiResponse<BlockSummary[]>> {
@@ -361,6 +367,7 @@ export const {
   getAccountHistory,
   getBlock,
   getBlockVirtualOps,
+  getTransaction,
   getBlocks,
   getLatestBlocks,
   getWitnesses,

@@ -141,6 +141,22 @@ export interface Operation {
   transaction_id: string;
 }
 
+// TransactionDetail is the /v1/tx/:id payload: the raw
+// condenser_api.get_transaction result, where operations arrive as
+// [op_type, op_value] pairs.
+export interface TransactionDetail {
+  id?: string;
+  block_num: number;
+  transaction_num?: number;
+  expired?: boolean;
+  ref_block_num: number;
+  ref_block_prefix: number;
+  expiration: string;
+  operations: [string, Record<string, unknown>][];
+  extensions: unknown[];
+  signatures: string[];
+}
+
 // Account types
 export interface Account {
   id: number;

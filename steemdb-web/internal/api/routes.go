@@ -37,6 +37,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 	chartsHandler := NewChartsHandler(chartsService, logger)
 	legacyHandler := NewLegacyHandler(steemClient, logger)
 	metaHandler := NewMetaHandler(&config.Analytics)
+	txHandler := NewTxHandler(steemClient, logger)
 
 	// API v1 routes - register first to avoid conflicts with legacy routes
 	v1 := router.Group("/api/v1")
@@ -67,6 +68,9 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 		{
 			operations.GET("/stats", blockHandler.GetOperationStats)
 		}
+
+		// Transaction route (the legacy /tx/{txid} page's data source)
+		v1.GET("/tx/:id", txHandler.GetTx)
 
 		// Dashboard route
 		v1.GET("/dashboard", dashboardHandler.GetDashboard)

@@ -5,6 +5,7 @@ import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { BlocksPage } from './pages/Blocks';
 import { BlockDetailPage } from './pages/BlockDetail';
+import { TxDetailPage } from './pages/TxDetail';
 import { AccountsPage, AccountDetailPage } from './pages/Accounts';
 import { PostsPage } from './pages/Posts';
 import { PostDetailPage } from './pages/PostDetail';
@@ -99,6 +100,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="blocks" element={<BlocksPage />} />
             <Route path="blocks/:id" element={<BlockDetailPage />} />
+            <Route path="tx/:id" element={<TxDetailPage />} />
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="accounts/:id" element={<AccountDetailPage />} />
             <Route path="posts" element={<PostsPage />} />
