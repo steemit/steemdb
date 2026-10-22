@@ -147,7 +147,7 @@ export interface Operation {
 export interface TransactionDetail {
   id?: string;
   block_num: number;
-  trx_num?: number;
+  transaction_num?: number;
   expired?: boolean;
   ref_block_num: number;
   ref_block_prefix: number;

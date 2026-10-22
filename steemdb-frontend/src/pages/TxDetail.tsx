@@ -120,7 +120,7 @@ export function TxDetailPage() {
   const txDataView: Record<string, unknown> = {
     transaction_id: txId,
     block_num: tx.block_num,
-    trx_num: tx.trx_num,
+    transaction_num: tx.transaction_num,
     ref_block_num: tx.ref_block_num,
     ref_block_prefix: tx.ref_block_prefix,
     expiration: tx.expiration,
