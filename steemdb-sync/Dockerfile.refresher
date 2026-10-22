@@ -1,7 +1,7 @@
 # Dockerfile for the refresher service (cmd/refresher).
 # Maintains witness / witness_history / witness_misses / funds_history /
 # status counters / clients snapshots (replaces legacy history.py + witnesses.py).
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 RUN apk add --no-cache git
 
