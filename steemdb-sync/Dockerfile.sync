@@ -12,7 +12,7 @@
 #     cold_ingest — HTTP receiver for the steemd ingest plugin; serves
 #                   /metrics on its ingest listener (INGEST_LISTEN_ADDR)
 #     repair      — gap-repair / rescan maintenance binary
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 RUN apk add --no-cache git
 

@@ -2,6 +2,8 @@ module github.com/steemit/steemdb-sync
 
 go 1.25.5
 
+toolchain go1.27.3
+
 require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.23.2

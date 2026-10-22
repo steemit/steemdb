@@ -2,6 +2,8 @@ module github.com/steemit/steemdb/web
 
 go 1.23.0
 
+toolchain go1.27.3
+
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gorilla/websocket v1.5.3
