@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ChevronRight, Search, ArrowUpDown, Star, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
@@ -24,18 +24,15 @@ export function AccountsPage() {
     queryFn: () => getAccounts({ page, limit: 20, search, sort: sortBy, order: sortOrder }),
   });
 
-  // Debounce the search box: the input updates local state on every
-  // keystroke, and only the settled value reaches the URL/query after a
-  // pause, so typing no longer fires a request per character.
-  useEffect(() => {
-    if (searchInput === search) return;
-    const timer = window.setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-      setSearchParams({ page: '1', sort: sortBy, order: sortOrder, ...(searchInput && { search: searchInput }) });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [searchInput, search, sortBy, sortOrder, setSearchParams]);
+  // Explicit search only: the input updates local state on every keystroke,
+  // and the query/URL change happens when the user presses Enter or clicks
+  // the search button.
+  const handleSearch = () => {
+    const value = searchInput.trim();
+    setSearch(value);
+    setPage(1);
+    setSearchParams({ page: '1', sort: sortBy, order: sortOrder, ...(value && { search: value }) });
+  };
 
   const handleSort = (field: string) => {
     if (sortBy === field) {
@@ -107,16 +104,23 @@ export function AccountsPage() {
               <CardTitle>Account List</CardTitle>
               <CardDescription>Search and browse Steem accounts</CardDescription>
             </div>
-            <div className="w-64">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search accounts..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
+            <div className="flex w-72 items-center gap-2">
+              <Input
+                placeholder="Search accounts..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSearch();
+                }}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleSearch}
+                title="Search"
+              >
+                <Search className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </CardHeader>
