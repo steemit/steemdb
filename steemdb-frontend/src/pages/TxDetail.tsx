@@ -5,8 +5,14 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { DefinitionTable } from '../components/ui/DefinitionTable';
 import { getTransaction } from '../lib/api';
-import type { TransactionDetail } from '../types';
+import type { ApiErrorBody, ApiResponse, TransactionDetail } from '../types';
 import { formatNumber, opDisplayName } from '../lib/utils';
+
+// apiErrorCode extracts the backend's numeric error code from an ApiResponse
+// error envelope (see lib/api.ts: failed requests keep the backend body).
+function apiErrorCode(error: ApiResponse<TransactionDetail>['error'] | undefined): number | undefined {
+  return typeof error === 'object' && error !== null ? (error as ApiErrorBody).code : undefined;
+}
 
 // TxOperationRow renders one operation of the transaction: a header with the
 // operation name and a collapsible definition table of the payload.
@@ -63,6 +69,12 @@ export function TxDetailPage() {
     queryKey: ['tx', txId],
     queryFn: () => getTransaction(txId),
     enabled: isValidId,
+    // While the transaction's block is still inside the reversible window
+    // the API answers 425; poll until the chain finalizes it and the page
+    // fills in on its own (Steem irreversibility lags the head by well
+    // under a minute).
+    refetchInterval: (query) =>
+      apiErrorCode(query.state.data?.error) === 425 ? 5000 : false,
   });
 
   const tx: TransactionDetail | undefined = data?.data;
@@ -94,14 +106,27 @@ export function TxDetailPage() {
     );
   }
 
+  const notYetIrreversible = apiErrorCode(data?.error) === 425;
+
   if (error || !data?.success || !tx) {
     return (
       <div className="space-y-6">
         <Card>
           <CardContent className="py-12">
-            <div className="text-center text-muted-foreground">
-              Transaction not found or failed to load.
-            </div>
+            {notYetIrreversible ? (
+              <div className="space-y-2">
+                <div className="text-center font-medium">Transaction not yet irreversible</div>
+                <div className="text-center text-muted-foreground">
+                  This transaction has landed on chain, but its block is still inside the
+                  reversible window. SteemDB only displays irreversible data — it becomes
+                  viewable once the chain finalizes the block, usually within a minute.
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground">
+                Transaction not found or failed to load.
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
