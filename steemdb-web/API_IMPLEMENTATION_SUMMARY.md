@@ -50,7 +50,7 @@ Successfully implemented the core API infrastructure for SteemDB Web Service, pr
 - `GET /api/v1/operations/stats?range=24h` - Operation type statistics
 
 #### Transaction Endpoints
-- `GET /api/v1/tx/:id` - Get a transaction by ID (proxies `condenser_api.get_transaction`; the legacy `/tx/{txid}` page's data source)
+- `GET /api/v1/tx/:id` - Get a transaction by ID (local-first: served from the `tx_cache` collection, falling back to `condenser_api.get_transaction` with the result cached — the legacy `/tx/{txid}` page's data source)
 
 #### System Endpoints
 - `GET /health` - Health check

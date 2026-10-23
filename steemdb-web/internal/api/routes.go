@@ -24,6 +24,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 	statsService := services.NewStatsService(db, steemClient, logger)
 	searchService := services.NewSearchService(db, steemClient, logger)
 	chartsService := services.NewChartsService(db, logger)
+	txService := services.NewTxService(db, steemClient, logger)
 
 	// Initialize handlers
 	accountHandler := NewAccountHandler(accountService, logger)
@@ -37,7 +38,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 	chartsHandler := NewChartsHandler(chartsService, logger)
 	legacyHandler := NewLegacyHandler(steemClient, logger)
 	metaHandler := NewMetaHandler(&config.Analytics)
-	txHandler := NewTxHandler(steemClient, logger)
+	txHandler := NewTxHandler(txService, logger)
 
 	// API v1 routes - register first to avoid conflicts with legacy routes
 	v1 := router.Group("/api/v1")

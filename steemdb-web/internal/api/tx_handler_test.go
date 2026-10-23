@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// doTxRequest serves GET /api/v1/tx/:id against a handler with a nil steem
-// client — only paths that never reach the client (ID validation) are under
-// test here.
+// doTxRequest serves GET /api/v1/tx/:id against a handler with a nil tx
+// service — only paths that never reach the service (ID validation) are
+// under test here.
 func doTxRequest(t *testing.T, id string) (int, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

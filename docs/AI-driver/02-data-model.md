@@ -72,8 +72,14 @@ snapshot), `witness` (30s top-100 rebuild; votes float), `witness_history`
 `clients_history`. `status` is cleanly partitioned by `_id` across writers —
 the model multi-writer collection.
 
-`stats_cache` is written by **web** (stats_service background counter) — the
-only web write to Mongo; self-contained.
+`stats_cache` is written by **web** (stats_service background counter) —
+self-contained. `tx_cache` is also written by **web** (tx_service read-through
+cache for `GET /api/v1/tx/:id`): `_id`=txid, full
+`condenser_api.get_transaction` document nested under `tx`, `_ts`=fetch time.
+Landed transactions are immutable, so entries are never refreshed and there is
+no TTL; each txid costs at most one public-node RPC for the lifetime of the
+deployment. No secondary index — `_id` lookups only, so the sync index
+inventory is not involved.
 
 ## Index authority
 

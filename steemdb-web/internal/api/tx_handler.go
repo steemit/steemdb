@@ -9,21 +9,21 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/steemit/steemdb/web/internal/models"
-	"github.com/steemit/steemdb/web/pkg/steem"
+	"github.com/steemit/steemdb/web/internal/services"
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // TxHandler handles transaction-related HTTP requests
 type TxHandler struct {
-	steemClient *steem.Client
-	logger      utils.Logger
+	txService *services.TxService
+	logger    utils.Logger
 }
 
 // NewTxHandler creates a new transaction handler
-func NewTxHandler(steemClient *steem.Client, logger utils.Logger) *TxHandler {
+func NewTxHandler(txService *services.TxService, logger utils.Logger) *TxHandler {
 	return &TxHandler{
-		steemClient: steemClient,
-		logger:      logger,
+		txService: txService,
+		logger:    logger,
 	}
 }
 
@@ -31,8 +31,10 @@ func NewTxHandler(steemClient *steem.Client, logger utils.Logger) *TxHandler {
 var txIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 // GetTx handles GET /api/v1/tx/:id
-// Proxies condenser_api.get_transaction, the same upstream call the legacy
-// /tx/{txid} page used, and returns the raw transaction document.
+// Serves the transaction local-first from the tx_cache collection, falling
+// back to the public node (condenser_api.get_transaction — the same upstream
+// call the legacy /tx/{txid} page used) with the result written back to the
+// cache. See services.TxService for the read-through contract.
 func (h *TxHandler) GetTx(c *gin.Context) {
 	txID := c.Param("id")
 	if !txIDPattern.MatchString(txID) {
@@ -40,7 +42,7 @@ func (h *TxHandler) GetTx(c *gin.Context) {
 		return
 	}
 
-	tx, err := h.steemClient.GetTransaction(txID)
+	tx, err := h.txService.GetTransaction(c.Request.Context(), txID)
 	if err != nil {
 		// steemd reports an unknown transaction ID as a JSON-RPC error; tell
 		// that apart from a genuine upstream failure so exchanges polling for
