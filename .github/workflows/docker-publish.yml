@@ -1,10 +1,10 @@
 name: Build & Publish Images
 
-# Builds and publishes versioned Docker images on every push to next.
+# Builds and publishes versioned Docker images on every push to master.
 #
 # Image naming: steemit/steemdb-{service}
 # Tag scheme:   {latest, branch}-{commit sha 7}   e.g.
-#               steemit/steemdb-web:next-d56f619  +  steemit/steemdb-web:latest
+#               steemit/steemdb-web:master-d56f619  +  steemit/steemdb-web:latest
 #
 # Services:
 #   web  — frontend (vite) + Go API in one image  (steemdb-web/Dockerfile)
@@ -12,7 +12,7 @@ name: Build & Publish Images
 #          (processor / live_sync / refresher resident, cold_ingest + repair ad hoc)
 on:
   push:
-    branches: [next]
+    branches: [master]
 
 concurrency:
   group: docker-publish-${{ github.ref }}

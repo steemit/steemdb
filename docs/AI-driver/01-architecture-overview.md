@@ -5,8 +5,8 @@
 A blockchain explorer for Steem, rewritten from PHP/Python into a Go + React
 monorepo. One machine ingests the entire chain into MongoDB and serves a REST
 + WebSocket API with a React SPA. Roughly 30k lines: `steemdb-sync` (~14k Go),
-`steemdb-web` (~8.5k Go), `steemdb-frontend` (~7k TS/TSX), plus `legacy/`
-(PHP, reference only — never extend, never import).
+`steemdb-web` (~8.5k Go), `steemdb-frontend` (~7k TS/TSX). The original PHP
+application is archived on the `legacy` branch — never extend, never import.
 
 ## System data flow
 

@@ -1,5 +1,0 @@
-{
-    "STEEMD_URLS": ["https://api.steemit.com"],
-    "MONGODB": "your_mongodb_connection_string"
-}
-  

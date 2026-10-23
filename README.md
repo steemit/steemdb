@@ -411,10 +411,9 @@ steemdb/
 │   ├── cmd/                    # cold_ingest / live_sync / processor / refresher / repair
 │   ├── internal/               # config, metrics, model, mongo, pipeline, processor, refresher, rpc, checker
 │   └── configs/                # Configuration files
-├── steemdb-frontend/           # React frontend
+└── steemdb-frontend/           # React frontend
 │   ├── src/                    # Source code
 │   └── public/                 # Static assets
-└── legacy/                     # Legacy PHP application (reference only)
 ```
 
 ### Development Workflow
@@ -612,9 +611,11 @@ steemdb/
 ├── docker-compose.production.yml   # Production topology
 ├── steemdb-web/                    # Web API service (serves the built frontend)
 ├── steemdb-sync/                   # Data sync service (cold ingest, live sync, processor, refresher, repair)
-├── steemdb-frontend/               # React frontend application
-└── legacy/                         # Legacy PHP application (reference only)
+└── steemdb-frontend/               # React frontend application
 ```
+
+> The original PHP/Python application is no longer part of this branch; it is
+> preserved on the `legacy` branch for reference.
 
 ### Quick Reference
 
