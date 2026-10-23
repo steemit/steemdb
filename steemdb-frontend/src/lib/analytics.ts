@@ -15,6 +15,12 @@
  * malformed response, or a script-load error only disables tracking for
  * this visit. The pageview is sent when the config arrives rather than at
  * DOMContentLoaded — a short, imperceptible delay for an SPA.
+ *
+ * The app is an SPA: gtag only sends the automatic pageview for the
+ * landing URL. Navigations via the History API are invisible to it, so
+ * the router calls trackPageView() on every location change
+ * (src/App.tsx). The Umami tracker script hooks the History API itself
+ * and needs no manual events.
  */
 import { apiClient } from './api';
 import type { MetaInfo } from './api';
@@ -25,6 +31,9 @@ import type { MetaInfo } from './api';
 const gaIDPattern = /^G-[A-Z0-9]+$/i;
 
 let initialized = false;
+// True once loadGoogleTag() has run: the gtag() shim exists and the
+// initial config event is queued in dataLayer. Guards trackPageView().
+let googleTagActive = false;
 
 export async function initAnalytics(): Promise<void> {
   if (initialized) return;
@@ -58,6 +67,23 @@ export async function initAnalytics(): Promise<void> {
   }
 }
 
+// GA records the landing page automatically (gtag('config')); SPA route
+// changes via the History API are NOT seen by gtag.js, so the router
+// calls this on every navigation. No-op unless Google Analytics is
+// enabled and bootstrapped — preserving the "not configured means not
+// loaded" semantics. Events pushed before gtag.js finishes downloading
+// sit in dataLayer and are flushed when it arrives.
+export function trackPageView(path: string, title: string): void {
+  if (!googleTagActive) return;
+  const w = window as unknown as { gtag?: (...args: unknown[]) => void };
+  if (typeof w.gtag !== 'function') return;
+  w.gtag('event', 'page_view', {
+    page_path: path,
+    page_title: title,
+    page_location: window.location.href,
+  });
+}
+
 // Google Analytics 4 (gtag). Mirrors the snippet the old inline index.html
 // script injected, minus the placeholder machinery.
 function loadGoogleTag(id: string): void {
@@ -76,6 +102,7 @@ function loadGoogleTag(id: string): void {
   document.head.appendChild(s);
   w.gtag('js', new Date());
   w.gtag('config', id);
+  googleTagActive = true;
 }
 
 // Self-hosted Umami: script.js lives at the instance's base URL (any

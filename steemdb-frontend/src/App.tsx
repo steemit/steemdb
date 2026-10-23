@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
@@ -24,6 +24,7 @@ import { StatisticsPage } from './pages/Statistics';
 import { SettingsPage } from './pages/Settings';
 import { useThemeStore, useWebSocketStore } from './store';
 import { wsClient } from './lib/websocket';
+import { trackPageView } from './lib/analytics';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -88,6 +89,26 @@ function WitnessRedirect() {
   return <Navigate to={`/accounts/${id}`} replace />;
 }
 
+// The SPA router navigates via the History API, which gtag does not
+// observe: without this listener every session reports exactly one
+// pageview (the landing page). The first render is skipped because
+// gtag('config') already sent that one — tracking here would double it.
+// trackPageView is a no-op when analytics is disabled or not yet loaded.
+function RouteChangeListener() {
+  const location = useLocation();
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    trackPageView(`${location.pathname}${location.search}`, document.title);
+  }, [location]);
+
+  return null;
+}
+
 function App() {
   useThemeEffect();
   useWebSocketConnection();
@@ -95,6 +116,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Router>
+        <RouteChangeListener />
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Dashboard />} />
