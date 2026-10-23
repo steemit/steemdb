@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -9,21 +10,21 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/steemit/steemdb/web/internal/models"
-	"github.com/steemit/steemdb/web/pkg/steem"
+	"github.com/steemit/steemdb/web/internal/services"
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
 // TxHandler handles transaction-related HTTP requests
 type TxHandler struct {
-	steemClient *steem.Client
-	logger      utils.Logger
+	txService *services.TxService
+	logger    utils.Logger
 }
 
 // NewTxHandler creates a new transaction handler
-func NewTxHandler(steemClient *steem.Client, logger utils.Logger) *TxHandler {
+func NewTxHandler(txService *services.TxService, logger utils.Logger) *TxHandler {
 	return &TxHandler{
-		steemClient: steemClient,
-		logger:      logger,
+		txService: txService,
+		logger:    logger,
 	}
 }
 
@@ -31,8 +32,13 @@ func NewTxHandler(steemClient *steem.Client, logger utils.Logger) *TxHandler {
 var txIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 // GetTx handles GET /api/v1/tx/:id
-// Proxies condenser_api.get_transaction, the same upstream call the legacy
-// /tx/{txid} page used, and returns the raw transaction document.
+// Serves the transaction local-first from the tx_cache collection, falling
+// back to the public node (condenser_api.get_transaction — the same upstream
+// call the legacy /tx/{txid} page used) with the result written back to the
+// cache. Only irreversible data is served: a transaction whose block is
+// still inside the reversible window answers 425 instead of returning a
+// document that a fork could still change or drop. See services.TxService
+// for the read-through contract.
 func (h *TxHandler) GetTx(c *gin.Context) {
 	txID := c.Param("id")
 	if !txIDPattern.MatchString(txID) {
@@ -40,8 +46,15 @@ func (h *TxHandler) GetTx(c *gin.Context) {
 		return
 	}
 
-	tx, err := h.steemClient.GetTransaction(txID)
+	tx, err := h.txService.GetTransaction(c.Request.Context(), txID)
 	if err != nil {
+		// The reversible-window answer is distinct from both "does not
+		// exist" and upstream trouble, so pollers can tell "retry in a
+		// minute" apart from "give up" and "try another node".
+		if errors.Is(err, services.ErrTxNotIrreversible) {
+			h.respondWithError(c, http.StatusTooEarly, "Transaction is not yet irreversible")
+			return
+		}
 		// steemd reports an unknown transaction ID as a JSON-RPC error; tell
 		// that apart from a genuine upstream failure so exchanges polling for
 		// a not-yet-seen deposit get a 404 instead of a 502.

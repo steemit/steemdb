@@ -72,8 +72,19 @@ snapshot), `witness` (30s top-100 rebuild; votes float), `witness_history`
 `clients_history`. `status` is cleanly partitioned by `_id` across writers —
 the model multi-writer collection.
 
-`stats_cache` is written by **web** (stats_service background counter) — the
-only web write to Mongo; self-contained.
+`stats_cache` is written by **web** (stats_service background counter) —
+self-contained. `tx_cache` is also written by **web** (tx_service read-through
+cache for `GET /api/v1/tx/:id`): `_id`=txid, full
+`condenser_api.get_transaction` document nested under `tx`, `_ts`=fetch time.
+The endpoint only serves irreversible data: a transaction is returned (and
+admitted to the cache) only once its block is at or below the chain's
+`last_irreversible_block_num`, fetched from the public node
+(get_dynamic_global_properties, cached in memory for a few seconds); anything
+still reversible answers 425 and is never cached, so a fork can never pin
+wrong data. Landed transactions are immutable, so entries are never refreshed
+and there is no TTL; a txid is refetched upstream only until it passes LIB,
+then served locally forever after. No secondary index —
+`_id` lookups only, so the sync index inventory is not involved.
 
 ## Index authority
 

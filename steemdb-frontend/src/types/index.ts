@@ -1,8 +1,19 @@
 // API Response types
+
+// Mirrors the backend models.APIError envelope (steemdb-web/internal/models/
+// response.go). Returned in ApiResponse.error by failed requests.
+export interface ApiErrorBody {
+  code: number;
+  message: string;
+  details?: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
-  error?: string;
+  // Either the backend's {code, message} error object (when the response
+  // body could be parsed) or a generic client-side failure string.
+  error?: string | ApiErrorBody;
   message?: string;
   // Present on paginated list endpoints
   meta?: ResponseMeta;

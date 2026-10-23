@@ -79,6 +79,19 @@ class ApiClient {
       });
 
       if (!response.ok) {
+        // Preserve the backend's error envelope ({success: false,
+        // error: {code, message}}) instead of discarding it, so pages can
+        // distinguish e.g. 404 not-found from 425 not-yet-final. Bodies that
+        // are not our envelope (proxies, empty replies) fall through to the
+        // generic throw below.
+        try {
+          const body = await response.json();
+          if (body && body.success === false) {
+            return body as ApiResponse<T>;
+          }
+        } catch {
+          // Not JSON — fall through to the generic error.
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
