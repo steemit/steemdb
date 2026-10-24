@@ -13,7 +13,7 @@ overrides:
   flatted@3: 3.4.4
   picomatch@2: 2.3.2
   picomatch@4: 4.0.7
-  postcss-selector-parser@6: 6.1.5
+  postcss-selector-parser@6: 7.1.6
   postcss@8: 8.5.31
   ajv@6: 6.15.0
   '@babel/core@7': 7.29.7
@@ -1009,6 +1009,7 @@ packages:
   eslint@9.39.1:
     resolution: {integrity: sha512-BhHmn2yNOFA9H9JmmIVKJmd288g9hrVRDkdoIgRCRuSySRUHH7r/DI6aAXW9T1WwUuY3DFgrcaqB+deURBLR5g==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -1448,8 +1449,8 @@ packages:
     peerDependencies:
       postcss: 8.5.31
 
-  postcss-selector-parser@6.1.5:
-    resolution: {integrity: sha512-TEHFzb5KRDKaOgJ4TYE+0jyJtFbjLvkdVOu0fZ2b6MTWzoqZd4Le+61aEppWkvTlYePgOX4ATL1wsAIPMLTw6Q==}
+  postcss-selector-parser@7.1.6:
+    resolution: {integrity: sha512-7qASPzhKF2l2KLboRZux8CCTRMdGiV08vWmyKzPz22qZ7ZjQBOeY7rNzNoCLSUiftJ7HUq0GERHmxw/t0dCdMw==}
     engines: {node: '>=4'}
 
   postcss-value-parser@4.2.0:
@@ -2166,7 +2167,7 @@ snapshots:
 
   '@tailwindcss/typography@0.5.19(tailwindcss@3.4.18)':
     dependencies:
-      postcss-selector-parser: 6.1.5
+      postcss-selector-parser: 7.1.6
       tailwindcss: 3.4.18
 
   '@tanstack/query-core@5.90.11': {}
@@ -2947,9 +2948,9 @@ snapshots:
   postcss-nested@6.2.0(postcss@8.5.31):
     dependencies:
       postcss: 8.5.31
-      postcss-selector-parser: 6.1.5
+      postcss-selector-parser: 7.1.6
 
-  postcss-selector-parser@6.1.5:
+  postcss-selector-parser@7.1.6:
     dependencies:
       cssesc: 3.0.0
       util-deprecate: 1.0.2
@@ -3143,7 +3144,7 @@ snapshots:
       postcss-js: 4.1.0(postcss@8.5.31)
       postcss-load-config: 6.0.1(jiti@1.21.7)(postcss@8.5.31)
       postcss-nested: 6.2.0(postcss@8.5.31)
-      postcss-selector-parser: 6.1.5
+      postcss-selector-parser: 7.1.6
       resolve: 1.22.11
       sucrase: 3.35.1
     transitivePeerDependencies:
