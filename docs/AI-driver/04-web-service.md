@@ -77,6 +77,45 @@ Conventions:
 - Error mapping: decode errors are not "not found" — distinguish
   `ErrNoDocuments` from corruption before returning 404.
 
+## Output escaping (XSS) contract
+
+Every string this service serves and the SPA displays comes from the
+chain — post bodies, titles, categories, witness URLs, account profile
+metadata, memo keys, operation payloads — so the attacker writes the
+bytes. The posture is "escape, never interpret", verified 2026-10
+end-to-end (built SPA bundle + stub API + real browser, plus the Go
+test `internal/api/json_output_test.go`):
+
+- **API side**: responses are JSON only (no HTML templating anywhere in
+  the service), and gin's default encoder HTML-escapes `<`, `>`, `&` to
+  `\u003c`, `\u003e`, `\u0026` with a correct `application/json`
+  content type. A client that inlines a response into an HTML document
+  therefore cannot break out of it. Pinned by the test above — failing
+  it means the renderer was swapped for a non-escaping encoder
+  (`jsoniter`, `c.PureJSON`, `SetEscapeHTML(false)`).
+- **Client side**: React escapes text children, and escaped text is the
+  only rendering mode in `steemdb-frontend` — there is no
+  `dangerouslySetInnerHTML`, no `innerHTML` assignment, no markdown or
+  HTML renderer. `PostDetail` shows `post.body` in a
+  `whitespace-pre-wrap` text node, so a post containing
+  `<script>…</script>` displays those characters literally (the body
+  is therefore also *not* rendered as markdown; that is a display
+  limitation, not a hole). `steemdb-frontend/eslint.config.js` bans
+  both raw-HTML sinks with `no-restricted-syntax`, so the fence is
+  enforced on `pnpm lint`, not remembered by reviewers.
+- **URLs are the one place escaping is not enough** (`<a href>` /
+  `<img src>` do not run the escaper). `src` values are built by
+  prefixing a fixed origin (`getAvatarUrl`), and `href` values from
+  chain data (`witness.url` in Accounts/Witnesses) are sanitized by
+  React 19's `sanitizeURL`, which rewrites `javascript:` to a throwing
+  stub — verified in the browser. That protection lives in the
+  framework, so re-verify it before any React downgrade, and prefer an
+  explicit `http(s)`-only check when adding new chain-sourced links.
+- Missing hardening (deliberate, not a bug): no CSP is sent. If one is
+  added it must allow `googletagmanager.com` and the configured Umami
+  origin (see `src/lib/analytics.ts`), plus `images.hive.blog` /
+  `ui-avatars.com` avatars.
+
 ## WebSocket (`websocket_service.go`)
 
 Single-producer model: `fetchData` goroutine polls RPC every 1s

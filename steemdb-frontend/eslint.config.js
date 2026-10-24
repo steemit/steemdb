@@ -19,5 +19,29 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // XSS fence: every string the app displays (post bodies, titles,
+      // witness URLs, account profiles, operation payloads) comes from the
+      // chain, i.e. from whoever wrote it. React escapes text children, and
+      // escaped text is the ONLY rendering mode in this app — the post body
+      // is shown as literal text with whitespace-pre-wrap, never as HTML or
+      // markdown. Raw HTML sinks bypass that escape entirely, so they are
+      // banned outright: a markdown/embed renderer needs an allow-list
+      // sanitizer (e.g. DOMPurify) reviewed in the same PR. See
+      // docs/AI-driver/04-web-service.md ("Output escaping" contract).
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXAttribute[name.name="dangerouslySetInnerHTML"]',
+          message:
+            'Chain data must render as React text. Adding raw HTML requires an allow-list sanitizer reviewed in the same PR (docs/AI-driver/04-web-service.md, "Output escaping").',
+        },
+        {
+          selector: 'AssignmentExpression[left.property.name="innerHTML"]',
+          message:
+            'Direct innerHTML assignment is an XSS sink for chain data. Render through JSX instead (docs/AI-driver/04-web-service.md, "Output escaping").',
+        },
+      ],
+    },
   },
 ])
