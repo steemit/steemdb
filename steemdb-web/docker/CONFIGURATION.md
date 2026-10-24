@@ -95,7 +95,7 @@ Unknown providers, or a provider with a missing/malformed credential, **fail clo
 
 In the production stack, set the variables in `.env` (gitignored) or export them before `docker compose up`. Changing them only requires a container restart (`docker compose restart steemdb-web`); no image rebuild is needed.
 
-SPA navigation is covered without extra configuration: the router sends a `page_view` event to Google Analytics on every route change (`steemdb-frontend/src/App.tsx`), and the Umami tracker script watches the History API by itself.
+SPA navigation is covered without extra code or configuration: the GA4 tracker's Enhanced Measurement (on by default for a web data stream) watches the History API itself, and the Umami tracker script watches the History API by itself. The SPA therefore sends no manual `page_view` events — layering manual events on top of Enhanced Measurement would double-count every route change.
 
 > This replaced the older mechanism that sed-replaced a `__GA_ID__` placeholder in `index.html` on every container start (with a pristine template copy in the image). The new path is vendor-neutral: adding a provider is a code/config change, never a deployment-pipeline change.
 >

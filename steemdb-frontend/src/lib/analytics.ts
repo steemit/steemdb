@@ -16,11 +16,11 @@
  * this visit. The pageview is sent when the config arrives rather than at
  * DOMContentLoaded — a short, imperceptible delay for an SPA.
  *
- * The app is an SPA: gtag only sends the automatic pageview for the
- * landing URL. Navigations via the History API are invisible to it, so
- * the router calls trackPageView() on every location change
- * (src/App.tsx). The Umami tracker script hooks the History API itself
- * and needs no manual events.
+ * The app is an SPA, but nothing here sends manual page_view events on
+ * route changes: GA4 Enhanced Measurement (on by default for a web data
+ * stream) watches the History API itself, and the Umami tracker script
+ * hooks the History API on its own. Sending them manually ON TOP of
+ * Enhanced Measurement double-counts every navigation.
  */
 import { apiClient } from './api';
 import type { MetaInfo } from './api';
@@ -31,9 +31,6 @@ import type { MetaInfo } from './api';
 const gaIDPattern = /^G-[A-Z0-9]+$/i;
 
 let initialized = false;
-// True once loadGoogleTag() has run: the gtag() shim exists and the
-// initial config event is queued in dataLayer. Guards trackPageView().
-let googleTagActive = false;
 
 export async function initAnalytics(): Promise<void> {
   if (initialized) return;
@@ -68,32 +65,32 @@ export async function initAnalytics(): Promise<void> {
 }
 
 // GA records the landing page automatically (gtag('config')); SPA route
-// changes via the History API are NOT seen by gtag.js, so the router
-// calls this on every navigation. No-op unless Google Analytics is
-// enabled and bootstrapped — preserving the "not configured means not
-// loaded" semantics. Events pushed before gtag.js finishes downloading
-// sit in dataLayer and are flushed when it arrives.
-export function trackPageView(path: string, title: string): void {
-  if (!googleTagActive) return;
-  const w = window as unknown as { gtag?: (...args: unknown[]) => void };
-  if (typeof w.gtag !== 'function') return;
-  w.gtag('event', 'page_view', {
-    page_path: path,
-    page_title: title,
-    page_location: window.location.href,
-  });
-}
+// changes via the History API are covered by GA4 Enhanced Measurement and
+// by the Umami tracker's own History hook — see the header comment. Events
+// pushed before gtag.js finishes downloading sit in dataLayer and are
+// flushed when it arrives.
 
 // Google Analytics 4 (gtag). Mirrors the snippet the old inline index.html
 // script injected, minus the placeholder machinery.
+//
+// The gtag shim below pushes the built-in `arguments` object — NOT a
+// rest-args array — on purpose. This is the exact shape of Google's own
+// snippet, and GTM's queue treats the two differently: with
+// `(...args) => dataLayer.push(args)` the entry lands as a plain Array, and
+// GTM's processing loop deterministically wedges right after the gtm.load
+// event (google_tag_manager.sequence freezes, zero hits, zero console
+// errors — every pageview silently lost). Verified by A/B on a minimal
+// page: arguments shim -> seq 15 + collect requests; array shim -> seq 13,
+// loop dead. Do not "modernize" this function.
 function loadGoogleTag(id: string): void {
   const w = window as unknown as {
     dataLayer?: unknown[];
     gtag?: (...args: unknown[]) => void;
   };
   w.dataLayer = w.dataLayer || [];
-  w.gtag = function (...args: unknown[]) {
-    w.dataLayer!.push(args);
+  w.gtag = function () {
+    // eslint-disable-next-line prefer-rest-params -- must push the built-in arguments object, not a rest array; see the comment above loadGoogleTag
+    w.dataLayer!.push(arguments);
   };
   const s = document.createElement('script');
   s.async = true;
@@ -102,7 +99,6 @@ function loadGoogleTag(id: string): void {
   document.head.appendChild(s);
   w.gtag('js', new Date());
   w.gtag('config', id);
-  googleTagActive = true;
 }
 
 // Self-hosted Umami: script.js lives at the instance's base URL (any
