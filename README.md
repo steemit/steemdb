@@ -388,6 +388,8 @@ docker compose -f docker-compose.production.yml up -d --build
 4. **Set up reverse proxy** (if needed)
    - Configure Nginx or Traefik for SSL termination
    - Point to `http://localhost:80` (or `${WEB_PORT}`) for the web service
+   - Forward the `Upgrade` / `Connection` headers, otherwise the `/ws`
+     websocket endpoint will not connect through the proxy
 
 ## 💻 Development
 
