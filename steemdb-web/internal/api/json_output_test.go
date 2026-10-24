@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -67,5 +69,39 @@ func TestJSONResponsesEscapeHTML(t *testing.T) {
 	}
 	if got, want := parsed.Data.Title, `<img src=x onerror=alert(1)>`; got != want {
 		t.Errorf("title round-trip = %q, want %q", got, want)
+	}
+}
+
+// TestNoUnescapedJSONRenderer covers the hole the test above cannot: it pins
+// gin's default encoder, but the handlers are free to opt out one at a time
+// (c.PureJSON, SetEscapeHTML(false), a third-party encoder) and it would stay
+// green while serving unescaped markup. Every response the SPA consumes is
+// produced in this package, so scanning its non-test sources is the cheapest
+// way to make such a change deliberate instead of accidental.
+func TestNoUnescapedJSONRenderer(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+
+	banned := []string{
+		"PureJSON",
+		"SetEscapeHTML(false)",
+		"json-iterator/go",
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, marker := range banned {
+			if bytes.Contains(src, []byte(marker)) {
+				t.Errorf("%s uses %q; responses must keep HTML escaping (docs/AI-driver/04-web-service.md, \"Output escaping\")", name, marker)
+			}
+		}
 	}
 }

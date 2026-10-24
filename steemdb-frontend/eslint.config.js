@@ -25,10 +25,11 @@ export default defineConfig([
       // chain, i.e. from whoever wrote it. React escapes text children, and
       // escaped text is the ONLY rendering mode in this app — the post body
       // is shown as literal text with whitespace-pre-wrap, never as HTML or
-      // markdown. Raw HTML sinks bypass that escape entirely, so they are
-      // banned outright: a markdown/embed renderer needs an allow-list
-      // sanitizer (e.g. DOMPurify) reviewed in the same PR. See
-      // docs/AI-driver/04-web-service.md ("Output escaping" contract).
+      // markdown. Raw-HTML sinks bypass that escape entirely, so the ones
+      // that can reach the DOM are banned outright: a markdown/embed
+      // renderer needs an allow-list sanitizer (e.g. DOMPurify) reviewed in
+      // the same PR. See docs/AI-driver/04-web-service.md ("Output escaping"
+      // contract).
       'no-restricted-syntax': [
         'error',
         {
@@ -37,9 +38,18 @@ export default defineConfig([
             'Chain data must render as React text. Adding raw HTML requires an allow-list sanitizer reviewed in the same PR (docs/AI-driver/04-web-service.md, "Output escaping").',
         },
         {
-          selector: 'AssignmentExpression[left.property.name="innerHTML"]',
+          // el.innerHTML = … / el.outerHTML = …, including el['innerHTML'] = …
+          selector:
+            'AssignmentExpression:matches([left.property.name=/^(inner|outer)HTML$/], [left.property.value=/^(inner|outer)HTML$/])',
           message:
-            'Direct innerHTML assignment is an XSS sink for chain data. Render through JSX instead (docs/AI-driver/04-web-service.md, "Output escaping").',
+            'Direct innerHTML/outerHTML assignment is an XSS sink for chain data. Render through JSX instead (docs/AI-driver/04-web-service.md, "Output escaping").',
+        },
+        {
+          // el.insertAdjacentHTML('beforeend', …)
+          selector:
+            'CallExpression:matches([callee.property.name="insertAdjacentHTML"], [callee.property.value="insertAdjacentHTML"])',
+          message:
+            'insertAdjacentHTML is an XSS sink for chain data. Render through JSX instead (docs/AI-driver/04-web-service.md, "Output escaping").',
         },
       ],
     },

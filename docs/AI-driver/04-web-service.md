@@ -92,7 +92,10 @@ test `internal/api/json_output_test.go`):
   content type. A client that inlines a response into an HTML document
   therefore cannot break out of it. Pinned by the test above — failing
   it means the renderer was swapped for a non-escaping encoder
-  (`jsoniter`, `c.PureJSON`, `SetEscapeHTML(false)`).
+  (`jsoniter`, `c.PureJSON`, `SetEscapeHTML(false)`). Because that test
+  only pins gin's default and a handler can opt out one at a time,
+  `TestNoUnescapedJSONRenderer` scans this package's non-test sources
+  for the same three markers.
 - **Client side**: React escapes text children, and escaped text is the
   only rendering mode in `steemdb-frontend` — there is no
   `dangerouslySetInnerHTML`, no `innerHTML` assignment, no markdown or
@@ -100,9 +103,11 @@ test `internal/api/json_output_test.go`):
   `whitespace-pre-wrap` text node, so a post containing
   `<script>…</script>` displays those characters literally (the body
   is therefore also *not* rendered as markdown; that is a display
-  limitation, not a hole). `steemdb-frontend/eslint.config.js` bans
-  both raw-HTML sinks with `no-restricted-syntax`, so the fence is
-  enforced on `pnpm lint`, not remembered by reviewers.
+  limitation, not a hole). `steemdb-frontend/eslint.config.js` bans the
+  four DOM-reachable raw-HTML sinks with `no-restricted-syntax` —
+  `dangerouslySetInnerHTML`, `innerHTML`/`outerHTML` assignment (dot and
+  bracket form), and `insertAdjacentHTML` — so the fence is enforced on
+  `pnpm lint`, not remembered by reviewers.
 - **URLs are the one place escaping is not enough** (`<a href>` /
   `<img src>` do not run the escaper). `src` values are built by
   prefixing a fixed origin (`getAvatarUrl`), and `href` values from
