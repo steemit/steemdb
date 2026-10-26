@@ -9,7 +9,10 @@ RUN npm install -g pnpm@10.17.0
 WORKDIR /app
 
 # Copy frontend package files
-COPY steemdb-frontend/package.json steemdb-frontend/pnpm-lock.yaml ./
+# pnpm-workspace.yaml carries the `overrides` (and `allowBuilds`) config: pnpm
+# compares it against the lockfile's recorded config, so leaving it out makes
+# `--frozen-lockfile` fail with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+COPY steemdb-frontend/package.json steemdb-frontend/pnpm-lock.yaml steemdb-frontend/pnpm-workspace.yaml ./
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
