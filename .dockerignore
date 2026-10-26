@@ -1,0 +1,59 @@
+# Docker build context for the ROOT context ("."), which is used only by
+# steemdb-web/Dockerfile — it builds the SPA (steemdb-frontend/) and the Go
+# API (steemdb-web/).
+#
+# The sync images build from ./steemdb-sync and are governed by
+# steemdb-sync/.dockerignore, so nothing under steemdb-sync/ is needed here.
+# Without this file a full-repo context carries local test-chain data
+# (steemdb-sync/test/steem-test/data, hundreds of GB on a dev box), the host
+# node_modules, and .git — none of which any stage COPYs, and all of which
+# break or stall a build.
+
+# Local chain data / test stacks: never part of a web image.
+steemdb-sync/
+
+# Version control and local runtime state.
+.git
+.gitattributes
+.gitignore
+.github
+.cursor
+.multica
+.zcode
+issue-attachments
+
+# Dependencies and build output: the image installs and builds its own
+# (a host node_modules copied over the container's would carry glibc binaries
+# into an alpine image).
+**/node_modules
+**/dist
+**/dist-ssr
+bin/
+**/*.test
+**/*.out
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+
+# Logs, temp dirs and local secrets.
+**/*.log
+**/logs
+**/tmp
+**/temp
+**/test-tmp
+**/.env
+**/.env.local
+**/*.local.yaml
+**/*.local.yml
+**/*.secret.yaml
+**/*.secret.yml
+
+# Docs and container/orchestration files are not needed inside the image.
+docs/
+**/*.md
+docker-compose*.yml
+**/Dockerfile*
+**/.dockerignore
+**/.DS_Store
+**/Thumbs.db
