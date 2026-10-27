@@ -82,6 +82,36 @@ figure has a unit contract checked against the writer (02-data-model,
 `$limit` with an ascending date sort returned the *oldest* 10 days of a
 9-year collection — pin the direction a test can assert.
 
+### A3. Shape heuristics, unit mixing and truncation (2026-10 audit, batch 3)
+Three separate ways a board can be confidently wrong without erroring.
+
+- **A string shape is not a fact.** `/labs/author` classified a payout as a
+  reply when its permlink started with `re-`. That is a client convention: on
+  one day 164 of 876 payouts (18.7%) were replies judged as posts, replies were
+  under-reported by 87%, and 88 of 622 authors were split wrong. The truth was
+  already written next door — `comment.parent_author` (written by the comment
+  handler for every op, so no rescan needed). **Rule**: classify on a written
+  field, joined by `comment._id = author/permlink`; never on the spelling of an
+  identifier.
+- **Rank by the unit you display.** The same board sorted by `vest` while its
+  "Total Rewards" column showed only steem+sbd, so the #1 card read `0.000
+  STEEM / 0.000 SBD` and the true leader was ranked 2nd. With three payout legs
+  there is one comparable unit: STEEM, using the props vesting ratio for VESTS
+  and the **median price feed** for SBD (SBD is not at parity — 2026-10: 1 SBD ≈
+  9.6 STEEM; `get_feed_history.current_median_history`, quote/base, cached
+  ~1min). **Rule**: one ranking key, derived from the same legs the row
+  displays.
+- **Truncation without server-side totals corrupts every percentage.** A
+  `$limit` added to `/labs/rshares` would have left the SPA dividing by the
+  truncated sum (top-200 of 1,400 rows: shares of ~700%). Totals come from a
+  `$facet` computed before the limit. And a snapshot that cannot state its own
+  freshness is unauditable: `status.clients-snapshot` stored no `updated_at`
+  and no coverage counters, so "is this stale?" and "how many posts have no
+  client?" were both unanswerable from the API. In the same ticker, `$add`
+  returned null whenever one payout field was missing, which is how 70 of 91
+  days carried reward 0 while post counts looked right — `$sum` over
+  `$ifNull`-guarded legs instead.
+
 ### B. Reader imagining writer's fields
 `Vote.Time`, `Reblog.BlockNum`, phantom indexes on `timestamp`/
 `last_update`, frontend types declaring string amounts. Every imagined

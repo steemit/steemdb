@@ -20,7 +20,7 @@ import type {
   Reblog,
   PowerUp,
   PowerDown,
-  RsharesAllocation,
+  RsharesBoard,
   CurationLeaderboard,
   AuthorLeaderboard,
   Flags,
@@ -312,12 +312,15 @@ class ApiClient {
     return this.request<PowerDown>('/v1/labs/powerdown');
   }
 
-  async getRshares(date?: string): Promise<ApiResponse<RsharesAllocation[]>> {
+  async getRshares(date?: string, limit?: number): Promise<ApiResponse<RsharesBoard>> {
     const searchParams = new URLSearchParams();
     if (date) {
       searchParams.set('date', date);
     }
-    return this.request<RsharesAllocation[]>(`/v1/labs/rshares?${searchParams}`);
+    if (limit) {
+      searchParams.set('limit', String(limit));
+    }
+    return this.request<RsharesBoard>(`/v1/labs/rshares?${searchParams}`);
   }
 
   async getCuration(date?: string, grouping?: string): Promise<ApiResponse<CurationLeaderboard[]>> {
@@ -346,8 +349,11 @@ class ApiClient {
     return this.request<Flags[]>('/v1/labs/flags');
   }
 
-  async getClients(): Promise<ApiResponse<Clients>> {
-    return this.request<Clients>('/v1/labs/clients');
+  async getClients(includeDaily = false): Promise<ApiResponse<Clients>> {
+    // The per-day series is ~98% of the payload and nothing renders it, so the
+    // backend sends it only on request.
+    const suffix = includeDaily ? '?include=daily' : '';
+    return this.request<Clients>(`/v1/labs/clients${suffix}`);
   }
 
   async getBenefactors(): Promise<ApiResponse<Benefactors>> {

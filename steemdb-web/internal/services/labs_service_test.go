@@ -311,6 +311,54 @@ func TestVestsToSteem(t *testing.T) {
 	}
 }
 
+// TestRewardValuationSteemEquivalent pins the author-board ranking metric: all
+// three payout legs are converted to STEEM, VESTS by the props ratio and SBD by
+// the median price feed. Treating SBD as STEEM at par (2026-10: 1 SBD ≈ 9.6
+// STEEM) or dropping VESTS (52.4% of one day's author rewards) misranks the
+// board.
+func TestRewardValuationSteemEquivalent(t *testing.T) {
+	// Production snapshot 2026-10-26: 201,658,879.271 STEEM over
+	// 324,827,389,106.419916 VESTS, and a median feed of
+	// 58,455,023.535 SBD / 561,645,706.579 STEEM.
+	valuation := rewardValuation{
+		VestsRatio:  vestsToSteemRatio("201658879.271 STEEM", "324827389106.419916 VESTS"),
+		SteemPerSBD: 561645706.579 / 58455023.535,
+	}
+
+	// 1,126,437.341679 VESTS ≈ 699.3 STEEM (the audit's chain cross-check).
+	if got := valuation.steemEquivalent(1126437.341679, 0, 0); got < 698 || got > 700 {
+		t.Errorf("vests leg = %v STEEM, want ≈699.3", got)
+	}
+	// A pure SBD payout is worth ~9.6x its face value in STEEM.
+	if got := valuation.steemEquivalent(0, 0, 1); got < 9.5 || got > 9.7 {
+		t.Errorf("1 SBD = %v STEEM, want ≈9.6 (never 1)", got)
+	}
+	// All three legs add up.
+	if got, want := valuation.steemEquivalent(1126437.341679, 548.186, 0.5), 699.307+548.186+4.804; got < want-1 || got > want+1 {
+		t.Errorf("total = %v STEEM, want ≈%v", got, want)
+	}
+}
+
+// TestClampLabsLimit pins the row-cap policy shared by the labs boards: a
+// missing request gets the default, an oversized one is clamped, and a
+// negative or zero value never means "no limit".
+func TestClampLabsLimit(t *testing.T) {
+	cases := []struct {
+		requested, def, max, want int
+	}{
+		{0, 200, 500, 200},
+		{-5, 200, 500, 200},
+		{50, 200, 500, 50},
+		{500, 200, 500, 500},
+		{100000, 200, 500, 500},
+	}
+	for _, c := range cases {
+		if got := clampLabsLimit(c.requested, c.def, c.max); got != c.want {
+			t.Errorf("clampLabsLimit(%d, %d, %d) = %d, want %d", c.requested, c.def, c.max, got, c.want)
+		}
+	}
+}
+
 // TestPreviousPowerDownWindow pins the "(Last 7 Days)" window to a rolling
 // 7x24h span. A day-aligned bound spans 8 UTC buckets, and because a power
 // down batch repeats every 7 days the same batch then lands in the first and

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -303,6 +305,61 @@ func (c *Client) GetActiveWitnesses() ([]string, error) {
 		}
 		return witnesses, nil
 	})
+}
+
+// GetMedianHistoryPrice returns the chain's current median price feed as the
+// number of STEEM one SBD is worth.
+//
+// condenser_api.get_feed_history states the median as an SBD/STEEM pair —
+// e.g. base "58455023.535 SBD" quote "561645706.579 STEEM", i.e. that many SBD
+// buys that many STEEM — so the STEEM value of one SBD is quote/base. The pair
+// is deliberately not read from `price_history` (whose last entry is the
+// oldest retained bucket, "0.049 SBD"/"1.000 STEEM", not the current median).
+//
+// The labs author leaderboard needs this because SBD does not trade at parity
+// on Steem (2026-10: 1 SBD ≈ 9.6 STEEM); collapsing SBD into STEEM at 1:1
+// would misrank authors whose payout is mostly SBD.
+func (c *Client) GetMedianHistoryPrice() (float64, error) {
+	type pricePair struct {
+		Base  string `json:"base"`
+		Quote string `json:"quote"`
+	}
+	type feedHistory struct {
+		CurrentMedianHistory pricePair `json:"current_median_history"`
+	}
+
+	feed, err := rpcCall(c, "get_feed_history", func(api *sdkapi.API) (*feedHistory, error) {
+		var f feedHistory
+		if err := api.CallWithResult("condenser_api", "get_feed_history", []interface{}{}, &f); err != nil {
+			return nil, err
+		}
+		return &f, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	base := parseAssetAmount(feed.CurrentMedianHistory.Base)
+	quote := parseAssetAmount(feed.CurrentMedianHistory.Quote)
+	if base <= 0 || quote <= 0 {
+		return 0, fmt.Errorf("median history price unusable (base=%q quote=%q)",
+			feed.CurrentMedianHistory.Base, feed.CurrentMedianHistory.Quote)
+	}
+	return quote / base, nil
+}
+
+// parseAssetAmount parses the numeric part of a wire asset string
+// ("58455023.535 SBD" -> 58455023.535). Returns 0 for anything unparsable.
+func parseAssetAmount(asset string) float64 {
+	fields := strings.Fields(asset)
+	if len(fields) == 0 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0
+	}
+	return value
 }
 
 // Helper functions to convert steemgosdk types to our types

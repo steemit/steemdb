@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,7 +73,7 @@ func (h *LabsHandler) GetPowerDowns(c *gin.Context) {
 
 // GetRshares handles GET /api/v1/labs/rshares
 func (h *LabsHandler) GetRshares(c *gin.Context) {
-	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
+	dateStr := c.DefaultQuery("date", time.Now().UTC().Format("2006-01-02"))
 
 	date, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -80,14 +81,30 @@ func (h *LabsHandler) GetRshares(c *gin.Context) {
 		return
 	}
 
-	rshares, err := h.labsService.GetRsharesAllocation(c.Request.Context(), date)
+	// The board is capped and ships its own totals; percentages must be derived
+	// from those totals, not from the (truncated) array.
+	board, err := h.labsService.GetRsharesAllocation(c.Request.Context(), date, parseLabsLimit(c))
 	if err != nil {
 		h.logger.Error("Failed to get rshares allocation", utils.Error(err))
 		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve rshares allocation")
 		return
 	}
 
-	h.respondWithSuccess(c, rshares)
+	h.respondWithSuccess(c, board)
+}
+
+// parseLabsLimit reads the optional `limit` row cap. 0 means "server default";
+// the service clamps to its own maximum.
+func parseLabsLimit(c *gin.Context) int {
+	raw := c.Query("limit")
+	if raw == "" {
+		return 0
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 0 {
+		return 0
+	}
+	return limit
 }
 
 // parseLeaderboardDate resolves the `date` query value for the curation and
@@ -156,7 +173,7 @@ func (h *LabsHandler) GetAuthor(c *gin.Context) {
 		return
 	}
 
-	leaderboard, err := h.labsService.GetAuthorLeaderboard(c.Request.Context(), date, grouping)
+	leaderboard, err := h.labsService.GetAuthorLeaderboard(c.Request.Context(), date, grouping, parseLabsLimit(c))
 	if err != nil {
 		h.logger.Error("Failed to get author leaderboard", utils.Error(err))
 		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve author leaderboard")
@@ -180,7 +197,11 @@ func (h *LabsHandler) GetFlags(c *gin.Context) {
 
 // GetClients handles GET /api/v1/labs/clients
 func (h *LabsHandler) GetClients(c *gin.Context) {
-	clients, err := h.labsService.GetClients(c.Request.Context())
+	// The per-day series is opt-in: it is the bulk of the payload and the SPA
+	// renders only the per-client totals.
+	includeDaily := c.Query("include") == "daily" || c.Query("daily") == "true"
+
+	clients, err := h.labsService.GetClients(c.Request.Context(), includeDaily)
 	if err != nil {
 		h.logger.Error("Failed to get clients", utils.Error(err))
 		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve clients")

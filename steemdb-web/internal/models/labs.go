@@ -69,6 +69,25 @@ type RsharesAllocation struct {
 	Account *AccountSummary `json:"account,omitempty"`
 }
 
+// RsharesBoard is the /labs/rshares response.
+//
+// The totals are computed before the row cap is applied: the SPA derives each
+// row's share of the day from TotalRshares, and computing that from a
+// truncated array would make the shares of a "top 200" board add up to far more
+// than 100%.
+//
+// DataAsOf is the newest comment.scanned timestamp behind the numbers (the
+// comment_rescanner refreshes active_votes on a ~6h cycle, so an ongoing day is
+// systematically short of its last hours); nil when no snapshot exists yet.
+type RsharesBoard struct {
+	Allocations  []RsharesAllocation `json:"allocations"`
+	TotalRshares int64               `json:"total_rshares"`
+	TotalVotes   int64               `json:"total_votes"`
+	Voters       int                 `json:"voters"`
+	Limit        int                 `json:"limit"`
+	DataAsOf     *time.Time          `json:"data_as_of,omitempty"`
+}
+
 // CurationLeaderboard represents curation reward leaderboard entry. Total is
 // VESTS (curation_reward.reward); Permlinks is capped per curator by the
 // service and is not rendered by the SPA.
@@ -81,7 +100,11 @@ type CurationLeaderboard struct {
 	Account   *AccountSummary `json:"account,omitempty"`
 }
 
-// AuthorLeaderboard represents author reward leaderboard entry
+// AuthorLeaderboard represents author reward leaderboard entry. The reward
+// legs are VESTS (Vest/PostVest/ReplyVest), STEEM (Steem/PostSteem/
+// ReplySteem) and SBD (Sbd/PostSbd/ReplySbd); TotalSteem is their STEEM
+// equivalent at the current vests ratio and median SBD price, and is the value
+// the board is ranked by.
 type AuthorLeaderboard struct {
 	Author     string          `json:"author"`
 	Count      int             `json:"count"`
@@ -96,7 +119,7 @@ type AuthorLeaderboard struct {
 	Sbd        float64         `json:"sbd"`
 	Steem      float64         `json:"steem"`
 	Vest       float64         `json:"vest"`
-	Permlinks  []string        `json:"permlinks,omitempty"`
+	TotalSteem float64         `json:"total_steem"`
 	Account    *AccountSummary `json:"account,omitempty"`
 }
 
@@ -113,16 +136,36 @@ type Flags struct {
 	Voters     map[string]int `json:"voters,omitempty"`
 }
 
-// Clients represents client statistics
+// Clients represents client statistics.
+//
+// Posts/Rewards are the whole-window totals per client (the SPA renders the
+// top 50 of each); Rewards is SBD (total_payout_value + pending_payout_value
+// as written by steemdb-sync). Dates carries the per-day series and is only
+// filled when the caller asks for it — it was 98% of a 236KB payload that
+// nothing rendered.
+//
+// The metadata fields come from the snapshot document and exist so a reader can
+// tell a stale snapshot (UpdatedAt) from a fresh one and see how much of the
+// window the client attribution actually covers (PostsWithApp of
+// PostsScanned).
 type Clients struct {
-	Dates   []ClientDate       `json:"dates"`
+	Dates   []ClientDate       `json:"dates,omitempty"`
 	Posts   map[string]int     `json:"posts"`
 	Rewards map[string]float64 `json:"rewards"`
+
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	WindowFrom   *time.Time `json:"window_from,omitempty"`
+	WindowTo     *time.Time `json:"window_to,omitempty"`
+	PostsScanned int        `json:"posts_scanned"`
+	PostsWithApp int        `json:"posts_with_app"`
 }
 
-// ClientDate represents client data for a specific date
+// ClientDate represents client data for a specific date. Total/Reward are the
+// day's own sums (all clients), which the snapshot stores.
 type ClientDate struct {
 	Date    time.Time     `json:"date"`
+	Total   int           `json:"total"`
+	Reward  float64       `json:"reward"`
 	Clients []ClientEntry `json:"clients"`
 }
 

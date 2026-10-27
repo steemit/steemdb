@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -49,33 +48,72 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 	}
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -clientsWindowDays)
+	window := bson.M{"$gte": start, "$lte": now}
+
+	// Coverage of the client attribution: how many comments the window holds at
+	// all, and how many carry an `app` string. The gap is the share of posts
+	// with no client signal — it used to be ~11% and it is invisible to a
+	// reader who only sees the per-client totals.
+	postsScanned, err := c.commentCol.CountDocuments(ctx, bson.M{"created": window})
+	if err != nil {
+		log.Printf("[Refresher:Clients] Failed to count window comments: %v", err)
+		return
+	}
+	postsWithApp, err := c.commentCol.CountDocuments(ctx, bson.M{
+		"created":           window,
+		"json_metadata.app": bson.M{"$type": "string", "$ne": ""},
+	})
+	if err != nil {
+		log.Printf("[Refresher:Clients] Failed to count comments with app: %v", err)
+		return
+	}
 
 	// Same pipeline as legacy history.py: match 90d comments whose
-	// json_metadata.app looks like "name/version", group by client × day,
-	// then re-group per day with per-client count/reward arrays.
+	// json_metadata.app is a non-empty string, group by client × day, then
+	// re-group per day with per-client count/reward arrays.
+	//
+	// The app match used to require a `name/version` shape
+	// (`[\w-]+/[\w.]+`), which silently dropped 13% of the posts that DO name a
+	// client (`dkscore-poststudio`, `SteemX`, `drugwars` — sampled 80 of 600 in
+	// one 8h window): only the version suffix is optional in practice, so the
+	// version is simply not required any more — `$split` on "/" already strips
+	// it.
 	pipeline := []bson.M{
 		{
 			"$match": bson.M{
-				"created": bson.M{"$gte": start, "$lte": now},
-				"json_metadata.app": bson.M{
-					"$type":  "string",
-					"$regex": primitive.Regex{Pattern: `[\w-]+/[\w.]+`, Options: "i"},
-				},
+				"created":           window,
+				"json_metadata.app": bson.M{"$type": "string", "$ne": ""},
 			},
 		},
 		{
 			"$project": bson.M{
-				"created": "$created",
-				"parts":   bson.M{"$split": []interface{}{"$json_metadata.app", "/"}},
-				"reward": bson.M{"$add": []interface{}{
-					"$total_payout_value", "$pending_payout_value", "$total_pending_payout_value",
+				"created": 1,
+				"client": bson.M{"$trim": bson.M{"input": bson.M{
+					"$arrayElemAt": []interface{}{
+						bson.M{"$split": []interface{}{"$json_metadata.app", "/"}},
+						0,
+					},
+				}}},
+				// `$add` returns null as soon as one operand is missing or
+				// non-numeric, and a null summand poisons the whole group —
+				// this is how 70 of 91 days ended up with reward 0 while the
+				// post counts were right. Each leg is guarded and summed.
+				"reward": bson.M{"$sum": []interface{}{
+					bson.M{"$ifNull": []interface{}{"$total_payout_value", 0}},
+					bson.M{"$ifNull": []interface{}{"$pending_payout_value", 0}},
+					bson.M{"$ifNull": []interface{}{"$total_pending_payout_value", 0}},
 				}},
 			},
 		},
 		{
+			// An app string that is only whitespace or starts with "/" leaves
+			// an empty client name.
+			"$match": bson.M{"client": bson.M{"$ne": ""}},
+		},
+		{
 			"$group": bson.M{
 				"_id": bson.M{
-					"client": bson.M{"$arrayElemAt": []interface{}{"$parts", 0}},
+					"client": "$client",
 					"doy":    bson.M{"$dayOfYear": "$created"},
 					"year":   bson.M{"$year": "$created"},
 					"month":  bson.M{"$month": "$created"},
@@ -87,7 +125,7 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 			},
 		},
 		{
-			"$sort": bson.M{"_id.year": 1, "_id.doy": 1, "value": -1},
+			"$sort": bson.M{"_id.year": 1, "_id.doy": 1, "value": -1, "_id.client": 1},
 		},
 		{
 			"$group": bson.M{
@@ -122,9 +160,22 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
+	// The metadata is what makes the snapshot auditable: without a refresh
+	// timestamp a stale snapshot can only be inferred from "is the last day
+	// today", and without the coverage counters the unattributed share of posts
+	// is unknowable from the API.
+	snapshot := bson.M{
+		"data":           data,
+		"updated_at":     now,
+		"window_from":    start,
+		"window_to":      now,
+		"posts_scanned":  postsScanned,
+		"posts_with_app": postsWithApp,
+	}
+
 	if _, err := c.statusCol.UpdateOne(ctx,
 		bson.M{"_id": "clients-snapshot"},
-		bson.M{"$set": bson.M{"data": data}},
+		bson.M{"$set": snapshot},
 		options.Update().SetUpsert(true),
 	); err != nil {
 		log.Printf("[Refresher:Clients] Failed to write clients-snapshot: %v", err)
@@ -133,11 +184,12 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 
 	if _, err := c.historyCol.UpdateOne(ctx,
 		bson.M{"date": today},
-		bson.M{"$set": bson.M{"data": data}},
+		bson.M{"$set": snapshot},
 		options.Update().SetUpsert(true),
 	); err != nil {
 		log.Printf("[Refresher:Clients] Failed to write clients_history: %v", err)
 	}
 
-	log.Printf("[Refresher:Clients] Snapshot updated (%d days)", len(data))
+	log.Printf("[Refresher:Clients] Snapshot updated (%d days, %d/%d posts attributed)",
+		len(data), postsWithApp, postsScanned)
 }
