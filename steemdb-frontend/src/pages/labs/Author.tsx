@@ -69,10 +69,16 @@ export function AuthorPage() {
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <Input
                 type={grouping === 'monthly' ? 'month' : 'date'}
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
+                // `date` always holds YYYY-MM-DD so switching grouping can
+                // never send a value the API rejects; the month control reads
+                // and writes the YYYY-MM prefix of the same state.
+                value={grouping === 'monthly' ? date.slice(0, 7) : date}
+                onChange={(e) =>
+                  setDate(grouping === 'monthly' ? `${e.target.value}-01` : e.target.value)
+                }
                 className="w-48"
               />
+              <span className="text-sm text-muted-foreground">UTC</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Grouping:</span>

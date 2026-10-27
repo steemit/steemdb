@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { getCuration } from '../../lib/api';
-import { formatCurrency, getAvatarUrl } from '../../lib/utils';
+import { formatVests, getAvatarUrl } from '../../lib/utils';
 import type { CurationLeaderboard } from '../../types';
 
 export function CurationPage() {
@@ -69,10 +69,16 @@ export function CurationPage() {
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <Input
                 type={grouping === 'monthly' ? 'month' : 'date'}
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
+                // `date` always holds YYYY-MM-DD so switching grouping can
+                // never send a value the API rejects; the month control reads
+                // and writes the YYYY-MM prefix of the same state.
+                value={grouping === 'monthly' ? date.slice(0, 7) : date}
+                onChange={(e) =>
+                  setDate(grouping === 'monthly' ? `${e.target.value}-01` : e.target.value)
+                }
                 className="w-48"
               />
+              <span className="text-sm text-muted-foreground">UTC</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Grouping:</span>
@@ -99,7 +105,8 @@ export function CurationPage() {
         <CardHeader>
           <CardTitle>Top Curators</CardTitle>
           <CardDescription>
-            Showing top {leaderboard.length} curators
+            Showing top {leaderboard.length} curators by curation reward (VESTS),
+            using the {grouping === 'monthly' ? 'UTC month' : 'UTC day'} selected above
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -147,7 +154,7 @@ export function CurationPage() {
                   </div>
                   <div className="text-right">
                     <div className="font-semibold text-lg">
-                      {formatCurrency(entry.total)}
+                      {formatVests(entry.total)}
                     </div>
                   </div>
                 </div>
