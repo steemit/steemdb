@@ -111,7 +111,9 @@ snapshot auditable: `posts_scanned` counts every **comment** in the window
 (posts *and* replies — it is a coverage denominator, not a post count),
 `posts_with_app` counts the ones the per-client lists actually attribute (same
 predicate, so an app string like `/1.2.3` that trims to an empty client name is
-scanned but not attributed), `posts_scanned - posts_with_app` is the share with
+scanned but not attributed, and so is a non-string `app` such as an array —
+the projection narrows the field to a string rather than letting `$split` abort
+the tick), `posts_scanned - posts_with_app` is the share with
 no client signal, and `updated_at` is the only way to tell a stalled refresher
 from a fresh one.
 

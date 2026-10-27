@@ -185,6 +185,42 @@ rescanned".
   up to `stale_hours`. Switching that cursor to `rescanned_at` needs a backfill
   plan (a `$lt` on a missing field matches every legacy document at once).
 
+### A6. The `$type` query operator is not a type guard in an aggregation (2026-10)
+
+The clients snapshot refuses `json_metadata.app` values that are not non-empty
+strings by matching `{"json_metadata.app": {"$type": "string", "$ne": ""}}`.
+That match does **not** exclude an array: MongoDB matches a field against a
+`$type` when **an element** has that type, so `{"app": ["steemx/1.0"]}` passes.
+The next stage, `$split` on the same field, requires a string and throws
+`(Location40085) $split requires an expression that evaluates to a string as a
+first argument, found: array` (reproduced on mongo 4.4).
+
+The blast radius is not the bad document. The aggregation aborts, `tick` returns
+before `status.clients-snapshot` is written, and the only trace is one log line:
+a single malformed comment anywhere in the 90-day window freezes the whole
+clients page for as long as it stays in the window. A background refresher must
+survive its worst input — the value that a stage cannot accept has to be
+narrowed in the projection, not assumed away by the pre-filter.
+
+- **Rule**: `$type` inside a `$match` is a pre-filter, not a guarantee. Any
+  expression that requires a specific type (`$split`, `$trim`, `$toLower`,
+  arithmetic) gets an `$isArray`/`$type` guard feeding it, so one dirty document
+  costs one row instead of the whole tick.
+- **Which fields get the guard — ask who shapes the value.** `json_metadata` is
+  arbitrary JSON parsed from the on-chain string
+  (`handlers/comment.go`: `json.Unmarshal` of the op's `json_metadata`), so any
+  account can post `{"app": ["x/1.0"]}` — a user-reachable shape, hence the
+  guard. `created` is a `time.Time` written by our own handlers on insert
+  (`setOnInsert` of the block timestamp) and by the rescanner's string→time
+  conversion, so no writer produces a non-date there and the `$group` date
+  extractors need no guard. A range match does *not* make that safe by itself —
+  `[date]` passes `{$gte, $lte}` and `$dayOfYear` throws `can't convert from
+  BSON type array to Date` — the writer inventory is what makes it safe.
+- **Corollary for tests**: seed the *foreign* type, not just the empty value.
+  The clients test carries an array-of-strings app and an array-of-strings app
+  with two elements; without the guard it fails at "snapshot not written", not
+  at a count assertion — which is what a broken tick actually looks like.
+
 ### B. Reader imagining writer's fields
 `Vote.Time`, `Reblog.BlockNum`, phantom indexes on `timestamp`/
 `last_update`, frontend types declaring string amounts. Every imagined

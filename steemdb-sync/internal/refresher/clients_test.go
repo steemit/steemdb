@@ -20,6 +20,12 @@ import (
 //     right;
 //  3. the snapshot carried no refresh timestamp and no coverage counters, so a
 //     stale snapshot and an unattributed share of posts were both invisible.
+//
+// It also pins a fourth defect found in review: `json_metadata.app` written as
+// an array passed the `$type: "string"` match and made `$split` abort, so a
+// single such document stopped the tick before the snapshot was written. The
+// array fixtures below make this test fail at "snapshot not written" if the
+// type guard regresses.
 func TestClientsTickerAgainstMongo(t *testing.T) {
 	uri := mongoTestURI()
 	if uri == "" {
@@ -65,6 +71,13 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		{"_id": "a/p4", "created": created, "json_metadata": bson.M{}},
 		// App with a leading slash leaves an empty client name: skipped.
 		{"_id": "a/p5", "created": created, "json_metadata": bson.M{"app": "/1.2.3"}},
+		// app as an array of strings: the query-level `$type: "string"` match
+		// does NOT exclude it (MongoDB matches an array when an element is a
+		// string), and the unguarded `$split` then aborted the whole tick —
+		// no snapshot written at all. Both of these are scanned, neither is
+		// attributed.
+		{"_id": "a/p7", "created": created, "json_metadata": bson.M{"app": []interface{}{"steemx/1.0"}}},
+		{"_id": "a/p8", "created": created, "json_metadata": bson.M{"app": []interface{}{"a", "b"}}},
 		// Outside the 90-day window: ignored entirely.
 		{"_id": "a/p6", "created": created.AddDate(0, 0, -120), "json_metadata": bson.M{"app": "old/1.0"}},
 	}
@@ -106,13 +119,14 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		t.Errorf("snapshot metadata missing: updated_at=%v window_from=%v window_to=%v",
 			snapshot.UpdatedAt, snapshot.WindowFrom, snapshot.WindowTo)
 	}
-	// 5 comments inside the 90-day window. Only 2 of them are attributed to a
+	// 7 comments inside the 90-day window. Only 2 of them are attributed to a
 	// client (steemit/0.1.0 and dkscore-poststudio): the "/1.2.3" app leaves an
-	// empty client name and is dropped by the aggregation, so it must not be
-	// counted as attributed either — counting it made the coverage claim a post
-	// the client lists did not contain.
-	if snapshot.PostsScanned != 5 || snapshot.PostsWithApp != 2 {
-		t.Errorf("coverage = %d/%d, want 2/5 (the out-of-window comment is not scanned; \"/1.2.3\" is scanned but unattributed)",
+	// empty client name and is dropped by the aggregation, and the two array
+	// apps are dropped by the same match, so none of them may be counted as
+	// attributed — counting them made the coverage claim a post the client
+	// lists did not contain.
+	if snapshot.PostsScanned != 7 || snapshot.PostsWithApp != 2 {
+		t.Errorf("coverage = %d/%d, want 2/7 (the out-of-window comment is not scanned; \"/1.2.3\" and the array apps are scanned but unattributed)",
 			snapshot.PostsWithApp, snapshot.PostsScanned)
 	}
 

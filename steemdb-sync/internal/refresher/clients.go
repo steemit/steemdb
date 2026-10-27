@@ -32,6 +32,33 @@ type clientsRefresher struct {
 	gate       *catchupGate
 }
 
+// clientAppStringExpr narrows json_metadata.app to a string, or "" for anything
+// else.
+//
+// The `$match` stages already filter on `$type: "string"`, but that query
+// operator is NOT a type guard in the aggregation sense: MongoDB matches an
+// array field against `$type: "string"` when any element is a string, so a
+// document written as `{"app": ["steemx/1.0"]}` passes the match and then hits
+// `$split`, which requires a string — `$split requires an expression that
+// evaluates to a string as a first argument, found: array` (error 40085,
+// reproduced on mongo 4.4). Because the aggregation aborts, the tick returns
+// before writing the snapshot: one such document anywhere in the 90-day window
+// freezes the whole clients snapshot, and the only trace is a log line.
+//
+// Guarding the value that feeds `$split` (rather than wrapping the branches in
+// `$cond`) keeps the expression total no matter which branch the server
+// evaluates; the array then projects an empty client name, is dropped by the
+// `client != ""` match, and shows up as the gap between posts_scanned and
+// posts_with_app instead of inventing an attribution for a shape no writer
+// produces.
+func clientAppStringExpr() bson.M {
+	return bson.M{"$cond": []interface{}{
+		bson.M{"$eq": []interface{}{bson.M{"$type": "$json_metadata.app"}, "string"}},
+		"$json_metadata.app",
+		"",
+	}}
+}
+
 // clientNameExpr is the client-attribution expression: the part of
 // json_metadata.app before the first "/", trimmed. A version suffix is optional
 // in practice (`dkscore-poststudio`, `SteemX`, `drugwars`), so it must not gate
@@ -45,7 +72,7 @@ type clientsRefresher struct {
 func clientNameExpr() bson.M {
 	return bson.M{"$trim": bson.M{"input": bson.M{
 		"$arrayElemAt": []interface{}{
-			bson.M{"$split": []interface{}{"$json_metadata.app", "/"}},
+			bson.M{"$split": []interface{}{clientAppStringExpr(), "/"}},
 			0,
 		},
 	}}}
@@ -130,6 +157,10 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 	// Same pipeline as legacy history.py: match 90d comments whose
 	// json_metadata.app is a non-empty string, group by client × day, then
 	// re-group per day with per-client count/reward arrays.
+	//
+	// The `$type: "string"` match is a cheap pre-filter, not a type guarantee:
+	// it also passes array values (see clientAppStringExpr), which is why the
+	// projection has to be total rather than trusting the match.
 	//
 	// The app match used to require a `name/version` shape
 	// (`[\w-]+/[\w.]+`), which silently dropped 13% of the posts that DO name a
