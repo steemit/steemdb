@@ -125,7 +125,16 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 			},
 		},
 		{
-			"$sort": bson.M{"_id.year": 1, "_id.doy": 1, "value": -1, "_id.client": 1},
+			// bson.D, not bson.M: MongoDB reads a $sort document's field
+			// order as precedence, while bson.M is an unordered map. With a
+			// map, `value` could become primary and each day's client list
+			// would be ordered across days instead of within one.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: 1},
+				{Key: "_id.doy", Value: 1},
+				{Key: "value", Value: -1},
+				{Key: "_id.client", Value: 1},
+			},
 		},
 		{
 			"$group": bson.M{
@@ -141,7 +150,11 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 			},
 		},
 		{
-			"$sort": bson.M{"_id.year": -1, "_id.doy": -1},
+			// Newest day first; bson.D so year stays ahead of day-of-year.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: -1},
+				{Key: "_id.doy", Value: -1},
+			},
 		},
 	}
 

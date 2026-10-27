@@ -112,6 +112,30 @@ Three separate ways a board can be confidently wrong without erroring.
   days carried reward 0 while post counts looked right — `$sum` over
   `$ifNull`-guarded legs instead.
 
+### A4. A multi-key `$sort` built from `bson.M` has no precedence (2026-10, batch 3)
+
+MongoDB reads the **field order of a `$sort` document as sort precedence**, and
+`bson.M` is an unordered Go map: marshalling `bson.M{"total_steem": -1, "_id": 1}`
+emits the two keys in a random order. When the tie-breaker lands first it becomes
+the primary key — and because it was a tie-breaker precisely because it is
+unique (`_id`, `_id.voter`), the ranking key is then ignored entirely. The board
+did not error; it just came back alphabetical, in roughly one run out of five
+(measured 5/40 and 7/40 on a local mongo 4.4 with identical input).
+
+It was found by accident: the labs integration tests assert row order, and they
+were run repeatedly. A single pass passes 80% of the time, which is exactly why
+this shape survives review.
+
+- **Rule**: any `$sort` with more than one key is a `bson.D` (`bson.D{{Key:...,
+  Value:...}, ...}`), never a map. Same for `$sort` inside `$facet` sub-pipelines
+  and on the sync side (`refresher/clients.go` ordered each day's client list by
+  a four-key map).
+- **Corollary for tests**: a board's ordering must be asserted more than once.
+  The regression test for this runs the same aggregation 20 times, because one
+  call cannot distinguish "correct precedence" from "lucky map order".
+
+A single-key `$sort` may stay a map — one key has no precedence problem.
+
 ### B. Reader imagining writer's fields
 `Vote.Time`, `Reblog.BlockNum`, phantom indexes on `timestamp`/
 `last_update`, frontend types declaring string amounts. Every imagined

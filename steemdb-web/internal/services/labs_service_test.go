@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -336,6 +338,72 @@ func TestRewardValuationSteemEquivalent(t *testing.T) {
 	// All three legs add up.
 	if got, want := valuation.steemEquivalent(1126437.341679, 548.186, 0.5), 699.307+548.186+4.804; got < want-1 || got > want+1 {
 		t.Errorf("total = %v STEEM, want ≈%v", got, want)
+	}
+}
+
+// TestRewardValuationFailureBackoff pins the node-failure behaviour of the
+// author-board valuation cache. The previous shape held a mutex across two RPC
+// calls, so every concurrent request queued behind the same (up to 46s) refresh
+// and a single sick node became an endpoint-wide pile-up. Now: the refresh is
+// merged, failures are recorded and short-circuit the next attempt, and a
+// last-good valuation keeps being served instead of failing the board.
+func TestRewardValuationFailureBackoff(t *testing.T) {
+	// No RPC client: every refresh fails, which is the "node unreachable" shape
+	// minus the wait.
+	svc := &LabsService{}
+
+	start := time.Now()
+	if _, err := svc.rewardValuation(context.Background()); err == nil {
+		t.Fatal("cold cache with no client returned a valuation; want an error")
+	}
+	failedAt := svc.lastValuationFailure()
+	if failedAt.IsZero() {
+		t.Fatal("refresh failure was not recorded; every request would hit the node again")
+	}
+	if failedAt.Before(start) {
+		t.Errorf("failure timestamp %v predates the attempt at %v", failedAt, start)
+	}
+
+	// Inside the retry window the call short-circuits instead of retrying.
+	if _, err := svc.rewardValuation(context.Background()); !errors.Is(err, errValuationRecentFailure) {
+		t.Errorf("second call error = %v, want errValuationRecentFailure", err)
+	}
+
+	// With a last-good valuation the same failure serves the stale rate: a
+	// minute-stale conversion is within 0.05% of the truth, an error page is not.
+	svc.valMu.Lock()
+	svc.val = rewardValuation{VestsRatio: 1e-6, SteemPerSBD: 9.6}
+	svc.valAt = time.Now().Add(-2 * labsValuationTTL)
+	svc.valMu.Unlock()
+
+	got, err := svc.rewardValuation(context.Background())
+	if err != nil {
+		t.Fatalf("stale valuation not served on a failed refresh: %v", err)
+	}
+	if got.SteemPerSBD != 9.6 || got.VestsRatio != 1e-6 {
+		t.Errorf("stale valuation = %+v, want the cached {VestsRatio:1e-6 SteemPerSBD:9.6}", got)
+	}
+}
+
+// TestRewardValuationServesFreshCache pins that a valuation inside
+// labsValuationTTL is returned without any RPC: the author board must not put
+// two public-node round trips inside every request.
+func TestRewardValuationServesFreshCache(t *testing.T) {
+	svc := &LabsService{}
+	svc.valMu.Lock()
+	svc.val = rewardValuation{VestsRatio: 2e-6, SteemPerSBD: 9.5}
+	svc.valAt = time.Now()
+	svc.valMu.Unlock()
+
+	got, err := svc.rewardValuation(context.Background())
+	if err != nil {
+		t.Fatalf("fresh cache returned an error: %v", err)
+	}
+	if got.SteemPerSBD != 9.5 {
+		t.Errorf("valuation = %+v, want the cached SteemPerSBD 9.5", got)
+	}
+	if !svc.lastValuationFailure().IsZero() {
+		t.Error("a fresh cache hit recorded a failure")
 	}
 }
 

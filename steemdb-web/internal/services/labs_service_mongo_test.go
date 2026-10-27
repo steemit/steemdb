@@ -469,6 +469,26 @@ func TestAuthorRankingBySteemEquivalentAgainstMongo(t *testing.T) {
 	if diff := got[0].TotalSteem - 14.6; diff > 1e-9 || diff < -1e-9 {
 		t.Errorf("liquid total_steem = %v, want 14.6 (1 SBD = 9.6 STEEM, not 1)", got[0].TotalSteem)
 	}
+
+	// Repeat the same call: a $sort document built from bson.M (an unordered
+	// map) has an undefined key precedence, so the _id tie-breaker became the
+	// primary key in roughly one run in five and the board came back in
+	// alphabetical order. A single call hides that; 20 do not.
+	for i := 0; i < 20; i++ {
+		repeated, err := svc.authorLeaderboard(ctx, day, "daily", 100, authorTestValuation)
+		if err != nil {
+			t.Fatalf("repeat %d: authorLeaderboard: %v", i, err)
+		}
+		if len(repeated) != 3 {
+			t.Fatalf("repeat %d: got %d authors, want 3", i, len(repeated))
+		}
+		for j, author := range want {
+			if repeated[j].Author != author {
+				t.Fatalf("repeat %d: rank %d = %q, want %q (sort precedence must not depend on map order)",
+					i, j+1, repeated[j].Author, author)
+			}
+		}
+	}
 }
 
 // TestAuthorLimitAgainstMongo pins the row cap: the response is bounded but the
@@ -557,6 +577,20 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 	}
 	if board.Allocations[0].Voter != "up" || board.Allocations[0].Rshares != 1500 {
 		t.Errorf("top row = %+v, want up/1500", board.Allocations[0])
+	}
+
+	// Repeat: the board's two-key $sort (_id.voter tie-breaker) came back in
+	// voter-name order in roughly one run in five while the sort document was
+	// an unordered map, which put the 5-rshare dust vote on top.
+	for i := 0; i < 20; i++ {
+		repeated, err := svc.GetRsharesAllocation(ctx, day, 1)
+		if err != nil {
+			t.Fatalf("repeat %d: GetRsharesAllocation: %v", i, err)
+		}
+		if len(repeated.Allocations) != 1 || repeated.Allocations[0].Voter != "up" {
+			t.Fatalf("repeat %d: top row = %+v, want the 1500-rshare vote (sort precedence must not depend on map order)",
+				i, repeated.Allocations)
+		}
 	}
 	if board.DataAsOf == nil || !board.DataAsOf.Equal(day.Add(7*time.Hour)) {
 		t.Errorf("data_as_of = %v, want the newest comment.scanned (%v)", board.DataAsOf, day.Add(7*time.Hour))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/steemit/steemdb/web/internal/database"
 	"github.com/steemit/steemdb/web/internal/models"
@@ -26,11 +28,14 @@ type LabsService struct {
 	steemClient *steem.Client
 	logger      utils.Logger
 
-	// Reward valuation cache (author leaderboard ranking). Guarded by valMu
-	// so a burst of requests shares one props + price-feed round trip.
-	valMu sync.Mutex
-	val   rewardValuation
-	valAt time.Time
+	// Reward valuation cache (author leaderboard ranking). valMu guards the
+	// cached snapshot; valGroup merges concurrent refreshes so a burst of
+	// requests issues one props + price-feed round trip instead of one each.
+	valMu     sync.Mutex
+	val       rewardValuation
+	valAt     time.Time
+	valFailAt time.Time
+	valGroup  singleflight.Group
 }
 
 // NewLabsService creates a new labs service
@@ -250,9 +255,13 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 			},
 		},
 		{
-			"$sort": bson.M{
-				"_id.year": 1,
-				"_id.doy":  1,
+			// bson.D, not bson.M: MongoDB reads the field order of a $sort
+			// document as precedence, while bson.M is an unordered map. With
+			// a map the day-of-year key can end up primary, which misorders a
+			// window that spans a year boundary (Dec 29..Jan 04).
+			"$sort": bson.D{
+				{Key: "_id.year", Value: 1},
+				{Key: "_id.doy", Value: 1},
 			},
 		},
 		{
@@ -325,9 +334,11 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 			},
 		},
 		{
-			"$sort": bson.M{
-				"_id.year": 1,
-				"_id.doy":  1,
+			// bson.D for the same reason as the upcoming pipeline above: a
+			// two-key sort in a map has undefined precedence.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: 1},
+				{Key: "_id.doy", Value: 1},
 			},
 		},
 		{
@@ -536,7 +547,10 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, 
 			// up to 100%).
 			"$facet": bson.M{
 				"rows": []bson.M{
-					{"$sort": bson.M{"rshares": -1, "_id.voter": 1}},
+					// bson.D: a two-key $sort in an unordered map made the
+					// tie-breaker (_id.voter) primary in some runs, so the
+					// board intermittently showed voters in name order.
+					{"$sort": bson.D{{Key: "rshares", Value: -1}, {Key: "_id.voter", Value: 1}}},
 					{"$limit": limit},
 					{
 						"$lookup": bson.M{
@@ -567,17 +581,23 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, 
 	}
 	defer cursor.Close(ctx)
 
+	// Decoded leniently (float64): active_votes[].rshares is written by
+	// steemdb-sync, which stores it as a BSON double, while `$sum` over
+	// integer-typed junk returns int64. Decoding both as float64 keeps the
+	// rounding in our hands instead of the codec's (a fractional double would
+	// fail a rigid int64 decode outright); rshares are whole numbers, so the
+	// round on the way out is lossless.
 	var facets []struct {
 		Rows []struct {
 			ID      bson.M   `bson:"_id"`
 			Votes   int      `bson:"votes"`
-			Rshares int64    `bson:"rshares"`
+			Rshares float64  `bson:"rshares"`
 			Account []bson.M `bson:"account"`
 		} `bson:"rows"`
 		Meta []struct {
-			TotalRshares int64 `bson:"total_rshares"`
-			TotalVotes   int64 `bson:"total_votes"`
-			Voters       int   `bson:"voters"`
+			TotalRshares float64 `bson:"total_rshares"`
+			TotalVotes   int64   `bson:"total_votes"`
+			Voters       int     `bson:"voters"`
 		} `bson:"meta"`
 	}
 	if err := cursor.All(ctx, &facets); err != nil {
@@ -590,7 +610,7 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, 
 	}
 	if len(facets) > 0 {
 		if len(facets[0].Meta) > 0 {
-			board.TotalRshares = facets[0].Meta[0].TotalRshares
+			board.TotalRshares = int64(math.Round(facets[0].Meta[0].TotalRshares))
 			board.TotalVotes = facets[0].Meta[0].TotalVotes
 			board.Voters = facets[0].Meta[0].Voters
 		}
@@ -599,7 +619,7 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, 
 			board.Allocations = append(board.Allocations, models.RsharesAllocation{
 				Voter:   voter,
 				Votes:   r.Votes,
-				Rshares: r.Rshares,
+				Rshares: int64(math.Round(r.Rshares)),
 				Account: accountSummaryFromLookup(r.Account),
 			})
 		}
@@ -757,7 +777,7 @@ const (
 // VESTS alone while displaying only steem+sbd inverted the top of the board
 // and showed "0.000 STEEM / 0.000 SBD" for 100% power-up authors.
 func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, grouping string, limit int) ([]models.AuthorLeaderboard, error) {
-	valuation, err := s.rewardValuation()
+	valuation, err := s.rewardValuation(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -883,7 +903,13 @@ func (s *LabsService) authorLeaderboard(ctx context.Context, date time.Time, gro
 			"$match": bson.M{"total_steem": bson.M{"$gt": 0}},
 		},
 		{
-			"$sort": bson.M{"total_steem": -1, "_id": 1},
+			// bson.D: with a map the _id tie-breaker can become the primary
+			// key, which silently replaced "rank by STEEM equivalent" with
+			// "alphabetical by author" in roughly one run out of five.
+			"$sort": bson.D{
+				{Key: "total_steem", Value: -1},
+				{Key: "_id", Value: 1},
+			},
 		},
 		{
 			"$limit": limit,
@@ -1147,10 +1173,14 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 			// "+N more benefactors") are the day's top benefactors. The former
 			// `$sort {_ts:-1}` on the raw collection only ordered that array by
 			// event time.
-			"$sort": bson.M{
-				"_id.year": -1,
-				"_id.doy":  -1,
-				"reward":   -1,
+			// bson.D: the day keys must stay ahead of `reward` in precedence.
+			// In a map the order is random, and with `reward` primary the
+			// per-day array would be ordered across days instead of within
+			// each day.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: -1},
+				{Key: "_id.doy", Value: -1},
+				{Key: "reward", Value: -1},
 			},
 		},
 		{
@@ -1176,9 +1206,10 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 		{
 			// Newest day first (was ascending, which together with $limit 10
 			// returned the oldest 10 days of the collection's history).
-			"$sort": bson.M{
-				"_id.year": -1,
-				"_id.doy":  -1,
+			// bson.D for ordering precedence across the two day keys.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: -1},
+				{Key: "_id.doy", Value: -1},
 			},
 		},
 		{
@@ -1348,6 +1379,27 @@ func vestsToSteem(vests, ratio float64) float64 {
 // uncached pair would put two public-node round trips inside every request.
 const labsValuationTTL = 60 * time.Second
 
+// labsValuationRetryTTL is how long a failed refresh suppresses the next
+// attempt. Without it, a sick node turns every request into a fresh
+// two-RPC call that takes up to 46s each (see steem.rpcMaxRetries): the
+// endpoint would emit a steady stream of doomed requests instead of a few.
+const labsValuationRetryTTL = 15 * time.Second
+
+// labsValuationWait bounds how long a request waits on a refresh that is
+// already in flight. The refresh itself is never abandoned (it warms the
+// cache for later requests), but no request queues behind it: past this
+// budget the caller is served the last good valuation, or fails.
+const labsValuationWait = 3 * time.Second
+
+var (
+	// errValuationInFlight reports that a refresh was already running and this
+	// request declined to queue behind it.
+	errValuationInFlight = errors.New("labs reward valuation refresh already in flight")
+	// errValuationRecentFailure reports that the last refresh failed less than
+	// labsValuationRetryTTL ago.
+	errValuationRecentFailure = errors.New("labs reward valuation refresh failed recently")
+)
+
 // rewardValuation is everything needed to state an author_reward payout in one
 // unit. VESTS → STEEM uses the props ratio; SBD → STEEM uses the median price
 // feed, because on Steem SBD does not trade at parity (2026-10: 1 SBD ≈ 9.6
@@ -1385,50 +1437,127 @@ func (v rewardValuation) steemEquivalentExpr(vests, steem, sbd string) bson.M {
 }
 
 // rewardValuation returns the current reward valuation, refreshing at most once
-// per labsValuationTTL. A failed refresh serves the last good valuation (a
-// minute-stale conversion is within 0.05% of the truth) and only an error when
-// nothing was ever fetched — the board then fails instead of ranking on a
-// fabricated rate.
-func (s *LabsService) rewardValuation() (rewardValuation, error) {
-	s.valMu.Lock()
-	defer s.valMu.Unlock()
-
-	if s.val.VestsRatio > 0 && s.val.SteemPerSBD > 0 && time.Since(s.valAt) < labsValuationTTL {
-		return s.val, nil
+// per labsValuationTTL.
+//
+// Failure behaviour is what keeps a sick node from becoming an endpoint-wide
+// pile-up (the lock-then-RPC shape this replaced made every concurrent request
+// wait behind the same refresh, and a hung node makes one refresh take up to
+// 46s per RPC):
+//
+//   - concurrent refreshes are merged, so a burst costs one round trip;
+//   - a request never queues behind an in-flight refresh for longer than
+//     labsValuationWait — it is served the last good valuation instead;
+//   - a failed refresh suppresses the next attempt for labsValuationRetryTTL.
+//
+// A last-good valuation is always preferred over an error (a minute-stale rate
+// is within 0.05% of the truth); only a cold cache surfaces the error, so the
+// board fails instead of ranking on a fabricated rate.
+func (s *LabsService) rewardValuation(ctx context.Context) (rewardValuation, error) {
+	if v, ok := s.freshValuation(); ok {
+		return v, nil
 	}
 
+	if failedAt := s.lastValuationFailure(); !failedAt.IsZero() && time.Since(failedAt) < labsValuationRetryTTL {
+		return s.cachedValuation(errValuationRecentFailure)
+	}
+
+	// DoChan (not Do) so the wait can be bounded: the refresh keeps running in
+	// its own goroutine and warms the cache even when every waiter gives up.
+	refreshed := s.valGroup.DoChan("rewardValuation", func() (interface{}, error) {
+		return s.fetchValuation()
+	})
+
+	timer := time.NewTimer(labsValuationWait)
+	defer timer.Stop()
+
+	select {
+	case res := <-refreshed:
+		if res.Err != nil {
+			return s.cachedValuation(res.Err)
+		}
+		v, _ := res.Val.(rewardValuation)
+		return v, nil
+	case <-timer.C:
+		return s.cachedValuation(errValuationInFlight)
+	case <-ctx.Done():
+		return s.cachedValuation(ctx.Err())
+	}
+}
+
+// freshValuation returns the cached valuation while it is still within
+// labsValuationTTL.
+func (s *LabsService) freshValuation() (rewardValuation, bool) {
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
+	if s.val.VestsRatio > 0 && s.val.SteemPerSBD > 0 && time.Since(s.valAt) < labsValuationTTL {
+		return s.val, true
+	}
+	return rewardValuation{}, false
+}
+
+// lastValuationFailure returns when the last refresh failed (zero if it did
+// not).
+func (s *LabsService) lastValuationFailure() time.Time {
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
+	return s.valFailAt
+}
+
+// fetchValuation performs one refresh and records its outcome. Runs at most
+// once per merge group, never holding valMu across the RPC.
+func (s *LabsService) fetchValuation() (rewardValuation, error) {
+	val, err := s.readValuationFromChain()
+	if err != nil {
+		s.valMu.Lock()
+		s.valFailAt = time.Now()
+		s.valMu.Unlock()
+		return rewardValuation{}, err
+	}
+
+	s.valMu.Lock()
+	s.val = val
+	s.valAt = time.Now()
+	s.valFailAt = time.Time{}
+	s.valMu.Unlock()
+
+	return val, nil
+}
+
+// readValuationFromChain is the two-call RPC half of a refresh.
+func (s *LabsService) readValuationFromChain() (rewardValuation, error) {
 	if s.steemClient == nil {
-		return s.staleValuation(errors.New("no steem client configured"))
+		return rewardValuation{}, errors.New("no steem client configured")
 	}
 
 	props, err := s.steemClient.GetDynamicGlobalProperties()
 	if err != nil {
-		return s.staleValuation(fmt.Errorf("failed to get props: %w", err))
+		return rewardValuation{}, fmt.Errorf("failed to get props: %w", err)
 	}
 	ratio := vestsToSteemRatio(props.TotalVestingFundSteem, props.TotalVestingShares)
 	if ratio <= 0 {
-		return s.staleValuation(errors.New("props carry no vesting ratio"))
+		return rewardValuation{}, errors.New("props carry no vesting ratio")
 	}
 
 	steemPerSBD, err := s.steemClient.GetMedianHistoryPrice()
 	if err != nil {
-		return s.staleValuation(fmt.Errorf("failed to get median price: %w", err))
+		return rewardValuation{}, fmt.Errorf("failed to get median price: %w", err)
 	}
 
-	s.val = rewardValuation{VestsRatio: ratio, SteemPerSBD: steemPerSBD}
-	s.valAt = time.Now()
-
-	return s.val, nil
+	return rewardValuation{VestsRatio: ratio, SteemPerSBD: steemPerSBD}, nil
 }
 
-// staleValuation returns the cached valuation when a refresh failed, otherwise
-// the refresh error.
-func (s *LabsService) staleValuation(cause error) (rewardValuation, error) {
-	if s.val.VestsRatio > 0 && s.val.SteemPerSBD > 0 {
+// cachedValuation returns the last good valuation when a refresh failed,
+// otherwise the refresh error.
+func (s *LabsService) cachedValuation(cause error) (rewardValuation, error) {
+	s.valMu.Lock()
+	val := s.val
+	s.valMu.Unlock()
+
+	if val.VestsRatio > 0 && val.SteemPerSBD > 0 {
 		if s.logger != nil {
 			s.logger.Warn("Using stale labs reward valuation", utils.Error(cause))
 		}
-		return s.val, nil
+		return val, nil
 	}
 	return rewardValuation{}, cause
 }
