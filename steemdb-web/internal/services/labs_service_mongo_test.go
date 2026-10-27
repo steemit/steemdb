@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -215,4 +216,165 @@ func TestFlagsSnapshotAgainstMongo(t *testing.T) {
 	if flags, err := svc.GetFlags(ctx); err != nil || len(flags) != 1 {
 		t.Errorf("stale snapshot not served: flags=%v err=%v", flags, err)
 	}
+}
+
+// TestPowerUpTotalAgainstMongo pins the aggregation fix: two deposits of the
+// same amount must both count towards `total`. The previous pipeline derived
+// total from an $addToSet of amounts, so identical deposits collapsed into one
+// and the leaderboard under-reported while `count` stayed correct.
+func TestPowerUpTotalAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	collection := svc.db.Collection("vesting_deposit")
+	now := time.Now().UTC()
+	docs := []bson.M{
+		// ecotracker: four deposits, three of them identical.
+		{"_ts": now.Add(-1 * time.Hour), "from": "ecotracker", "to": "", "amount": 0.001},
+		{"_ts": now.Add(-2 * time.Hour), "from": "ecotracker", "to": "", "amount": 0.001},
+		{"_ts": now.Add(-3 * time.Hour), "from": "ecotracker", "to": "", "amount": 0.001},
+		{"_ts": now.Add(-4 * time.Hour), "from": "ecotracker", "to": "", "amount": 5.0},
+		// delegated: the deposit is credited to `to`, not `from`.
+		{"_ts": now.Add(-5 * time.Hour), "from": "sponsor", "to": "delegate", "amount": 2.5},
+		// outside the 30-day window
+		{"_ts": now.AddDate(0, 0, -40), "from": "ecotracker", "to": "", "amount": 1000.0},
+	}
+	if _, err := collection.InsertMany(ctx, asDocs(docs)); err != nil {
+		t.Fatalf("insert deposits: %v", err)
+	}
+
+	got, err := svc.GetPowerUps(ctx, "")
+	if err != nil {
+		t.Fatalf("GetPowerUps: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d accounts, want 2: %+v", len(got), got)
+	}
+	if got[0].User != "ecotracker" {
+		t.Errorf("first account = %q, want ecotracker (largest total)", got[0].User)
+	}
+	if got[0].Count != 4 {
+		t.Errorf("ecotracker count = %d, want 4", got[0].Count)
+	}
+	// 3 × 0.001 + 5.0 = 5.003. Summing the distinct-amount set gives 5.001.
+	if diff := got[0].Total - 5.003; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("ecotracker total = %v, want 5.003 (duplicate amounts counted)", got[0].Total)
+	}
+	if got[1].User != "delegate" || got[1].Total != 2.5 {
+		t.Errorf("second entry = %+v, want delegate/2.5 (credited to the `to` account)", got[1])
+	}
+
+	// The 7-day window must exclude nothing here except the old deposit that
+	// was already excluded; a week filter drops nothing but keeps the sums.
+	week, err := svc.GetPowerUps(ctx, "week")
+	if err != nil {
+		t.Fatalf("GetPowerUps(week): %v", err)
+	}
+	if len(week) != 2 || week[0].Total != 5.003 {
+		t.Errorf("week window = %+v, want the same two accounts", week)
+	}
+}
+
+// TestPendingPostsAgainstMongo pins the scope fix: replies and zero-payout
+// posts must not appear on a page titled "Pending Posts".
+func TestPendingPostsAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	collection := svc.db.Collection("comment")
+	now := time.Now().UTC()
+	// Inside the [7d, 6.5d] window: a top-level post with a payout, a reply
+	// with a payout, and a top-level post with nothing pending.
+	created := now.Add(-160 * time.Hour)
+	docs := []bson.M{
+		{"_id": "a/p1", "author": "a", "permlink": "p1", "title": "post", "depth": 0, "created": created, "pending_payout_value": 12.5},
+		{"_id": "b/re1", "author": "b", "permlink": "re1", "title": "", "depth": 1, "created": created, "pending_payout_value": 99.0},
+		{"_id": "c/p2", "author": "c", "permlink": "p2", "title": "declining", "depth": 0, "created": created, "pending_payout_value": 0},
+		{"_id": "d/p3", "author": "d", "permlink": "p3", "title": "too old", "depth": 0, "created": now.Add(-200 * time.Hour), "pending_payout_value": 50.0},
+	}
+	if _, err := collection.InsertMany(ctx, asDocs(docs)); err != nil {
+		t.Fatalf("insert comments: %v", err)
+	}
+
+	got, err := svc.GetPendingPosts(ctx)
+	if err != nil {
+		t.Fatalf("GetPendingPosts: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d posts, want 1 (the other three are a reply, a zero payout and an out-of-window post): %+v", len(got), got)
+	}
+	if got[0].Author != "a" || got[0].PendingPayoutValue != 12.5 {
+		t.Errorf("pending post = %+v, want a/p1 with 12.5", got[0])
+	}
+}
+
+// TestCurationMonthlyAgainstMongo pins the monthly window and the permlink cap
+// that keeps the response small.
+func TestCurationMonthlyAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	collection := svc.db.Collection("curation_reward")
+	docs := []bson.M{
+		{"curator": "curators", "_ts": time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC), "reward": 100.0, "comment_author": "a", "comment_permlink": "p1"},
+		{"curator": "curators", "_ts": time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC), "reward": 50.0, "comment_author": "b", "comment_permlink": "p2"},
+		// next month — must stay out of the September window
+		{"curator": "curators", "_ts": time.Date(2026, 10, 1, 0, 30, 0, 0, time.UTC), "reward": 999.0, "comment_author": "c", "comment_permlink": "p3"},
+	}
+	if _, err := collection.InsertMany(ctx, asDocs(docs)); err != nil {
+		t.Fatalf("insert rewards: %v", err)
+	}
+
+	got, err := svc.GetCurationLeaderboard(ctx, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), "monthly")
+	if err != nil {
+		t.Fatalf("GetCurationLeaderboard: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d curators, want 1", len(got))
+	}
+	if got[0].Curator != "curators" || got[0].Count != 2 || got[0].Total != 150.0 {
+		t.Errorf("curation row = %+v, want curators/2 ops/150 VESTS", got[0])
+	}
+}
+
+// TestCurationPermlinkCapAgainstMongo bounds the response payload: a curator
+// with far more posts than the cap still returns a full count and total.
+func TestCurationPermlinkCapAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	collection := svc.db.Collection("curation_reward")
+	day := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	docs := make([]bson.M, 0, curatedPermlinksPerCurator+15)
+	for i := 0; i < curatedPermlinksPerCurator+15; i++ {
+		docs = append(docs, bson.M{
+			"curator": "heavy", "_ts": day.Add(time.Duration(i) * time.Minute), "reward": 1.0,
+			"comment_author": "author", "comment_permlink": fmt.Sprintf("p%d", i),
+		})
+	}
+	if _, err := collection.InsertMany(ctx, asDocs(docs)); err != nil {
+		t.Fatalf("insert rewards: %v", err)
+	}
+
+	got, err := svc.GetCurationLeaderboard(ctx, day, "daily")
+	if err != nil {
+		t.Fatalf("GetCurationLeaderboard: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d curators, want 1", len(got))
+	}
+	if got[0].Count != curatedPermlinksPerCurator+15 {
+		t.Errorf("count = %d, want %d (the cap applies to permlinks only)", got[0].Count, curatedPermlinksPerCurator+15)
+	}
+	if len(got[0].Permlinks) != curatedPermlinksPerCurator {
+		t.Errorf("permlinks = %d, want the cap %d", len(got[0].Permlinks), curatedPermlinksPerCurator)
+	}
+	if got[0].Total != float64(curatedPermlinksPerCurator+15) {
+		t.Errorf("total = %v, want %d", got[0].Total, curatedPermlinksPerCurator+15)
+	}
+}
+
+// asDocs adapts a typed document slice to the driver's InsertMany signature.
+func asDocs(ms []bson.M) []interface{} {
+	out := make([]interface{}, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, m)
+	}
+	return out
 }

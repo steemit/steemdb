@@ -90,21 +90,43 @@ func (h *LabsHandler) GetRshares(c *gin.Context) {
 	h.respondWithSuccess(c, rshares)
 }
 
-// GetCuration handles GET /api/v1/labs/curation
-func (h *LabsHandler) GetCuration(c *gin.Context) {
-	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
-	grouping := c.DefaultQuery("grouping", "daily")
-
-	var date time.Time
-	var err error
-
-	if grouping == "monthly" {
-		dateStr = c.DefaultQuery("date", time.Now().Format("2006-01"))
-		date, err = time.Parse("2006-01", dateStr)
-	} else {
-		date, err = time.Parse("2006-01-02", dateStr)
+// parseLeaderboardDate resolves the `date` query value for the curation and
+// author leaderboards.
+//
+// grouping=monthly accepts YYYY-MM and YYYY-MM-DD: a date control that keeps
+// its daily value while the grouping switches to monthly used to 400 here.
+// The fallback default is the current UTC day/month (the aggregation windows
+// are UTC), never the server-local date, so a request without `date` cannot
+// land on the neighbouring day because of the container's TZ.
+func parseLeaderboardDate(grouping, dateStr string) (time.Time, error) {
+	if dateStr == "" {
+		if grouping == "monthly" {
+			dateStr = time.Now().UTC().Format("2006-01")
+		} else {
+			dateStr = time.Now().UTC().Format("2006-01-02")
+		}
 	}
 
+	if grouping == "monthly" {
+		if date, err := time.Parse("2006-01", dateStr); err == nil {
+			return date, nil
+		}
+		return time.Parse("2006-01-02", dateStr)
+	}
+	return time.Parse("2006-01-02", dateStr)
+}
+
+// GetCuration handles GET /api/v1/labs/curation
+func (h *LabsHandler) GetCuration(c *gin.Context) {
+	grouping := c.DefaultQuery("grouping", "daily")
+	if grouping != "daily" && grouping != "monthly" {
+		// Unknown groupings used to fall through to the daily window, so a
+		// client asking for something else silently got a different board.
+		h.respondWithError(c, http.StatusBadRequest, "Invalid grouping (daily or monthly)")
+		return
+	}
+
+	date, err := parseLeaderboardDate(grouping, c.DefaultQuery("date", ""))
 	if err != nil {
 		h.respondWithError(c, http.StatusBadRequest, "Invalid date format")
 		return
@@ -122,19 +144,13 @@ func (h *LabsHandler) GetCuration(c *gin.Context) {
 
 // GetAuthor handles GET /api/v1/labs/author
 func (h *LabsHandler) GetAuthor(c *gin.Context) {
-	dateStr := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
 	grouping := c.DefaultQuery("grouping", "daily")
-
-	var date time.Time
-	var err error
-
-	if grouping == "monthly" {
-		dateStr = c.DefaultQuery("date", time.Now().Format("2006-01"))
-		date, err = time.Parse("2006-01", dateStr)
-	} else {
-		date, err = time.Parse("2006-01-02", dateStr)
+	if grouping != "daily" && grouping != "monthly" {
+		h.respondWithError(c, http.StatusBadRequest, "Invalid grouping (daily or monthly)")
+		return
 	}
 
+	date, err := parseLeaderboardDate(grouping, c.DefaultQuery("date", ""))
 	if err != nil {
 		h.respondWithError(c, http.StatusBadRequest, "Invalid date format")
 		return

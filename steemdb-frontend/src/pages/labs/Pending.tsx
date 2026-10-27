@@ -59,8 +59,8 @@ export function PendingPage() {
         <CardHeader>
           <CardTitle>Pending Payout Posts</CardTitle>
           <CardDescription>
-            Posts created 6.5-7 days ago, within 12 hours of cashout, sorted
-            by pending payout value
+            Posts created 6.5-7 days ago, within 12 hours of cashout. Top 200
+            ranked by pending payout (SBD); replies excluded.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -106,7 +106,7 @@ export function PendingPage() {
                     </div>
                     <div className="text-right ml-4">
                       <div className="font-semibold text-lg">
-                        {formatCurrency(post.total_pending_payout_value)}
+                        {formatCurrency(post.pending_payout_value, 'SBD')}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         Pending

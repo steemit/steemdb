@@ -2,9 +2,12 @@ package models
 
 import "time"
 
-// PowerUp represents a power up (vesting deposit) entry. Account is a
-// tolerant summary projection: account documents written by steemdb-sync
-// keep raw RPC values (string ints/dates) that a rigid struct cannot decode.
+// PowerUp represents a power up (vesting deposit) entry. Total is the STEEM
+// sum over every deposit in the window; Instances is the *distinct* amount set
+// of that window (legacy shape, unused by the SPA) — never derive Total from
+// it. Account is a tolerant summary projection: account documents written by
+// steemdb-sync keep raw RPC values (string ints/dates) that a rigid struct
+// cannot decode.
 type PowerUp struct {
 	User      string          `json:"user"`
 	Count     int             `json:"count"`
@@ -66,7 +69,9 @@ type RsharesAllocation struct {
 	Account *AccountSummary `json:"account,omitempty"`
 }
 
-// CurationLeaderboard represents curation reward leaderboard entry
+// CurationLeaderboard represents curation reward leaderboard entry. Total is
+// VESTS (curation_reward.reward); Permlinks is capped per curator by the
+// service and is not rendered by the SPA.
 type CurationLeaderboard struct {
 	Curator   string          `json:"curator"`
 	Count     int             `json:"count"`

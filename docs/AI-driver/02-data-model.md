@@ -46,6 +46,10 @@ fields.
   `total_vesting_fund_steem / total_vesting_shares` from the same props
   snapshot — never hand a VESTS number to a STEEM formatter (the labs power
   down page was overstated ~1610x that way until 2026-10).
+- **`comment.pending_payout_value` is SBD and is the only pending figure.**
+  `total_pending_payout_value` is written as 0 by this chain, so a reader that
+  displays it renders `0.000` for every row. `depth` distinguishes top-level
+  posts (0) from replies; labs boards whose copy says "posts" must filter it.
 
 ## Collection reference
 

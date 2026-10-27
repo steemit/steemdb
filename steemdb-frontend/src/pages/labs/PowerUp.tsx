@@ -12,6 +12,9 @@ export function PowerUpPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [filter, setFilter] = useState(searchParams.get('filter') || '');
 
+  // Mirrors the endpoint's rolling windows: '' → 30 days, week → 7, day → 1.
+  const windowLabel = filter === 'week' ? '7 days' : filter === 'day' ? '24 hours' : '30 days';
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['powerups', filter],
     queryFn: () => getPowerUps(filter || undefined),
@@ -74,21 +77,21 @@ export function PowerUpPage() {
           size="sm"
           onClick={() => handleFilterChange('')}
         >
-          All (30 days)
+          30 days
         </Button>
         <Button
           variant={filter === 'week' ? 'default' : 'outline'}
           size="sm"
           onClick={() => handleFilterChange('week')}
         >
-          Week
+          7 days
         </Button>
         <Button
           variant={filter === 'day' ? 'default' : 'outline'}
           size="sm"
           onClick={() => handleFilterChange('day')}
         >
-          Day
+          24h
         </Button>
       </div>
 
@@ -96,7 +99,8 @@ export function PowerUpPage() {
         <CardHeader>
           <CardTitle>Top Power Ups</CardTitle>
           <CardDescription>
-            Showing top {powerUps.length} accounts by total power up amount
+            Showing top {powerUps.length} accounts by total power up amount in
+            the last {windowLabel} (rolling window, not a calendar day)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -123,6 +127,7 @@ export function PowerUpPage() {
                           <img
                             src={getAvatarUrl(powerUp.user)}
                             alt={powerUp.user}
+                            loading="lazy"
                             className="h-8 w-8 rounded-full"
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = 'none';

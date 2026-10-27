@@ -45,6 +45,7 @@ func NewLabsService(db *database.MongoDB, steemClient *steem.Client, logger util
 type powerUpRow struct {
 	ID        bson.M        `bson:"_id"`
 	Count     int           `bson:"count"`
+	Total     float64       `bson:"total"`
 	Instances []interface{} `bson:"instances"`
 	Account   []bson.M      `bson:"account"`
 }
@@ -95,8 +96,22 @@ func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.
 						},
 					},
 				},
-				"count":     bson.M{"$sum": 1},
+				"count": bson.M{"$sum": 1},
+				// total is the sum over every deposit. The former code derived
+				// it by summing `instances`, which was an $addToSet of amounts:
+				// two identical amounts in the window collapsed into one, so
+				// the figure was systematically short while `count` stayed
+				// right (worst account under-reported by 99.86%).
+				"total":     bson.M{"$sum": "$amount"},
 				"instances": bson.M{"$addToSet": "$amount"},
+			},
+		},
+		{
+			// Rank before truncating: $limit ahead of $sort kept an arbitrary
+			// 1000 accounts instead of the top 1000 once the window exceeded
+			// it. Sorting ~1k grouped rows is negligible.
+			"$sort": bson.M{
+				"total": -1,
 			},
 		},
 		{
@@ -127,15 +142,20 @@ func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.
 	for _, r := range results {
 		user, _ := r.ID["user"].(string)
 
-		// vesting_deposit.amount is stored as a numeric value (mirroring
-		// legacy sync.py's float conversion); older writers may still carry
-		// asset strings, so coerce each distinct amount leniently.
-		total := 0.0
+		// `total` comes from the aggregation ($sum over every deposit), so
+		// duplicate amounts are counted. The instances walk stays as a
+		// fallback for rows written by an older pipeline that only produced
+		// the distinct-amount set (vesting_deposit.amount is numeric; older
+		// writers may still carry asset strings, hence the lenient coercion).
+		total := r.Total
 		instances := make([]float64, 0, len(r.Instances))
 		for _, inst := range r.Instances {
-			val := toFloat64(inst)
-			instances = append(instances, val)
-			total += val
+			instances = append(instances, toFloat64(inst))
+		}
+		if total == 0 && len(instances) > 0 {
+			for _, val := range instances {
+				total += val
+			}
 		}
 
 		powerUps = append(powerUps, models.PowerUp{
@@ -516,7 +536,16 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time) 
 	return allocations, nil
 }
 
-// GetCurationLeaderboard retrieves curation reward leaderboard
+// curatedPermlinksPerCurator bounds how many of a curator's posts the
+// leaderboard returns per row.
+const curatedPermlinksPerCurator = 20
+
+// GetCurationLeaderboard retrieves curation reward leaderboard for one UTC day
+// or month.
+//
+// Unit contract: `total` is the sum of curation_reward.reward, which is VESTS
+// on chain — the SPA renders it with formatVests. `count` is the number of
+// reward ops and `authors` the distinct rewarded authors.
 func (s *LabsService) GetCurationLeaderboard(ctx context.Context, date time.Time, grouping string) ([]models.CurationLeaderboard, error) {
 	collection := s.db.Collection("curation_reward")
 
@@ -558,6 +587,18 @@ func (s *LabsService) GetCurationLeaderboard(ctx context.Context, date time.Time
 		},
 		{
 			"$limit": 100,
+		},
+		{
+			// The permlink set dominates the response (96.9-99.8% of the
+			// bytes; a monthly board was ~4.7MB) and nothing renders it. Cap
+			// it per curator instead of returning every post, which also
+			// bounds the document size far from the 16MB limit.
+			"$project": bson.M{
+				"count":     1,
+				"total":     1,
+				"authors":   1,
+				"permlinks": bson.M{"$slice": bson.A{"$permlinks", curatedPermlinksPerCurator}},
+			},
 		},
 		{
 			"$lookup": bson.M{
@@ -1043,7 +1084,11 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 	}, nil
 }
 
-// GetPendingPosts retrieves pending payout posts
+// GetPendingPosts retrieves posts whose payout is still pending.
+//
+// Scope: top-level posts only (`depth: 0`) — replies were 14.5% of the rows on
+// a page titled "Posts" — with a strictly positive pending payout, ranked by
+// pending_payout_value, capped at 200 rows.
 func (s *LabsService) GetPendingPosts(ctx context.Context) ([]models.PendingPost, error) {
 	collection := s.db.Collection("comment")
 
@@ -1054,6 +1099,8 @@ func (s *LabsService) GetPendingPosts(ctx context.Context) ([]models.PendingPost
 			"$gte": start,
 			"$lte": end,
 		},
+		"depth":                0,
+		"pending_payout_value": bson.M{"$gt": 0},
 	}
 
 	findOptions := options.Find().

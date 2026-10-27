@@ -63,6 +63,22 @@ voter name and every flagged permlink (~40MB for 200 accounts) and the SPA read
 neither — the API now exposes `count`, `voter_count`, `post_count` and the top
 10 voters only.
 
+4. **Truncate after ranking, and cap what a row carries.** `$limit` ahead of
+   `$sort` keeps an arbitrary slice ($group output order is unspecified), so a
+   "top N" claim must be backed by a sort that runs first — labs/powerup
+   shipped `$limit 1000` with no sort at all, and powerup's `total` was derived
+   from an `$addToSet` of amounts, so identical deposits collapsed and the
+   figures were short while `count` stayed right. Caps on a per-row array
+   belong in a `$project` with `$slice` (curation keeps 20 permlinks per
+   curator instead of every post, which was 96.9-99.8% of a ~4.7MB monthly
+   response).
+5. **Copy must state the window, the unit and the cap.** Rolling windows are
+   not calendar days ("Day" meant 24h), a capped list must say "top N", and
+   the unit in the label must match the formatter (`formatVests` vs
+   `formatCurrency`). Replies vs posts is a filter (`depth: 0`), not a
+   subtitle — 14.5% of the pending-payout rows used to be replies on a page
+   titled "Posts".
+
 ## Dual-track data access (local Mongo vs steem RPC)
 
 Five dual-track points exist: block-detail enrich, virtual-ops (pure RPC —
