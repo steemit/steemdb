@@ -52,8 +52,11 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		// Conventional name/version: counted, reward 10 SBD.
 		{"_id": "a/p1", "created": created, "json_metadata": bson.M{"app": "steemit/0.1.0"},
 			"total_payout_value": 8.0, "pending_payout_value": 1.0, "total_pending_payout_value": 1.0},
-		// No version suffix — the case the old regex dropped. Also exercises the
-		// missing-payout-field guard: `$add` would yield null and zero the day.
+		// No version suffix — the case the old regex dropped. Two payout legs
+		// missing: `$add` would have yielded null and zeroed the day, while
+		// `$sum` ignores them (so the assertion below discriminates the
+		// historical `$add` defect only through the total, not through the
+		// guards).
 		{"_id": "a/p2", "created": created, "json_metadata": bson.M{"app": "dkscore-poststudio"},
 			"pending_payout_value": 5.0},
 		// Empty app string: scanned, not attributed.

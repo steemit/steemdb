@@ -376,11 +376,13 @@ export interface RsharesAllocation {
  * /labs/rshares response. The board is capped at `limit` rows; the totals are
  * computed server-side over every voter of the day, so percentages must be
  * derived from `total_rshares`, never from summing `allocations`.
- * `votes_refreshed_at` is the newest `comment.rescanned_at` among the day's
- * posts — when the vote snapshot behind the numbers was last refreshed (the
- * rescanner runs on a ~6h cycle). It is not `comment.scanned`, which the
- * comment handler also bumps on every op. Absent when no post of that day has
- * been rescanned yet: the page must then claim no freshness at all.
+ * `votes_complete_as_of` is the OLDEST `comment.rescanned_at` among the day's
+ * posts — the instant up to which the whole day's votes have been refreshed
+ * (the rescanner runs on a ~6h cycle, and its queue is rolling, so the newest
+ * snapshot is always ~now and says nothing about the rest of the day). It is
+ * not `comment.scanned`, which the comment handler also bumps on every op.
+ * Absent when no post of that day has been rescanned yet: the page must then
+ * claim no freshness at all.
  */
 export interface RsharesBoard {
   allocations: RsharesAllocation[];
@@ -388,7 +390,7 @@ export interface RsharesBoard {
   total_votes: number;
   voters: number;
   limit: number;
-  votes_refreshed_at?: string;
+  votes_complete_as_of?: string;
 }
 
 export interface CurationLeaderboard {

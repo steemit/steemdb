@@ -55,8 +55,11 @@ export function RsharesPage() {
   // Percentages come from the server-side total: the rows are capped, so
   // summing `allocations` would make the shares add up to far more than 100%.
   const totalRshares = board?.total_rshares ?? 0;
-  const votesRefreshedAt = board?.votes_refreshed_at
-    ? new Date(board.votes_refreshed_at)
+  // The oldest vote snapshot among the day's posts: the instant up to which the
+  // whole day is complete. Absent means no post of that day has been rescanned,
+  // and the page must then claim no freshness at all.
+  const votesCompleteAsOf = board?.votes_complete_as_of
+    ? new Date(board.votes_complete_as_of)
     : undefined;
 
   return (
@@ -104,19 +107,20 @@ export function RsharesPage() {
           <CardDescription>
             Total rshares: {formatNumber(totalRshares)} from {formatNumber(board?.total_votes ?? 0)}{' '}
             votes by {formatNumber(board?.voters ?? 0)} voters
-            {votesRefreshedAt && (
+            {votesCompleteAsOf && (
               <>
-                {' · '}votes last refreshed{' '}
-                {votesRefreshedAt.toISOString().slice(0, 16).replace('T', ' ')} UTC
+                {' · '}votes complete as of{' '}
+                {votesCompleteAsOf.toISOString().slice(0, 16).replace('T', ' ')} UTC
               </>
             )}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {votesRefreshedAt && (
+          {votesCompleteAsOf && (
             <p className="mb-4 text-sm text-muted-foreground">
-              Votes are snapshotted on a ~6 hour cycle, so the data can be that far behind: the
-              most recent hours of an ongoing day are not counted yet.
+              Each post&apos;s votes are refreshed on a ~6 hour cycle. The timestamp above is the
+              oldest snapshot among this day&apos;s posts, so the day is complete up to that point:
+              later votes — and posts not yet snapshotted at all — may be missing.
             </p>
           )}
           <div className="space-y-3">

@@ -157,10 +157,13 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 				// figure — so the column is "the payout legs summed", not "SBD
 				// paid out".
 				//
-				// `$add` returns null as soon as one operand is missing or
-				// non-numeric, and a null summand poisons the whole group —
-				// this is how 70 of 91 days ended up with reward 0 while the
-				// post counts were right. Each leg is guarded and summed.
+				// `$sum` over an array ignores null/missing operands, so a comment
+				// without payout fields contributes 0 instead of turning the whole
+				// group null: the previous `$add` did the latter, which is how 70
+				// of 91 days read reward 0 while the post counts were right. The
+				// `$ifNull` guards below are therefore belt-and-braces — removing
+				// them changes nothing (verified on mongo 4.4), and they cost one
+				// stage per leg in an aggregation that runs over a 90-day window.
 				"reward": bson.M{"$sum": []interface{}{
 					bson.M{"$ifNull": []interface{}{"$total_payout_value", 0}},
 					bson.M{"$ifNull": []interface{}{"$pending_payout_value", 0}},

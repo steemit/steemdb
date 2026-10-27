@@ -99,10 +99,12 @@ the refresher's clients ticker) holds the labs/clients board:
 reward}], reward, total}` plus the snapshot metadata `updated_at`,
 `window_from`, `window_to`, `posts_scanned`, `posts_with_app`. `client` is the
 part of `comment.json_metadata.app` before the first `/` (a version suffix is
-optional — it must not gate attribution), `count` is attributed posts and
+optional — it must not gate attribution), `count` is attributed comments
+(posts and replies — the same set `posts_scanned` counts) and
 `reward` is **SBD**, the sum of all three payout legs SteemDB stores per
 comment: `total_payout_value + pending_payout_value + total_pending_payout_value`
-(each guarded with `$ifNull` because a missing payout field makes `$add` null).
+(summed with `$sum`, which ignores a missing leg; the older `$add` returned null
+as soon as one leg was absent and zeroed the whole day).
 The legs overlap in meaning; they are summed as written, so the figure is "the
 payout legs summed", not "SBD already paid out". The metadata is what makes the
 snapshot auditable: `posts_scanned` counts every **comment** in the window

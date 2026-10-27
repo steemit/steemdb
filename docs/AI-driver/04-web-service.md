@@ -82,14 +82,17 @@ neither — the API now exposes `count`, `voter_count`, `post_count` and the top
    voter of the day (290-405KB, unbounded) while top-10 held 65% of the
    rshares; it is now a `$facet` of top-N rows plus `total_rshares` /
    `total_votes` / `voters`. Never let the SPA derive a share from a truncated
-   array. The same endpoint reports `votes_refreshed_at` (the newest
-   `comment.rescanned_at` among the day's posts) because the rescanner refreshes
+   array. The same endpoint reports `votes_complete_as_of` (the OLDEST
+   `comment.rescanned_at` among the day's posts — the instant up to which the
+   whole day's votes have been refreshed) because the rescanner refreshes
    `active_votes` on a ~6h cycle — an ongoing day is systematically short of its
    last hours (36% of votes, 42% of rshares at audit time) and the copy says so.
    It must not read `comment.scanned`: that field is also bumped by the comment
    handler on every op, so its maximum over an ongoing day is "newest document
    write" (~now), and the board ended up announcing freshness and lag on the same
-   screen (pitfall A5).
+   screen (pitfall A5). The newest `rescanned_at` fails the same way — the
+   rescanner's queue is rolling, so some post is always refreshed ~now. Only the
+   oldest snapshot is a bound the whole day satisfies.
 7. **Classify on written fields, not on identifier spelling.** A reply is a
    payout whose `comment.parent_author` is non-empty, never a payout whose
    permlink starts with `re-` (client convention; 18.7% wrong on one day). The
@@ -131,10 +134,10 @@ old shapes yet (the batch is not deployed), so no compatibility shims were kept.
 
 | Endpoint | Change |
 |---|---|
-| `GET /labs/rshares` | array → object: `{allocations, total_rshares, total_votes, voters, limit, votes_refreshed_at}`. Rows are capped (`?limit`, default 200, max 2000) while the totals cover every voter of the day, so a share must be derived from `total_rshares`. `votes_refreshed_at` is `comment.rescanned_at`, absent when the day has no vote snapshot. |
+| `GET /labs/rshares` | array → object: `{allocations, total_rshares, total_votes, voters, limit, votes_complete_as_of}`. Rows are capped (`?limit`, default 200, max 2000) while the totals cover every voter of the day, so a share must be derived from `total_rshares`. `votes_complete_as_of` is the OLDEST `comment.rescanned_at` among the day's posts (the instant the whole day is complete up to), absent when no post of that day has been rescanned. |
 | `GET /labs/flags` | `flaggers` (every voter) and `posts` (every permlink) removed — neither was ever rendered and together they made the response ~29MB; `voter_count` and `post_count` added. `count` is still the downvote **op** count. |
 | `GET /labs/author` | `permlinks` removed (never rendered); `total_steem` added — the STEEM equivalent of all three payout legs, and the value the board is ranked by. `?limit` is honoured (default 200, max 500). |
-| `GET /labs/clients` | `dates` is opt-in (`?include=daily`, it was 98% of a 236KB payload); each daily entry gained `total`/`reward`; the response gained `updated_at`, `window_from`, `window_to`, `posts_scanned`, `posts_with_app`. |
+| `GET /labs/clients` | `dates` is opt-in (`?include=daily`, it was 98% of a 236KB payload); each daily entry gained `total`/`reward`; the response gained `updated_at`, `window_from`, `window_to`, `posts_scanned`, `posts_with_app`. Both counters count comments (posts + replies), and the per-client `posts` map counts comments attributed with the same predicate — the SPA labels them accordingly. |
 | `GET /labs/benefactors` | window narrowed to the 10 daily buckets ending today (it returned the oldest 10 days — April 2017) and the reward unit is documented as VESTS. |
 
 ## Dual-track data access (local Mongo vs steem RPC)

@@ -116,8 +116,11 @@ export function ClientsPage() {
       {/* Top by Posts */}
       <Card>
         <CardHeader>
-          <CardTitle>Top Clients by Posts</CardTitle>
-          <CardDescription>Posts published by each client in the window</CardDescription>
+          <CardTitle>Top Clients by Comments</CardTitle>
+          {/* "Comments", not "posts": the snapshot attributes every comment in
+              the window (posts and replies) that carries an app string, so a
+              per-client count is a comment count. */}
+          <CardDescription>Comments published through each client in the window</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -139,7 +142,7 @@ export function ClientsPage() {
                       <div className="font-medium">{client}</div>
                     </div>
                   </div>
-                  <div className="font-semibold">{formatNumber(count)} posts</div>
+                  <div className="font-semibold">{formatNumber(count)} comments</div>
                 </div>
               ))
             )}
@@ -151,11 +154,12 @@ export function ClientsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Top Clients by Rewards</CardTitle>
-          {/* SBD, not STEEM: the snapshot sums total_payout_value +
-              pending_payout_value, both SBD assets (labelled STEEM before,
-              inflating every figure). */}
+          {/* SBD, not STEEM: the snapshot sums the three payout legs
+              (total_payout_value + pending_payout_value +
+              total_pending_payout_value), all SBD assets (labelled STEEM
+              before, inflating every figure). */}
           <CardDescription>
-            Author rewards (SBD) earned by posts published through each client
+            Author rewards (SBD) on comments published through each client
           </CardDescription>
         </CardHeader>
         <CardContent>

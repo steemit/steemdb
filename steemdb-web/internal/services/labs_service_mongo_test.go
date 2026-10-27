@@ -598,9 +598,9 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 				i, repeated.Allocations)
 		}
 	}
-	if board.VotesRefreshedAt == nil || !board.VotesRefreshedAt.Equal(day.Add(4*time.Hour)) {
-		t.Errorf("votes_refreshed_at = %v, want the newest comment.rescanned_at (%v), not the newest scanned (%v)",
-			board.VotesRefreshedAt, day.Add(4*time.Hour), day.Add(7*time.Hour))
+	if board.VotesCompleteAsOf == nil || !board.VotesCompleteAsOf.Equal(day.Add(2*time.Hour)) {
+		t.Errorf("votes_complete_as_of = %v, want the OLDEST comment.rescanned_at (%v) — the instant the whole day is complete as of; the newest (%v) is always ~now on an ongoing day",
+			board.VotesCompleteAsOf, day.Add(2*time.Hour), day.Add(4*time.Hour))
 	}
 
 	// Reverse assertion: a day whose documents were written just now but never
@@ -619,9 +619,9 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRsharesAllocation(unscanned): %v", err)
 	}
-	if unscanned.VotesRefreshedAt != nil {
-		t.Errorf("votes_refreshed_at = %v, want nil: a fresh `scanned` with no `rescanned_at` is not a vote snapshot",
-			unscanned.VotesRefreshedAt)
+	if unscanned.VotesCompleteAsOf != nil {
+		t.Errorf("votes_complete_as_of = %v, want nil: a fresh `scanned` with no `rescanned_at` is not a vote snapshot",
+			unscanned.VotesCompleteAsOf)
 	}
 
 	// An empty day reports zero totals and no snapshot rather than an error.
@@ -629,7 +629,7 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRsharesAllocation(empty): %v", err)
 	}
-	if len(empty.Allocations) != 0 || empty.TotalRshares != 0 || empty.VotesRefreshedAt != nil {
+	if len(empty.Allocations) != 0 || empty.TotalRshares != 0 || empty.VotesCompleteAsOf != nil {
 		t.Errorf("empty day = %+v, want no rows, no totals and no timestamp", empty)
 	}
 }

@@ -150,20 +150,34 @@ time some post of that day was edited or rescanned".
 
 The fix is a field with one writer, not a better query: the rescanner also
 writes `rescanned_at`, nobody else touches it, and the response field
-(`votes_refreshed_at`) is read from it. A day with no `rescanned_at` reports
+(`votes_complete_as_of`) is read from it. A day with no `rescanned_at` reports
 **no** timestamp, and the SPA then makes no freshness claim — the missing field
 is the honest answer, not `now`.
+
+Swapping the field is only half of it. The good field still has to be reduced in
+the right direction: the rescanner works a **rolling** queue, so on an ongoing
+day some post is refreshed every few minutes and `max(rescanned_at)` is ~now
+again — the same overstatement with a different field name. The only single
+instant that is true for a whole day is `min(rescanned_at)`: every post's votes
+have been refreshed at least that recently, so the day is complete **up to**
+that point. The response computes it with a `$group`/`$min` aggregation rather
+than `find().sort()`: sorting a day of comment documents (bodies plus
+`active_votes`) is a blocking sort that can hit the 100MB
+`internalQueryMaxBlockingSortMemoryUsageBytes` cap on a busy day, and the
+resulting error looked exactly like "this day was never rescanned".
 
 - **Rule**: before publishing a timestamp as "the data is as of X", count its
   writers (`grep` the collection name in the handler, the rescanner and the
   repair tools). A field bumped by a write path that does not refresh the data
   in question answers "when was this row touched", never "how fresh is it".
+- **Second rule**: a per-row timestamp aggregated over a set is a bound, not an
+  instant. `max` claims the whole set is as fresh as its freshest row (never
+  true under a rolling refresh); `min` claims only what every row satisfies.
 - **Corollary for tests**: assert the discriminating case, not the happy path.
-  The regression test seeds a document whose `scanned` is the newest on the day
-  while `rescanned_at` is older, and a second day whose documents have a fresh
-  `scanned` and no `rescanned_at` at all — the second must report nil. Asserting
-  only "the timestamp is the newest `scanned`" is what locked the wrong
-  semantics in the first time.
+  The regression test seeds one post whose `scanned` is the newest write while
+  its `rescanned_at` is older, a second post rescanned later (only `min` and
+  `max` disagree about the answer), and a third day whose documents have a fresh
+  `scanned` and no `rescanned_at` at all — which must report nil.
 - **Same-shaped hazard, not fixed here**: the rescanner's staleness cursor is
   still `scanned`, so an actively edited post postpones its own vote rescan for
   up to `stale_hours`. Switching that cursor to `rescanned_at` needs a backfill
