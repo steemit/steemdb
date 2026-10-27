@@ -161,10 +161,11 @@ again — the same overstatement with a different field name. The only single
 instant that is true for a whole day is `min(rescanned_at)`: every post's votes
 have been refreshed at least that recently, so the day is complete **up to**
 that point. The response computes it with a `$group`/`$min` aggregation rather
-than `find().sort()`: sorting a day of comment documents (bodies plus
-`active_votes`) is a blocking sort that can hit the 100MB
-`internalQueryMaxBlockingSortMemoryUsageBytes` cap on a busy day, and the
-resulting error looked exactly like "this day was never rescanned".
+than `find().sort()`: nothing indexes `rescanned_at`, so the sort is an
+unindexed blocking SORT over whole documents (bodies plus `active_votes`) that
+can hit the 100MB `internalQueryMaxBlockingSortMemoryUsageBytes` cap on a busy
+day — and the resulting error looked exactly like "this day was never
+rescanned".
 
 - **Rule**: before publishing a timestamp as "the data is as of X", count its
   writers (`grep` the collection name in the handler, the rescanner and the
@@ -175,9 +176,10 @@ resulting error looked exactly like "this day was never rescanned".
   true under a rolling refresh); `min` claims only what every row satisfies.
 - **Corollary for tests**: assert the discriminating case, not the happy path.
   The regression test seeds one post whose `scanned` is the newest write while
-  its `rescanned_at` is older, a second post rescanned later (only `min` and
-  `max` disagree about the answer), and a third day whose documents have a fresh
-  `scanned` and no `rescanned_at` at all — which must report nil.
+  its `rescanned_at` is older, a second post rescanned at a different instant
+  (the two values are what make `min` and `max` disagree about the answer), and
+  a third day whose documents have a fresh `scanned` and no `rescanned_at` at
+  all — which must report nil.
 - **Same-shaped hazard, not fixed here**: the rescanner's staleness cursor is
   still `scanned`, so an actively edited post postpones its own vote rescan for
   up to `stale_hours`. Switching that cursor to `rescanned_at` needs a backfill

@@ -658,11 +658,14 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, 
 // Deliberately not `scanned`: the comment handler writes that on every comment
 // op, so it answers "when was this document last written".
 //
-// A $group aggregation rather than find+sort: sorting one day of documents
-// (bodies plus active_votes) is a blocking sort that can exceed the 100MB
-// internalQueryMaxBlockingSortMemoryUsageBytes cap on a busy day, and the
-// failure would have surfaced as "no timestamp" instead of as an error. $group
-// streams, and it computes the bound in the server rather than in memory.
+// A $group aggregation rather than find+sort: nothing indexes `rescanned_at`,
+// so sorting one day of comment documents is an unindexed blocking SORT (30k
+// keys on a probe day) that buffers whole documents — bodies plus
+// active_votes — and can therefore exceed the 100MB
+// internalQueryMaxBlockingSortMemoryUsageBytes cap on a busy day. Its error
+// would have surfaced as "no timestamp" instead of as an error. $group removes
+// the sort stage entirely, so there is no sort buffer to overflow, and the
+// `created` index still bounds the scan to one day.
 func (s *LabsService) rsharesVotesCompleteAsOf(ctx context.Context, start, end time.Time) *time.Time {
 	pipeline := []bson.M{
 		{
