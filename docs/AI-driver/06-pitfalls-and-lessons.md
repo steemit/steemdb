@@ -61,7 +61,9 @@ health check rather than eyeballing block progress.
 ## Review-confirmed defect patterns (2026-09 five-pass review)
 
 Each pattern below occurred ≥2 times independently — they are systemic,
-not one-offs. The fix direction is named; until fixed, work around.
+not one-offs. A6 is the exception: it was found once, and is recorded for its
+category (a pre-filter mistaken for a guarantee), not its frequency. The fix
+direction is named; until fixed, work around.
 
 ### A. Rigid decoding of open-shaped documents
 labs ×5 endpoints structurally 500 (string→int64, double→[]string,
@@ -185,7 +187,7 @@ rescanned".
   up to `stale_hours`. Switching that cursor to `rescanned_at` needs a backfill
   plan (a `$lt` on a missing field matches every legacy document at once).
 
-### A6. The `$type` query operator is not a type guard in an aggregation (2026-10)
+### A6. The `$type` query operator is not a type guard in an aggregation (2026-10, found once in review)
 
 The clients snapshot refuses `json_metadata.app` values that are not non-empty
 strings by matching `{"json_metadata.app": {"$type": "string", "$ne": ""}}`.
@@ -197,8 +199,13 @@ first argument, found: array` (reproduced on mongo 4.4).
 
 The blast radius is not the bad document. The aggregation aborts, `tick` returns
 before `status.clients-snapshot` is written, and the only trace is one log line:
-a single malformed comment anywhere in the 90-day window freezes the whole
-clients page for as long as it stays in the window. A background refresher must
+a single comment whose `app` is an array holding a string, anywhere in the 90-day
+window, freezes the whole clients page for as long as it stays in the window.
+Other foreign shapes (object, number, boolean, null, an array of numbers) never
+reach the projection — the pre-filter drops them — so this one shape is the whole
+risk. This is not corruption anyone can clean up: `json_metadata` is the op's
+on-chain JSON string unmarshalled as-is (`handlers/comment.go`), so the shape is
+user-controlled input that any account can post. A background refresher must
 survive its worst input — the value that a stage cannot accept has to be
 narrowed in the projection, not assumed away by the pre-filter.
 
@@ -208,18 +215,36 @@ narrowed in the projection, not assumed away by the pre-filter.
   costs one row instead of the whole tick.
 - **Which fields get the guard — ask who shapes the value.** `json_metadata` is
   arbitrary JSON parsed from the on-chain string
-  (`handlers/comment.go`: `json.Unmarshal` of the op's `json_metadata`), so any
-  account can post `{"app": ["x/1.0"]}` — a user-reachable shape, hence the
-  guard. `created` is a `time.Time` written by our own handlers on insert
+  (`handlers/comment.go`: `json.Unmarshal` of the op's `json_metadata`), and the
+  chain only asserts that the string is valid JSON (`comment_operation::validate`
+  → `fc::json::is_valid`), so any account can post `{"app": ["x/1.0"]}` — or a
+  top-level array — a user-reachable shape, hence the guard. `created` is a
+  `time.Time` written by our own handlers on insert
   (`setOnInsert` of the block timestamp) and by the rescanner's string→time
   conversion, so no writer produces a non-date there and the `$group` date
   extractors need no guard. A range match does *not* make that safe by itself —
   `[date]` passes `{$gte, $lte}` and `$dayOfYear` throws `can't convert from
   BSON type array to Date` — the writer inventory is what makes it safe.
+- **Any array shape, not just the one-element case.** The guard sits on the
+  value, so it is total over the traversal. `["x/1.0"]`, `["x/1.0","y/2.0"]`, a
+  mixed array that holds a string, and a top-level array
+  (`json_metadata: [{"app": "x/1.0"}]` — dot notation descends into it, so its
+  `app` also reads as an array) all pass the pre-filter and project an empty
+  client name: counted in `posts_scanned`, skipped in `posts_with_app`. Arrays
+  the pre-filter already excludes (all-number, all-object, or nested —
+  `[["steemx/1.0"]]` has array elements, so no string element) never reach the
+  projection and are not attributed either, so the verdict is the same however
+  deep the array sits. A one-element array that *does* name a client
+  (`["steemx/1.0"]`) is the deliberate cost of that rule: the attribution is
+  dropped, because inventing a naming rule for an undocumented shape is a worse
+  error than under-attributing it. If such a client is ever observed in real
+  data, taking the first element becomes a decision with evidence behind it
+  rather than a guess.
 - **Corollary for tests**: seed the *foreign* type, not just the empty value.
-  The clients test carries an array-of-strings app and an array-of-strings app
-  with two elements; without the guard it fails at "snapshot not written", not
-  at a count assertion — which is what a broken tick actually looks like.
+  The clients test carries an array-of-strings app, an array-of-strings app with
+  two elements, and an app reached through a top-level `json_metadata` array;
+  without the guard it fails at "snapshot not written", not at a count
+  assertion — which is what a broken tick actually looks like.
 
 ### B. Reader imagining writer's fields
 `Vote.Time`, `Reblog.BlockNum`, phantom indexes on `timestamp`/

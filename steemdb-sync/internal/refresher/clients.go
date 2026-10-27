@@ -45,12 +45,16 @@ type clientsRefresher struct {
 // before writing the snapshot: one such document anywhere in the 90-day window
 // freezes the whole clients snapshot, and the only trace is a log line.
 //
-// Guarding the value that feeds `$split` (rather than wrapping the branches in
-// `$cond`) keeps the expression total no matter which branch the server
-// evaluates; the array then projects an empty client name, is dropped by the
+// The guard wraps the value that feeds `$split`, not the surrounding branches.
+// Both are equally total — `$cond` evaluates only the branch it selects, so
+// wrapping `$split` in a branch would be just as safe — but putting it here
+// means every caller of clientNameExpr inherits it, so neither the per-day
+// aggregation nor the coverage count can forget it. The guard returns "", which
+// splits to [""], so the array projects an empty client name, is dropped by the
 // `client != ""` match, and shows up as the gap between posts_scanned and
-// posts_with_app instead of inventing an attribution for a shape no writer
-// produces.
+// posts_with_app instead of inventing an attribution for user-controlled input
+// (json_metadata is the on-chain JSON string unmarshalled as-is, so any account
+// can post this shape; it is not corruption that a cleanup could remove).
 func clientAppStringExpr() bson.M {
 	return bson.M{"$cond": []interface{}{
 		bson.M{"$eq": []interface{}{bson.M{"$type": "$json_metadata.app"}, "string"}},

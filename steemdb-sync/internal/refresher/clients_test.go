@@ -78,6 +78,9 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		// attributed.
 		{"_id": "a/p7", "created": created, "json_metadata": bson.M{"app": []interface{}{"steemx/1.0"}}},
 		{"_id": "a/p8", "created": created, "json_metadata": bson.M{"app": []interface{}{"a", "b"}}},
+		// json_metadata itself a top-level array: dot notation descends into it,
+		// so `app` also reads as an array. Same verdict — scanned, unattributed.
+		{"_id": "a/p9", "created": created, "json_metadata": []interface{}{bson.M{"app": "top/9.9"}}},
 		// Outside the 90-day window: ignored entirely.
 		{"_id": "a/p6", "created": created.AddDate(0, 0, -120), "json_metadata": bson.M{"app": "old/1.0"}},
 	}
@@ -119,14 +122,15 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		t.Errorf("snapshot metadata missing: updated_at=%v window_from=%v window_to=%v",
 			snapshot.UpdatedAt, snapshot.WindowFrom, snapshot.WindowTo)
 	}
-	// 7 comments inside the 90-day window. Only 2 of them are attributed to a
+	// 8 comments inside the 90-day window. Only 2 of them are attributed to a
 	// client (steemit/0.1.0 and dkscore-poststudio): the "/1.2.3" app leaves an
-	// empty client name and is dropped by the aggregation, and the two array
-	// apps are dropped by the same match, so none of them may be counted as
+	// empty client name and is dropped by the aggregation, and the three array
+	// apps (two nested under a document, one under a top-level json_metadata
+	// array) are dropped by the same match, so none of them may be counted as
 	// attributed — counting them made the coverage claim a post the client
 	// lists did not contain.
-	if snapshot.PostsScanned != 7 || snapshot.PostsWithApp != 2 {
-		t.Errorf("coverage = %d/%d, want 2/7 (the out-of-window comment is not scanned; \"/1.2.3\" and the array apps are scanned but unattributed)",
+	if snapshot.PostsScanned != 8 || snapshot.PostsWithApp != 2 {
+		t.Errorf("coverage = %d/%d, want 2/8 (the out-of-window comment is not scanned; \"/1.2.3\" and the array apps are scanned but unattributed)",
 			snapshot.PostsWithApp, snapshot.PostsScanned)
 	}
 
