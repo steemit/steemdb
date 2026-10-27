@@ -42,13 +42,14 @@ type LiveSyncConfig struct {
 }
 
 // RefresherConfig contains refresher-process settings (witness/stats/clients/
-// funds tickers, optional full account rescan). Replaces legacy history.py +
-// witnesses.py (PROCESSOR_PLAN.md Batch 7/9).
+// flags/funds tickers, optional full account rescan). Replaces legacy
+// history.py + witnesses.py (PROCESSOR_PLAN.md Batch 7/9).
 type RefresherConfig struct {
 	Enabled       bool                `yaml:"enabled"`
 	Witness       RefresherTickConfig `yaml:"witness"`
 	Stats         RefresherTickConfig `yaml:"stats"`
 	Clients       RefresherTickConfig `yaml:"clients"`
+	Flags         RefresherTickConfig `yaml:"flags"`
 	Funds         RefresherTickConfig `yaml:"funds"`
 	AccountRescan AccountRescanConfig `yaml:"account_rescan"`
 }
@@ -212,6 +213,7 @@ func Load(configPath string) (*Config, error) {
 			Witness: RefresherTickConfig{Enabled: true, Interval: "30s"},
 			Stats:   RefresherTickConfig{Enabled: true, Interval: "5m"},
 			Clients: RefresherTickConfig{Enabled: true, Interval: "1h"},
+			Flags:   RefresherTickConfig{Enabled: true, Interval: "24h"},
 			Funds:   RefresherTickConfig{Enabled: true, Interval: "1h"},
 			AccountRescan: AccountRescanConfig{
 				Enabled:      false,
@@ -441,6 +443,11 @@ func (c *Config) RefresherClientsInterval() (time.Duration, error) {
 // RefresherFundsInterval returns the funds ticker interval duration
 func (c *Config) RefresherFundsInterval() (time.Duration, error) {
 	return time.ParseDuration(c.Refresher.Funds.Interval)
+}
+
+// RefresherFlagsInterval returns the flags ticker interval duration
+func (c *Config) RefresherFlagsInterval() (time.Duration, error) {
+	return time.ParseDuration(c.Refresher.Flags.Interval)
 }
 
 // RefresherAccountRescanInterval returns the account rescan interval duration

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/steemit/steemdb/web/internal/database"
@@ -153,7 +155,17 @@ func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.
 	return powerUps, nil
 }
 
-// GetPowerDowns retrieves power down statistics
+// GetPowerDowns retrieves power down statistics.
+//
+// Unit contract: `vesting_withdraw.withdrawn` and
+// `account.vesting_withdraw_rate` are VESTS on chain, `deposited` is STEEM.
+// Every figure this endpoint exposes as "withdrawn" is converted to STEEM at
+// the current global-properties rate, because the question the page answers is
+// how much STEEM is being redeemed (showing raw VESTS as STEEM overstated the
+// page by ~1610x). `deposited` needs no conversion. Past days carry the exact
+// per-op `deposited` sum, so a historical "withdrawn" is the VESTS total valued
+// at today's rate, not at the withdrawal moment (the collection holds no
+// per-op rate); the two differ by <0.05% per the 2026-10 audit.
 func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, error) {
 	// Get blockchain properties
 	props, err := s.steemClient.GetDynamicGlobalProperties()
@@ -164,7 +176,16 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 	// Parse amounts
 	current := parseAmount(props.CurrentSupply)
 	vesting := parseAmount(props.TotalVestingFundSteem)
-	liquid := current - vesting
+	// current_supply = balances + savings + escrow + vesting fund + reward fund
+	// + pending rewarded vesting. Subtracting only the vesting fund leaves the
+	// reward fund (currently empty) and the already-earmarked pending vesting
+	// rewards in the figure, so subtract both: what remains is the spendable
+	// upper bound (savings/escrow are still counted — they are liquid to their
+	// owners, just not free-floating).
+	pendingRewarded := parseAmount(props.PendingRewardedVestingSteem)
+	liquid := current - vesting - pendingRewarded
+
+	vestsRatio := vestsToSteemRatio(props.TotalVestingFundSteem, props.TotalVestingShares)
 
 	powerDownProps := models.PowerDownProps{
 		Current: current,
@@ -230,6 +251,7 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 	upcomingTotal := 0.0
 	for _, r := range upcomingResults {
 		id := r.ID
+		withdrawn := vestsToSteem(r.Withdrawn, vestsRatio)
 		upcoming = append(upcoming, models.PowerDownDay{
 			DayOfYear: getInt(id["doy"]),
 			Year:      getInt(id["year"]),
@@ -237,14 +259,20 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 			Day:       getInt(id["day"]),
 			DayOfWeek: getInt(id["dow"]),
 			Count:     r.Count,
-			Withdrawn: r.Withdrawn,
+			Withdrawn: withdrawn,
 		})
-		upcomingTotal += r.Withdrawn
+		upcomingTotal += withdrawn
 	}
 
 	// Get previous power downs from vesting_withdraw collection
 	withdrawCollection := s.db.Collection("vesting_withdraw")
-	sevenDaysAgo := time.Now().AddDate(0, 0, -7).Truncate(24 * time.Hour)
+	// Exact 7x24h window, not a day-aligned one: day alignment ran from the
+	// midnight 7 days back, i.e. 8 daily buckets, and because a power down
+	// batch repeats every 7 days the same batch landed in both the first and
+	// the last bucket — the "(Last 7 Days)" total counted one full weekly batch
+	// twice. The first bucket is now partial, which is the honest reading of a
+	// rolling window.
+	sevenDaysAgo := previousPowerDownWindow(time.Now())
 
 	previousPipeline := []bson.M{
 		{
@@ -299,6 +327,7 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 	previousTotal := 0.0
 	for _, r := range previousResults {
 		id := r.ID
+		withdrawn := vestsToSteem(r.Withdrawn, vestsRatio)
 		previous = append(previous, models.PowerDownDay{
 			DayOfYear: getInt(id["doy"]),
 			Year:      getInt(id["year"]),
@@ -306,22 +335,21 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 			Day:       getInt(id["day"]),
 			DayOfWeek: getInt(id["dow"]),
 			Count:     r.Count,
-			Withdrawn: r.Withdrawn,
+			Withdrawn: withdrawn,
 			Deposited: r.Deposited,
 		})
-		previousTotal += r.Withdrawn
+		previousTotal += withdrawn
 	}
 
-	// Get top power down users
+	// Get top power down users (rolling 30 days, today included — the former
+	// upper bound at today's midnight dropped the whole current day).
 	thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Truncate(24 * time.Hour)
-	midnight := time.Now().Truncate(24 * time.Hour)
 
 	userPipeline := []bson.M{
 		{
 			"$match": bson.M{
 				"_ts": bson.M{
 					"$gte": thirtyDaysAgo,
-					"$lte": midnight,
 				},
 			},
 		},
@@ -380,7 +408,7 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 		powerDowns = append(powerDowns, models.PowerDownUser{
 			User:        user,
 			Count:       r.Count,
-			Withdrawn:   r.Withdrawn,
+			Withdrawn:   vestsToSteem(r.Withdrawn, vestsRatio),
 			Deposited:   r.Deposited,
 			DepositedTo: r.DepositedTo,
 			Account:     accountSummaryFromLookup(r.Account),
@@ -758,89 +786,71 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 	return leaderboard, nil
 }
 
-// GetFlags retrieves flagged accounts statistics
+// GetFlags retrieves the flagged-accounts leaderboard from
+// status.flags-snapshot (maintained by steemdb-sync's flags refresher).
+//
+// This used to aggregate the vote collection per request: `vote` holds ~941M
+// documents (~7.7M with weight<0) and the only index on that slice is the
+// partial {weight:1}, which has no author/voter/permlink — so every request
+// FETCHed all ~7.7M negative-vote documents and the $group needed >100MB, which
+// MongoDB rejected with code 292
+// (QueryExceededMemoryLimitNoDiskUseAllowed), surfacing as this endpoint's
+// permanent 500. With allowDiskUse the same aggregation took 145-293s on
+// production, so it cannot be the request path at all.
+//
+// The snapshot also trims the payload: the old response shipped every voter
+// name and every flagged permlink (~40MB for the top 200 accounts, none of
+// which the SPA read).
 func (s *LabsService) GetFlags(ctx context.Context) ([]models.Flags, error) {
-	voteCollection := s.db.Collection("vote")
-
-	pipeline := []bson.M{
-		{
-			"$match": bson.M{
-				"weight": bson.M{"$lt": 0},
-			},
-		},
-		{
-			"$group": bson.M{
-				"_id":      "$author",
-				"count":    bson.M{"$sum": 1},
-				"flaggers": bson.M{"$push": "$voter"},
-				"posts":    bson.M{"$addToSet": "$permlink"},
-			},
-		},
-		{
-			"$sort": bson.M{
-				"count": -1,
-			},
-		},
-		{
-			"$limit": 200,
-		},
+	var snapshot struct {
+		ID   string              `bson:"_id"`
+		Data []flagSnapshotEntry `bson:"data"`
 	}
 
-	cursor, err := voteCollection.Aggregate(ctx, pipeline)
+	err := s.db.Collection("status").FindOne(ctx, bson.M{"_id": flagsSnapshotID}).Decode(&snapshot)
 	if err != nil {
-		return nil, fmt.Errorf("failed to aggregate flags: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	var results []struct {
-		ID       string   `bson:"_id"`
-		Count    int      `bson:"count"`
-		Flaggers []string `bson:"flaggers"`
-		Posts    []string `bson:"posts"`
-	}
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, fmt.Errorf("failed to decode flags: %w", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("flags snapshot %q not available yet: %w", flagsSnapshotID, err)
+		}
+		return nil, fmt.Errorf("failed to get flags snapshot: %w", err)
 	}
 
-	flags := make([]models.Flags, 0, len(results))
-	for _, r := range results {
-		// Count flaggers
-		voterCounts := make(map[string]int)
-		for _, voter := range r.Flaggers {
-			voterCounts[voter]++
-		}
+	return flagsFromSnapshot(snapshot.Data), nil
+}
 
-		// Sort by count and take top 10
-		type voterCount struct {
-			voter string
-			count int
+// flagsFromSnapshot maps status.flags-snapshot rows to API models.
+func flagsFromSnapshot(entries []flagSnapshotEntry) []models.Flags {
+	flags := make([]models.Flags, 0, len(entries))
+	for _, entry := range entries {
+		voters := make(map[string]int, len(entry.Voters))
+		for _, v := range entry.Voters {
+			voters[v.Voter] = v.Count
 		}
-		voters := make([]voterCount, 0, len(voterCounts))
-		for voter, count := range voterCounts {
-			voters = append(voters, voterCount{voter: voter, count: count})
-		}
-		sort.Slice(voters, func(i, j int) bool {
-			return voters[i].count > voters[j].count
-		})
-
-		topVoters := make(map[string]int)
-		for i, v := range voters {
-			if i >= 10 {
-				break
-			}
-			topVoters[v.voter] = v.count
-		}
-
 		flags = append(flags, models.Flags{
-			Author:   r.ID,
-			Count:    r.Count,
-			Flaggers: r.Flaggers,
-			Posts:    r.Posts,
-			Voters:   topVoters,
+			Author:     entry.Author,
+			Count:      entry.Count,
+			VoterCount: entry.VoterCount,
+			PostCount:  entry.PostCount,
+			Voters:     voters,
 		})
 	}
+	return flags
+}
 
-	return flags, nil
+// flagsSnapshotID is the status document holding the precomputed flags
+// leaderboard (written by steemdb-sync's flags refresher).
+const flagsSnapshotID = "flags-snapshot"
+
+// flagSnapshotEntry mirrors one status.flags-snapshot row.
+type flagSnapshotEntry struct {
+	Author     string `bson:"author"`
+	Count      int    `bson:"count"`
+	VoterCount int    `bson:"voter_count"`
+	PostCount  int    `bson:"post_count"`
+	Voters     []struct {
+		Voter string `bson:"voter"`
+		Count int    `bson:"count"`
+	} `bson:"voters"`
 }
 
 // GetClients retrieves client statistics from the clients-snapshot maintained
@@ -905,14 +915,22 @@ type clientDayData struct {
 	Total  int     `bson:"total"`
 }
 
-// GetBenefactors retrieves benefactor reward statistics
+// GetBenefactors retrieves benefactor reward statistics for the last 10 days.
+//
+// reward is VESTS (comment_benefactor_reward.vesting_payout), never STEEM —
+// see docs/AI-driver/02-data-model.md; the SPA renders it with formatVests.
 func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, error) {
 	collection := s.db.Collection("benefactor_reward")
 
+	windowStart := benefactorWindowStart(time.Now())
+
 	pipeline := []bson.M{
 		{
-			"$sort": bson.M{
-				"_ts": -1,
+			// Bounded scan: `_ts` leads the benefactor_reward index, so this
+			// is a range scan over ~6.5k documents instead of a 7.1M-document
+			// full-collection $group that exceeds MongoDB's $group memory cap.
+			"$match": bson.M{
+				"_ts": bson.M{"$gte": windowStart},
 			},
 		},
 		{
@@ -927,6 +945,18 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 				},
 				"reward": bson.M{"$sum": "$reward"},
 				"count":  bson.M{"$sum": 1},
+			},
+		},
+		{
+			// Order the per-day benefactor array by reward before folding it
+			// into the day document, so the SPA's first 10 rows (and its
+			// "+N more benefactors") are the day's top benefactors. The former
+			// `$sort {_ts:-1}` on the raw collection only ordered that array by
+			// event time.
+			"$sort": bson.M{
+				"_id.year": -1,
+				"_id.doy":  -1,
+				"reward":   -1,
 			},
 		},
 		{
@@ -950,10 +980,11 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 			},
 		},
 		{
+			// Newest day first (was ascending, which together with $limit 10
+			// returned the oldest 10 days of the collection's history).
 			"$sort": bson.M{
-				"_id.year": 1,
-				"_id.doy":  1,
-				"reward":   -1,
+				"_id.year": -1,
+				"_id.doy":  -1,
 			},
 		},
 		{
@@ -961,7 +992,9 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 		},
 	}
 
-	cursor, err := collection.Aggregate(ctx, pipeline)
+	cursor, err := collection.Aggregate(ctx, pipeline, options.Aggregate().
+		SetAllowDiskUse(true).
+		SetMaxTime(10*time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate benefactors: %w", err)
 	}
@@ -1073,6 +1106,56 @@ func pendingPostsWindow(now time.Time) (time.Time, time.Time) {
 	sevenDaysAgo := now.AddDate(0, 0, -7)
 	hundredFiftySixHoursAgo := now.Add(-156 * time.Hour)
 	return sevenDaysAgo, hundredFiftySixHoursAgo
+}
+
+// previousPowerDownWindow returns the lower bound of the "(Last 7 Days)"
+// power-down window: exactly 7x24h before now.
+//
+// It used to be day-aligned (`now.AddDate(0,0,-7).Truncate(24h)`), which spans
+// 8 UTC calendar buckets; since a power down batch repeats every 7 days, the
+// same batch appeared in both the first and the last bucket and the total
+// counted it twice. A rolling window whose first bucket is partial is the
+// correct reading of "last 7 days".
+func previousPowerDownWindow(now time.Time) time.Time {
+	return now.Add(-7 * 24 * time.Hour)
+}
+
+// vestsToSteemRatio returns the STEEM value of one VEST at the given global
+// properties snapshot (total_vesting_fund_steem / total_vesting_shares).
+// Returns 0 when either side is missing; vestsToSteem then passes the amount
+// through unchanged rather than fabricating a rate.
+func vestsToSteemRatio(totalVestingFundSteem, totalVestingShares string) float64 {
+	fund := parseAmount(totalVestingFundSteem)
+	shares := parseAmount(totalVestingShares)
+	if fund <= 0 || shares <= 0 {
+		return 0
+	}
+	return fund / shares
+}
+
+// vestsToSteem converts a VESTS amount to STEEM with the given ratio. A zero
+// ratio (missing props) leaves the value as-is — never a silent zero.
+func vestsToSteem(vests, ratio float64) float64 {
+	if ratio <= 0 {
+		return vests
+	}
+	return vests * ratio
+}
+
+// benefactorWindowStart returns the $match lower bound for the benefactor
+// leaderboard: UTC midnight 9 days back, i.e. the 10 daily buckets ending
+// today.
+//
+// The endpoint used to aggregate benefactor_reward with no $match at all
+// (~7.1M documents, 413k (benefactor, day) groups). That $group needed
+// >100MB — MongoDB code 292 QueryExceededMemoryLimitNoDiskUseAllowed, the
+// endpoint's 500 — and the eventual `$sort {year:1, doy:1}` + `$limit 10`
+// returned the OLDEST 10 days (April 2017) instead of the recent ones.
+// The window also drops the stray `_ts = 0001-01-01` documents written by a
+// cold-start replay with an uninitialised block timestamp.
+func benefactorWindowStart(now time.Time) time.Time {
+	midnight := now.UTC().Truncate(24 * time.Hour)
+	return midnight.AddDate(0, 0, -9)
 }
 
 // accountSummaryFromLookup projects the account array produced by a $lookup

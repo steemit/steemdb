@@ -67,11 +67,11 @@ export function PowerDownPage() {
               <div className="font-semibold">{formatCurrency(powerDown.props.current)}</div>
             </div>
             <div>
-              <div className="text-sm text-muted-foreground">Vesting</div>
+              <div className="text-sm text-muted-foreground">Vesting Fund</div>
               <div className="font-semibold">{formatCurrency(powerDown.props.vesting)}</div>
             </div>
             <div>
-              <div className="text-sm text-muted-foreground">Liquid</div>
+              <div className="text-sm text-muted-foreground">Liquid (excl. vesting fund and pending rewards)</div>
               <div className="font-semibold">{formatCurrency(powerDown.props.liquid)}</div>
             </div>
           </div>
@@ -83,7 +83,7 @@ export function PowerDownPage() {
         <CardHeader>
           <CardTitle>Upcoming Power Downs</CardTitle>
           <CardDescription>
-            Total: {formatCurrency(powerDown.upcoming_total)}
+            Total over the next 7 days (UTC): {formatCurrency(powerDown.upcoming_total)}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -94,7 +94,7 @@ export function PowerDownPage() {
                   <Calendar className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <div className="font-medium">
-                      {dayNames[day.dow]} {day.month}/{day.day}/{day.year}
+                      {dayNames[day.dow]} {day.month}/{day.day}/{day.year} UTC
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {day.count} withdrawal{day.count !== 1 ? 's' : ''}
@@ -124,7 +124,7 @@ export function PowerDownPage() {
                   <Calendar className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <div className="font-medium">
-                      {dayNames[day.dow]} {day.month}/{day.day}/{day.year}
+                      {dayNames[day.dow]} {day.month}/{day.day}/{day.year} UTC
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {day.count} withdrawal{day.count !== 1 ? 's' : ''}
@@ -148,7 +148,10 @@ export function PowerDownPage() {
       {/* Top Power Down Users */}
       <Card>
         <CardHeader>
-          <CardTitle>Top Power Down Users (Last 30 Days)</CardTitle>
+          <CardTitle>Top 50 Power Down Users (Last 30 Days)</CardTitle>
+          <CardDescription>
+            Ranked by STEEM withdrawn. Rows with multiple destination accounts list them all.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -187,6 +190,11 @@ export function PowerDownPage() {
                   {user.deposited && user.deposited > 0 && (
                     <div className="text-sm text-muted-foreground">
                       Deposited: {formatCurrency(user.deposited)}
+                    </div>
+                  )}
+                  {user.deposited_to && user.deposited_to.length > 1 && (
+                    <div className="text-xs text-muted-foreground">
+                      To: {user.deposited_to.join(', ')}
                     </div>
                   )}
                 </div>

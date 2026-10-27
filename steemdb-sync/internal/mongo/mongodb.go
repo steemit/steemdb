@@ -236,9 +236,9 @@ func indexInventory() []indexSpec {
 		{
 			// benefactor_reward needs both indexes: the upsert filter is
 			// {_block, benefactor, permlink, author} (see BenefactorRewardHandler),
-			// while the _ts-led one only serves the web-layer $sort on _ts
-			// (LabsService.GetBenefactors). Without the _block-led index every
-			// upsert is a collection scan.
+			// while the _ts-led one serves the web-layer time window
+			// ($match _ts >= 10 UTC days ago, LabsService.GetBenefactors).
+			// Without the _block-led index every upsert is a collection scan.
 			collection: "benefactor_reward",
 			model: mongo.IndexModel{Keys: bson.D{
 				{Key: "_ts", Value: 1}, {Key: "benefactor", Value: 1},
@@ -290,12 +290,13 @@ func indexInventory() []indexSpec {
 			}},
 		},
 		{
-			// web labs_service.go GetFlags: $match weight < 0 over the whole
-			// vote collection. Partial on weight < 0: negative votes (flags)
-			// are a tiny minority of all votes, a full {weight: 1} over every
-			// vote ever cast would be pure write amplification for this single
-			// query, and the query predicate is identical to the filter
-			// expression so the planner can use the index.
+			// Refresher flags tick (status.flags-snapshot): $match weight < 0
+			// over the whole vote collection, once per ticker interval.
+			// Partial on weight < 0: negative votes (flags) are a tiny
+			// minority of all votes, a full {weight: 1} over every vote ever
+			// cast would be pure write amplification for this single query,
+			// and the query predicate is identical to the filter expression
+			// so the planner can use the index.
 			collection: "vote",
 			model: mongo.IndexModel{
 				Keys:    bson.D{{Key: "weight", Value: 1}},

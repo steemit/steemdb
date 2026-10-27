@@ -65,6 +65,14 @@ refresher:
   clients:
     enabled: true
     interval: "1h"
+  # flags: status.flags-snapshot — all-time downvote leaderboard (24h)
+  # Aggregates the whole vote history (~7.7M weight<0 documents, ~2.5-5min
+  # with allowDiskUse), so it runs daily: the endpoint serves the snapshot
+  # instead of aggregating per request. Skipped while the processor cursor
+  # lags (vote is processor-derived).
+  flags:
+    enabled: true
+    interval: "24h"
   # funds: funds_history reward fund snapshots (1h)
   funds:
     enabled: true

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { getFlags } from '../../lib/api';
+import { formatNumber } from '../../lib/utils';
 import type { Flags } from '../../types';
 
 export function FlagsPage() {
@@ -57,7 +58,7 @@ export function FlagsPage() {
         <CardHeader>
           <CardTitle>Flagged Accounts</CardTitle>
           <CardDescription>
-            Accounts with the most downvotes
+            Accounts with the most downvotes, all time. Rebuilt daily.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -82,11 +83,12 @@ export function FlagsPage() {
                           @{flag.author}
                         </Link>
                         <div className="text-sm text-muted-foreground">
-                          {flag.count} downvote{flag.count !== 1 ? 's' : ''}
+                          {formatNumber(flag.count)} downvote{flag.count !== 1 ? 's' : ''}
+                          {flag.voter_count ? ` from ${formatNumber(flag.voter_count)} account${flag.voter_count !== 1 ? 's' : ''}` : ''}
                         </div>
                       </div>
                     </div>
-                    <Badge variant="destructive">{flag.count}</Badge>
+                    <Badge variant="destructive">{formatNumber(flag.count)}</Badge>
                   </div>
                   {flag.voters && Object.keys(flag.voters).length > 0 && (
                     <div className="mt-3 pt-3 border-t">
@@ -100,15 +102,15 @@ export function FlagsPage() {
                               to={`/accounts/${voter}`}
                               className="text-xs hover:underline"
                             >
-                              @{voter} ({count})
+                              @{voter} ({formatNumber(count)})
                             </Link>
                           ))}
                       </div>
                     </div>
                   )}
-                  {flag.posts && flag.posts.length > 0 && (
+                  {flag.post_count > 0 && (
                     <div className="mt-2 text-xs text-muted-foreground">
-                      {flag.posts.length} post{flag.posts.length !== 1 ? 's' : ''} flagged
+                      {formatNumber(flag.post_count)} post{flag.post_count !== 1 ? 's' : ''} flagged
                     </div>
                   )}
                 </div>

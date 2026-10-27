@@ -30,6 +30,39 @@ review window (fixed 2026-09). Same rule
 for `json_metadata`: it may be a raw string (invalid chain JSON), decode
 leniently and never let one bad document 500 a whole page.
 
+## Labs endpoint data shapes (aggregation rules)
+
+Labs is the read-amplification surface: every endpoint is an aggregation over
+a processor-written collection, so three rules apply and are cheap to get
+wrong.
+
+1. **A per-request aggregation must fit the index that leads its `$match`.**
+   `benefactor_reward` (7.1M docs) and `vote` (941M docs / 7.7M negative) both
+   broke the endpoint with MongoDB code 292
+   `QueryExceededMemoryLimitNoDiskUseAllowed` when aggregated unbounded; the
+   fix is a `$match` window that the leading `_ts` index can serve (benefactors:
+   10 UTC days, ~18ms) or a precomputed snapshot (flags — `vote`'s only index
+   on the negative slice is the partial `{weight:1}`, which carries no
+   author/voter/permlink, so any request over it must FETCH ~7.7M documents and
+   measured 145-293s even with `allowDiskUse`). `allowDiskUse` alone is not a
+   fix: it converts a fast 500 into a multi-minute request that competes with
+   everything else on the hot cache.
+2. **A snapshot is written by the refresher, read as a point lookup.** The
+   precedent is `status.clients-snapshot`; `status.flags-snapshot` follows it
+   (daily, `refresher.flags` config). Snapshot writers overwrite, so a bad run
+   self-heals on the next tick — do not build them append-only.
+3. **Render chain units, don't relabel them.** `reward` on
+   `curation_reward`/`benefactor_reward` and `withdrawn` on
+   `vesting_withdraw` are VESTS; the SPA shows them via `formatVests`, or the
+   service converts with the props ratio when the economic question is STEEM
+   (labs/powerdown). Never feed VESTS to `formatCurrency` — that is how the
+   power down page displayed 348.8M STEEM for 216.5k STEEM of real withdrawals.
+
+Also: a labs response must stay small. The old `/labs/flags` shipped every
+voter name and every flagged permlink (~40MB for 200 accounts) and the SPA read
+neither — the API now exposes `count`, `voter_count`, `post_count` and the top
+10 voters only.
+
 ## Dual-track data access (local Mongo vs steem RPC)
 
 Five dual-track points exist: block-detail enrich, virtual-ops (pure RPC —

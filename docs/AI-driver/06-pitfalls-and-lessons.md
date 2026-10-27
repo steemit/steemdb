@@ -68,6 +68,20 @@ labs ×5 endpoints structurally 500 (string→int64, double→[]string,
 string→map decode aborts the whole cursor). **Rule**: bson.M lenient
 projection for anything sync writes (02-data-model).
 
+### A2. Unbounded labs aggregation / wrong display units (2026-10 audit)
+`/labs/flags` and `/labs/benefactors` returned a permanent 500: both grouped
+their whole collection (`vote` 7.7M negative docs, `benefactor_reward` 7.1M)
+with no `$match`, exceeding the 100MB `$group` budget (code 292), and
+`allowDiskUse` turned that into a 145-293s request. Alongside it, three
+endpoints printed VESTS through a STEEM formatter (power down overstated
+~1610x, curation and benefactors the same class). **Rules**: a per-request
+aggregation is bounded by a `$match` the leading index serves, or it moves to
+a refresher snapshot; `allowDiskUse` is a safety net, not a fix; and every
+figure has a unit contract checked against the writer (02-data-model,
+"VESTS vs STEEM"). A second-order trap from the same audit: `$sort` +
+`$limit` with an ascending date sort returned the *oldest* 10 days of a
+9-year collection — pin the direction a test can assert.
+
 ### B. Reader imagining writer's fields
 `Vote.Time`, `Reblog.BlockNum`, phantom indexes on `timestamp`/
 `last_update`, frontend types declaring string amounts. Every imagined

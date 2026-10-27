@@ -6,6 +6,7 @@
 //   - witness (30s): witness / witness_history / witness_misses collections
 //   - stats   (5m):  status transactions/operations counters
 //   - clients (1h):  status.clients-snapshot + clients_history
+//   - flags   (24h): status.flags-snapshot
 //   - funds   (1h):  funds_history reward fund snapshots
 //   - account rescan (24h, default off): full account refresh via lookup_accounts
 package refresher
@@ -61,6 +62,15 @@ func (r *Refresher) Run(ctx context.Context) {
 		}
 		c := newClientsRefresher(db)
 		go runTicker(ctx, "Clients", interval, c.tick)
+	}
+
+	if r.cfg.Refresher.Flags.Enabled {
+		interval, err := r.cfg.RefresherFlagsInterval()
+		if err != nil {
+			log.Fatalf("[Refresher] Invalid flags interval: %v", err)
+		}
+		f := newFlagsRefresher(db)
+		go runTicker(ctx, "Flags", interval, f.tick)
 	}
 
 	if r.cfg.Refresher.Funds.Enabled {

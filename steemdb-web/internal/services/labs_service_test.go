@@ -282,3 +282,156 @@ func TestToFloat64(t *testing.T) {
 		})
 	}
 }
+
+// TestVestsToSteem guards the units contract of the power down figures: the
+// chain stores VESTS, the page must show STEEM, and a missing props snapshot
+// must pass the amount through instead of zeroing it.
+func TestVestsToSteem(t *testing.T) {
+	// Production snapshot, 2026-10-26: 201,658,879.271 STEEM over
+	// 324,827,389,106.419916 VESTS → 1 STEEM ≈ 1610.78 VESTS.
+	ratio := vestsToSteemRatio("201658879.271 STEEM", "324827389106.419916 VESTS")
+	if ratio <= 0 {
+		t.Fatalf("ratio = %v, want a positive STEEM-per-VEST rate", ratio)
+	}
+	if got := 1 / ratio; got < 1610 || got > 1612 {
+		t.Errorf("1 STEEM = %.2f VESTS, want ≈1610.8", got)
+	}
+
+	// 348,792,400.290 VESTS must render as ≈216,536 STEEM, not 348 million.
+	if got := vestsToSteem(348792400.290, ratio); got < 216000 || got > 217000 {
+		t.Errorf("vestsToSteem(348792400.29) = %v STEEM, want ≈216536", got)
+	}
+
+	// Missing props: no rate, value untouched (never silently zero).
+	if got := vestsToSteemRatio("", ""); got != 0 {
+		t.Errorf("ratio without props = %v, want 0", got)
+	}
+	if got := vestsToSteem(27.5, 0); got != 27.5 {
+		t.Errorf("vestsToSteem with no rate = %v, want the input 27.5", got)
+	}
+}
+
+// TestPreviousPowerDownWindow pins the "(Last 7 Days)" window to a rolling
+// 7x24h span. A day-aligned bound spans 8 UTC buckets, and because a power
+// down batch repeats every 7 days the same batch then lands in the first and
+// the last bucket, double-counting it in the total.
+func TestPreviousPowerDownWindow(t *testing.T) {
+	now := time.Date(2026, 10, 26, 23, 2, 0, 0, time.UTC)
+	want := now.Add(-7 * 24 * time.Hour)
+
+	got := previousPowerDownWindow(now)
+	if !got.Equal(want) {
+		t.Errorf("window start = %v, want %v (exactly 7x24h, not day-aligned)", got, want)
+	}
+	if got.Equal(now.AddDate(0, 0, -7).Truncate(24 * time.Hour)) {
+		t.Error("window start is still day-aligned; it would span 8 UTC buckets")
+	}
+}
+
+// TestBenefactorWindowStart pins the benefactor leaderboard to the 10 daily
+// buckets ending today (UTC). The unbounded aggregation exceeded the $group
+// memory cap (MongoDB code 292) and its ascending sort returned the oldest
+// 10 days of the collection instead of the recent ones.
+func TestBenefactorWindowStart(t *testing.T) {
+	tests := []struct {
+		name string
+		now  time.Time
+		want time.Time
+	}{
+		{
+			name: "mid-day UTC",
+			now:  time.Date(2026, 10, 26, 15, 50, 0, 0, time.UTC),
+			want: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "local zone is normalised to UTC midnight",
+			now:  time.Date(2026, 10, 27, 7, 30, 0, 0, time.FixedZone("CST", 8*3600)),
+			want: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := benefactorWindowStart(tt.now)
+			if !got.Equal(tt.want) {
+				t.Errorf("benefactorWindowStart(%v) = %v, want %v", tt.now, got, tt.want)
+			}
+			if got.Location() != time.UTC {
+				t.Errorf("window start location = %v, want UTC", got.Location())
+			}
+			// 0001-01-01 documents from a cold-start replay with an
+			// uninitialised block timestamp must fall outside the window.
+			if !got.After(time.Date(2017, 1, 1, 0, 0, 0, 0, time.UTC)) {
+				t.Errorf("window start %v would admit pre-2017 garbage documents", got)
+			}
+		})
+	}
+}
+
+// TestFlagsFromSnapshot guards the flags snapshot decode: steemdb-sync writes
+// {author, count, voter_count, post_count, voters:[{voter,count}]} into
+// status.flags-snapshot, and the API must expose the same fields (the old
+// response shipped full flaggers/posts arrays the SPA never read).
+func TestFlagsFromSnapshot(t *testing.T) {
+	doc := bson.M{
+		"_id": "flags-snapshot",
+		"data": bson.A{
+			bson.M{
+				"author":      "appics-introduce",
+				"count":       381430,
+				"voter_count": 251,
+				"post_count":  8234,
+				"voters": bson.A{
+					bson.M{"voter": "steemcleaners", "count": 900},
+					bson.M{"voter": "spaminator", "count": 41},
+				},
+			},
+			bson.M{
+				"author":      "schoolofminnows",
+				"count":       149100,
+				"voter_count": 173,
+				"post_count":  2956,
+				"voters":      bson.A{},
+			},
+		},
+	}
+
+	raw, err := bson.Marshal(doc)
+	if err != nil {
+		t.Fatalf("failed to marshal snapshot: %v", err)
+	}
+
+	var snapshot struct {
+		ID   string              `bson:"_id"`
+		Data []flagSnapshotEntry `bson:"data"`
+	}
+	if err := bson.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatalf("failed to decode snapshot: %v", err)
+	}
+	if snapshot.ID != flagsSnapshotID {
+		t.Errorf("snapshot._id = %q, want %q", snapshot.ID, flagsSnapshotID)
+	}
+
+	flags := flagsFromSnapshot(snapshot.Data)
+	if len(flags) != 2 {
+		t.Fatalf("flags length = %d, want 2", len(flags))
+	}
+
+	first := flags[0]
+	if first.Author != "appics-introduce" || first.Count != 381430 {
+		t.Errorf("first entry = %+v, want author=appics-introduce count=381430", first)
+	}
+	if first.VoterCount != 251 {
+		t.Errorf("VoterCount = %d, want 251 (distinct voters)", first.VoterCount)
+	}
+	if first.PostCount != 8234 {
+		t.Errorf("PostCount = %d, want 8234 (distinct posts)", first.PostCount)
+	}
+	if len(first.Voters) != 2 || first.Voters["steemcleaners"] != 900 || first.Voters["spaminator"] != 41 {
+		t.Errorf("Voters = %v, want the top-flagger op counts", first.Voters)
+	}
+
+	second := flags[1]
+	if len(second.Voters) != 0 {
+		t.Errorf("second entry Voters = %v, want empty", second.Voters)
+	}
+}
