@@ -61,10 +61,12 @@ export function ClientsPage() {
   const updatedAt = clients.updated_at
     ? `${clients.updated_at.slice(0, 16).replace('T', ' ')} UTC`
     : undefined;
-  const unattributed =
-    clients.posts_scanned > 0
-      ? clients.posts_scanned - clients.posts_with_app
-      : 0;
+  // Both counters count comments (posts + replies). A snapshot written before
+  // the metadata existed has no counters at all, so both read 0 — that must not
+  // render as "0 of 0 comments name a client", which reads as a coverage
+  // finding instead of a missing field. There is no way to tell such a snapshot
+  // from an empty window, and claiming nothing is the honest option for both.
+  const unattributed = clients.posts_scanned - clients.posts_with_app;
   const attributedShare =
     clients.posts_scanned > 0
       ? ((clients.posts_with_app / clients.posts_scanned) * 100).toFixed(1)
@@ -95,16 +97,18 @@ export function ClientsPage() {
             {formatNumber(clientCount)} clients
             {clientCount > TOP_CLIENTS ? ` · top ${TOP_CLIENTS} shown` : ''}
           </p>
-          <p>
-            Attribution comes from each post&apos;s <code>json_metadata.app</code>:{' '}
-            {formatNumber(clients.posts_with_app)} of {formatNumber(clients.posts_scanned)} posts
-            name a client
-            {attributedShare ? ` (${attributedShare}%)` : ''}
-            {unattributed > 0
-              ? `, the other ${formatNumber(unattributed)} are not counted below`
-              : ''}
-            .
-          </p>
+          {clients.posts_scanned > 0 && (
+            <p>
+              Attribution comes from each comment&apos;s <code>json_metadata.app</code>:{' '}
+              {formatNumber(clients.posts_with_app)} of {formatNumber(clients.posts_scanned)}{' '}
+              comments (posts and replies) name a client
+              {attributedShare ? ` (${attributedShare}%)` : ''}
+              {unattributed > 0
+                ? `, the other ${formatNumber(unattributed)} are not counted below`
+                : ''}
+              .
+            </p>
+          )}
           {updatedAt && <p>Snapshot refreshed {updatedAt}.</p>}
         </CardContent>
       </Card>

@@ -55,7 +55,9 @@ export function RsharesPage() {
   // Percentages come from the server-side total: the rows are capped, so
   // summing `allocations` would make the shares add up to far more than 100%.
   const totalRshares = board?.total_rshares ?? 0;
-  const dataAsOf = board?.data_as_of ? new Date(board.data_as_of) : undefined;
+  const votesRefreshedAt = board?.votes_refreshed_at
+    ? new Date(board.votes_refreshed_at)
+    : undefined;
 
   return (
     <div className="space-y-6">
@@ -102,18 +104,19 @@ export function RsharesPage() {
           <CardDescription>
             Total rshares: {formatNumber(totalRshares)} from {formatNumber(board?.total_votes ?? 0)}{' '}
             votes by {formatNumber(board?.voters ?? 0)} voters
-            {dataAsOf && (
+            {votesRefreshedAt && (
               <>
-                {' · '}data as of {dataAsOf.toISOString().slice(0, 16).replace('T', ' ')} UTC
+                {' · '}votes last refreshed{' '}
+                {votesRefreshedAt.toISOString().slice(0, 16).replace('T', ' ')} UTC
               </>
             )}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {dataAsOf && (
+          {votesRefreshedAt && (
             <p className="mb-4 text-sm text-muted-foreground">
-              Vote snapshots refresh on a ~6 hour cycle, so the most recent hours of an ongoing
-              day are not counted yet.
+              Votes are snapshotted on a ~6 hour cycle, so the data can be that far behind: the
+              most recent hours of an ongoing day are not counted yet.
             </p>
           )}
           <div className="space-y-3">

@@ -103,10 +103,13 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		t.Errorf("snapshot metadata missing: updated_at=%v window_from=%v window_to=%v",
 			snapshot.UpdatedAt, snapshot.WindowFrom, snapshot.WindowTo)
 	}
-	// 5 posts inside the 90-day window; 3 of them carry a non-empty app string
-	// (steemit/0.1.0, dkscore-poststudio, /1.2.3).
-	if snapshot.PostsScanned != 5 || snapshot.PostsWithApp != 3 {
-		t.Errorf("coverage = %d/%d, want 3/5 (the out-of-window post is not scanned)",
+	// 5 comments inside the 90-day window. Only 2 of them are attributed to a
+	// client (steemit/0.1.0 and dkscore-poststudio): the "/1.2.3" app leaves an
+	// empty client name and is dropped by the aggregation, so it must not be
+	// counted as attributed either — counting it made the coverage claim a post
+	// the client lists did not contain.
+	if snapshot.PostsScanned != 5 || snapshot.PostsWithApp != 2 {
+		t.Errorf("coverage = %d/%d, want 2/5 (the out-of-window comment is not scanned; \"/1.2.3\" is scanned but unattributed)",
 			snapshot.PostsWithApp, snapshot.PostsScanned)
 	}
 

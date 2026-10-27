@@ -22,8 +22,17 @@ import (
 // comment handler (Batch 2) cannot write from op data alone.
 //
 // Two queues (mirrors legacy sync.py update_queue):
-//  1. Recent posts rescan: comments created within window_days, scanned > stale_hours ago
+//  1. Recent posts rescan: comments created within window_days whose `scanned`
+//     is more than stale_hours old
 //  2. Past-payout rescan: comments with pending payout past cashout_time
+//
+// NOTE on `scanned`: it is written by the comment handler on every comment op
+// (edits included) as well as by this rescanner, so it means "the document was
+// last written" — it is the staleness cursor for queue 1, not a snapshot time.
+// The rescanner additionally writes `rescanned_at`, which no other writer
+// touches and which therefore means "this document's active_votes were
+// refreshed at this instant". Readers stating the freshness of vote data (the
+// web rshares board) must read `rescanned_at`.
 //
 // Uses a bounded worker pool (default 5) for concurrent get_content calls,
 // since get_content is a single-item RPC (unlike get_accounts which is batched).
@@ -341,8 +350,17 @@ func processContent(content *protocolapi.Content) bson.M {
 		}
 	}
 
-	// Set scanned timestamp
-	m["scanned"] = time.Now().UTC()
+	// Two timestamps, two writers — never read one as the other:
+	//
+	//   scanned      written by the comment handler (every comment op, edits
+	//                included) AND by this rescanner, so it only means "the
+	//                document was last written".
+	//   rescanned_at written only here, so it means "the active_votes in this
+	//                document were refreshed at this instant". The web rshares
+	//                board states its freshness from this field.
+	now := time.Now().UTC()
+	m["scanned"] = now
+	m["rescanned_at"] = now
 
 	return m
 }
