@@ -29,13 +29,19 @@ type LabsService struct {
 	logger      utils.Logger
 
 	// Reward valuation cache (author leaderboard ranking). valMu guards the
-	// cached snapshot; valGroup merges concurrent refreshes so a burst of
-	// requests issues one props + price-feed round trip instead of one each.
-	valMu     sync.Mutex
-	val       rewardValuation
-	valAt     time.Time
-	valFailAt time.Time
-	valGroup  singleflight.Group
+	// cached snapshot and the refresh slot; valGroup merges concurrent
+	// refreshes so a burst of requests issues one props + price-feed round trip
+	// instead of one each.
+	valMu         sync.Mutex
+	val           rewardValuation
+	valAt         time.Time
+	valFailAt     time.Time
+	valRefreshing bool
+	valGroup      singleflight.Group
+
+	// valFetch is a test seam: production leaves it nil and the refresh reads
+	// the chain. Tests need a slow or failing source without a node.
+	valFetch func() (rewardValuation, error)
 }
 
 // NewLabsService creates a new labs service
@@ -1441,13 +1447,16 @@ func (v rewardValuation) steemEquivalentExpr(vests, steem, sbd string) bson.M {
 //
 // Failure behaviour is what keeps a sick node from becoming an endpoint-wide
 // pile-up (the lock-then-RPC shape this replaced made every concurrent request
-// wait behind the same refresh, and a hung node makes one refresh take up to
-// 46s per RPC):
+// wait behind the same refresh, and a hung node makes one refresh up to two 46s
+// retry loops):
 //
 //   - concurrent refreshes are merged, so a burst costs one round trip;
-//   - a request never queues behind an in-flight refresh for longer than
-//     labsValuationWait — it is served the last good valuation instead;
-//   - a failed refresh suppresses the next attempt for labsValuationRetryTTL.
+//   - only the request that started the refresh waits for it (bounded by
+//     labsValuationWait); every other request is served the last good
+//     valuation immediately rather than queueing behind it, because during a
+//     node outage a queue of 3s waits is exactly the pile-up;
+//   - a failed refresh suppresses the next attempt for labsValuationRetryTTL,
+//     and is logged once per attempt rather than once per request.
 //
 // A last-good valuation is always preferred over an error (a minute-stale rate
 // is within 0.05% of the truth); only a cold cache surfaces the error, so the
@@ -1461,8 +1470,15 @@ func (s *LabsService) rewardValuation(ctx context.Context) (rewardValuation, err
 		return s.cachedValuation(errValuationRecentFailure)
 	}
 
+	// One refresh owner at a time. Followers do not wait at all: they take the
+	// stale value (or the error, on a cold cache) on this same tick.
+	if !s.beginValuationRefresh() {
+		return s.cachedValuation(errValuationInFlight)
+	}
+	defer s.endValuationRefresh()
+
 	// DoChan (not Do) so the wait can be bounded: the refresh keeps running in
-	// its own goroutine and warms the cache even when every waiter gives up.
+	// its own goroutine and warms the cache even if this request gives up.
 	refreshed := s.valGroup.DoChan("rewardValuation", func() (interface{}, error) {
 		return s.fetchValuation()
 	})
@@ -1482,6 +1498,25 @@ func (s *LabsService) rewardValuation(ctx context.Context) (rewardValuation, err
 	case <-ctx.Done():
 		return s.cachedValuation(ctx.Err())
 	}
+}
+
+// beginValuationRefresh claims the refresh slot, reporting whether this caller
+// owns it.
+func (s *LabsService) beginValuationRefresh() bool {
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
+	if s.valRefreshing {
+		return false
+	}
+	s.valRefreshing = true
+	return true
+}
+
+// endValuationRefresh releases the refresh slot.
+func (s *LabsService) endValuationRefresh() {
+	s.valMu.Lock()
+	s.valRefreshing = false
+	s.valMu.Unlock()
 }
 
 // freshValuation returns the cached valuation while it is still within
@@ -1504,13 +1539,23 @@ func (s *LabsService) lastValuationFailure() time.Time {
 }
 
 // fetchValuation performs one refresh and records its outcome. Runs at most
-// once per merge group, never holding valMu across the RPC.
+// once per merge group, never holding valMu across the RPC. The failure is
+// logged here, once per attempt — logging in cachedValuation would emit one
+// warning per request for as long as the stale value is being served.
 func (s *LabsService) fetchValuation() (rewardValuation, error) {
-	val, err := s.readValuationFromChain()
+	source := s.valFetch
+	if source == nil {
+		source = s.readValuationFromChain
+	}
+
+	val, err := source()
 	if err != nil {
 		s.valMu.Lock()
 		s.valFailAt = time.Now()
 		s.valMu.Unlock()
+		if s.logger != nil {
+			s.logger.Warn("Labs reward valuation refresh failed; serving the last good rate", utils.Error(err))
+		}
 		return rewardValuation{}, err
 	}
 
@@ -1547,16 +1592,14 @@ func (s *LabsService) readValuationFromChain() (rewardValuation, error) {
 }
 
 // cachedValuation returns the last good valuation when a refresh failed,
-// otherwise the refresh error.
+// otherwise the refresh error. Deliberately silent: the failure itself is
+// logged once by fetchValuation, while this path runs once per request.
 func (s *LabsService) cachedValuation(cause error) (rewardValuation, error) {
 	s.valMu.Lock()
 	val := s.val
 	s.valMu.Unlock()
 
 	if val.VestsRatio > 0 && val.SteemPerSBD > 0 {
-		if s.logger != nil {
-			s.logger.Warn("Using stale labs reward valuation", utils.Error(cause))
-		}
 		return val, nil
 	}
 	return rewardValuation{}, cause

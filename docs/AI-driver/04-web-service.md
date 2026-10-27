@@ -100,6 +100,19 @@ neither — the API now exposes `count`, `voter_count`, `post_count` and the top
    per-day series on request (`?include=daily`, it was 98% of the payload and
    nothing rendered it). `rewards` is SBD (`total_payout_value` +
    `pending_payout_value`), not STEEM.
+9. **A cached RPC value must not queue requests behind it.** `labs/author`
+   needs props + the median price feed to rank payouts in one unit. The cache
+   is refreshed under singleflight; only the request that owns the refresh
+   waits (≤3s), every other request takes the last good rate immediately, and a
+   failure suppresses the next attempt for 15s and is logged once per attempt.
+   A hanging node costs up to two 46s retry loops (`pkg/steem`), so the naive
+   "hold a mutex across the call" shape turns one bad node into an
+   endpoint-wide pile-up. On a cold cache the endpoint fails fast instead of
+   ranking on a fabricated rate.
+10. **A multi-key `$sort` is a `bson.D`.** MongoDB reads the field order of a
+   `$sort` document as precedence and `bson.M` has none, so
+   `{"total_steem": -1, "_id": 1}` occasionally makes the unique tie-breaker
+   primary — alphabetical boards, no error (pitfall A4).
 
 ## Dual-track data access (local Mongo vs steem RPC)
 

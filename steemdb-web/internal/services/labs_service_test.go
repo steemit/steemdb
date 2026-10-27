@@ -407,6 +407,90 @@ func TestRewardValuationServesFreshCache(t *testing.T) {
 	}
 }
 
+// TestRewardValuationFollowerDoesNotWait pins the outage shape: while one
+// request owns a refresh, the others must return the last good valuation on the
+// same tick. Waiting 3s each would turn a hung node into a queue of 3s waits —
+// the pile-up the merge was supposed to remove.
+func TestRewardValuationFollowerDoesNotWait(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+
+	svc := &LabsService{
+		val:   rewardValuation{VestsRatio: 1e-6, SteemPerSBD: 9.6},
+		valAt: time.Now().Add(-2 * labsValuationTTL), // expired, still usable
+		valFetch: func() (rewardValuation, error) {
+			started <- struct{}{}
+			<-release // stands in for a hung node
+			return rewardValuation{VestsRatio: 2e-6, SteemPerSBD: 9.7}, nil
+		},
+	}
+
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := svc.rewardValuation(context.Background())
+		leaderErr <- err
+	}()
+	<-started // the leader is now inside the refresh
+
+	begin := time.Now()
+	got, err := svc.rewardValuation(context.Background())
+	elapsed := time.Since(begin)
+	if err != nil {
+		t.Fatalf("follower returned an error instead of the stale valuation: %v", err)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("follower waited %v; it must not queue behind the in-flight refresh", elapsed)
+	}
+	if got.SteemPerSBD != 9.6 || got.VestsRatio != 1e-6 {
+		t.Errorf("follower valuation = %+v, want the last good {VestsRatio:1e-6 SteemPerSBD:9.6}", got)
+	}
+
+	close(release)
+	if err := <-leaderErr; err != nil {
+		t.Errorf("leader refresh failed: %v", err)
+	}
+	// The completed refresh is cached and no failure is recorded.
+	if v, ok := svc.freshValuation(); !ok || v.SteemPerSBD != 9.7 {
+		t.Errorf("refreshed valuation not cached: %+v (ok=%v)", v, ok)
+	}
+	if !svc.lastValuationFailure().IsZero() {
+		t.Error("a successful refresh left a failure timestamp behind; the next refresh would be suppressed")
+	}
+}
+
+// TestRewardValuationRecoversAfterFailure pins that the retry suppression
+// expires: once labsValuationRetryTTL has passed the service asks the node
+// again, and a success clears the stale state.
+func TestRewardValuationRecoversAfterFailure(t *testing.T) {
+	svc := &LabsService{
+		valFailAt: time.Now(),
+		valFetch: func() (rewardValuation, error) {
+			return rewardValuation{VestsRatio: 3e-6, SteemPerSBD: 9.4}, nil
+		},
+	}
+
+	// Inside the window: suppressed, no fetch.
+	if _, err := svc.rewardValuation(context.Background()); !errors.Is(err, errValuationRecentFailure) {
+		t.Errorf("call inside the retry window = %v, want errValuationRecentFailure", err)
+	}
+
+	// Past the window the service retries and caches the result.
+	svc.valMu.Lock()
+	svc.valFailAt = time.Now().Add(-2 * labsValuationRetryTTL)
+	svc.valMu.Unlock()
+
+	got, err := svc.rewardValuation(context.Background())
+	if err != nil {
+		t.Fatalf("retry after the window failed: %v", err)
+	}
+	if got.SteemPerSBD != 9.4 {
+		t.Errorf("valuation = %+v, want the fresh SteemPerSBD 9.4", got)
+	}
+	if !svc.lastValuationFailure().IsZero() {
+		t.Error("a successful retry did not clear the failure timestamp")
+	}
+}
+
 // TestClampLabsLimit pins the row-cap policy shared by the labs boards: a
 // missing request gets the default, an oversized one is clamped, and a
 // negative or zero value never means "no limit".
