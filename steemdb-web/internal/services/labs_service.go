@@ -167,8 +167,9 @@ func (s *LabsService) GetPowerUps(ctx context.Context, filter string) ([]models.
 		})
 	}
 
-	// Sort by total descending
-	sort.Slice(powerUps, func(i, j int) bool {
+	// The aggregation already returns the top 1000 by total; re-sorting stably
+	// keeps equal totals in that order instead of depending on the Go map walk.
+	sort.SliceStable(powerUps, func(i, j int) bool {
 		return powerUps[i].Total > powerUps[j].Total
 	})
 
