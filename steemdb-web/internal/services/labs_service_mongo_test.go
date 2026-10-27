@@ -532,7 +532,9 @@ func TestAuthorLimitAgainstMongo(t *testing.T) {
 
 // TestRsharesBoardAgainstMongo pins the rshares contract: positive-only sums
 // (downvotes must not cancel upvotes and dust votes must still count), totals
-// computed before the row cap, and the snapshot timestamp the SPA reports.
+// computed before the row cap, and the freshness timestamp the SPA reports —
+// which must come from `rescanned_at` (written only by the comment rescanner)
+// and never from `scanned` (also bumped by the comment handler on every op).
 func TestRsharesBoardAgainstMongo(t *testing.T) {
 	svc, ctx := labsTestService(t)
 
@@ -540,7 +542,10 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 	comments := []bson.M{
 		{
 			"_id": "a/p1", "author": "a", "permlink": "p1", "created": day.Add(time.Hour),
-			"scanned": day.Add(7 * time.Hour),
+			// scanned is the NEWEST write on the day but not the newest vote
+			// snapshot: the comment handler bumps it on every comment op.
+			"scanned":      day.Add(7 * time.Hour),
+			"rescanned_at": day.Add(4 * time.Hour),
 			"active_votes": []bson.M{
 				{"voter": "up", "weight": int64(10000), "rshares": int64(1000), "time": day},
 				// weight 0 but positive rshares: a dust vote the old
@@ -552,7 +557,8 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 		},
 		{
 			"_id": "a/p2", "author": "a", "permlink": "p2", "created": day.Add(2 * time.Hour),
-			"scanned": day.Add(5 * time.Hour),
+			"scanned":      day.Add(5 * time.Hour),
+			"rescanned_at": day.Add(2 * time.Hour),
 			"active_votes": []bson.M{
 				{"voter": "up", "weight": int64(10000), "rshares": int64(500), "time": day},
 			},
@@ -592,8 +598,30 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 				i, repeated.Allocations)
 		}
 	}
-	if board.DataAsOf == nil || !board.DataAsOf.Equal(day.Add(7*time.Hour)) {
-		t.Errorf("data_as_of = %v, want the newest comment.scanned (%v)", board.DataAsOf, day.Add(7*time.Hour))
+	if board.VotesCompleteAsOf == nil || !board.VotesCompleteAsOf.Equal(day.Add(2*time.Hour)) {
+		t.Errorf("votes_complete_as_of = %v, want the OLDEST comment.rescanned_at (%v) — the instant the whole day is complete as of; the newest (%v) is always ~now on an ongoing day",
+			board.VotesCompleteAsOf, day.Add(2*time.Hour), day.Add(4*time.Hour))
+	}
+
+	// Reverse assertion: a day whose documents were written just now but never
+	// rescanned must NOT be reported as fresh. `scanned` alone is the shape that
+	// used to make the board announce "data as of <now>" while the SPA said on
+	// the same screen that recent hours were missing.
+	freshWriteOnly := day.AddDate(0, 0, -5)
+	if _, err := svc.db.Collection("comment").InsertOne(ctx, bson.M{
+		"_id": "a/p3", "author": "a", "permlink": "p3", "created": freshWriteOnly.Add(time.Hour),
+		"scanned":      time.Now().UTC(),
+		"active_votes": []bson.M{{"voter": "up", "weight": int64(10000), "rshares": int64(10), "time": day}},
+	}); err != nil {
+		t.Fatalf("insert unscanned comment: %v", err)
+	}
+	unscanned, err := svc.GetRsharesAllocation(ctx, freshWriteOnly, 0)
+	if err != nil {
+		t.Fatalf("GetRsharesAllocation(unscanned): %v", err)
+	}
+	if unscanned.VotesCompleteAsOf != nil {
+		t.Errorf("votes_complete_as_of = %v, want nil: a fresh `scanned` with no `rescanned_at` is not a vote snapshot",
+			unscanned.VotesCompleteAsOf)
 	}
 
 	// An empty day reports zero totals and no snapshot rather than an error.
@@ -601,7 +629,7 @@ func TestRsharesBoardAgainstMongo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRsharesAllocation(empty): %v", err)
 	}
-	if len(empty.Allocations) != 0 || empty.TotalRshares != 0 || empty.DataAsOf != nil {
+	if len(empty.Allocations) != 0 || empty.TotalRshares != 0 || empty.VotesCompleteAsOf != nil {
 		t.Errorf("empty day = %+v, want no rows, no totals and no timestamp", empty)
 	}
 }

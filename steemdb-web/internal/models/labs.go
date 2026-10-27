@@ -76,16 +76,23 @@ type RsharesAllocation struct {
 // truncated array would make the shares of a "top 200" board add up to far more
 // than 100%.
 //
-// DataAsOf is the newest comment.scanned timestamp behind the numbers (the
-// comment_rescanner refreshes active_votes on a ~6h cycle, so an ongoing day is
-// systematically short of its last hours); nil when no snapshot exists yet.
+// VotesCompleteAsOf is the OLDEST `comment.rescanned_at` among the day's posts:
+// the instant up to which every one of those posts' active_votes has been
+// refreshed, i.e. the only single instant that is true for the whole day. It is
+// deliberately NOT `comment.scanned` (also written by the comment handler on
+// every op, edits included, so its maximum is "newest write to the day's
+// documents") and NOT the newest `rescanned_at` either — the rescanner works a
+// rolling queue, so the newest snapshot is always ~now on an ongoing day and
+// the board would again claim freshness it cannot back. nil when no post of
+// that day has been rescanned yet; the SPA must then make no freshness claim at
+// all.
 type RsharesBoard struct {
-	Allocations  []RsharesAllocation `json:"allocations"`
-	TotalRshares int64               `json:"total_rshares"`
-	TotalVotes   int64               `json:"total_votes"`
-	Voters       int                 `json:"voters"`
-	Limit        int                 `json:"limit"`
-	DataAsOf     *time.Time          `json:"data_as_of,omitempty"`
+	Allocations       []RsharesAllocation `json:"allocations"`
+	TotalRshares      int64               `json:"total_rshares"`
+	TotalVotes        int64               `json:"total_votes"`
+	Voters            int                 `json:"voters"`
+	Limit             int                 `json:"limit"`
+	VotesCompleteAsOf *time.Time          `json:"votes_complete_as_of,omitempty"`
 }
 
 // CurationLeaderboard represents curation reward leaderboard entry. Total is
@@ -139,15 +146,21 @@ type Flags struct {
 // Clients represents client statistics.
 //
 // Posts/Rewards are the whole-window totals per client (the SPA renders the
-// top 50 of each); Rewards is SBD (total_payout_value + pending_payout_value
-// as written by steemdb-sync). Dates carries the per-day series and is only
-// filled when the caller asks for it — it was 98% of a 236KB payload that
-// nothing rendered.
+// top 50 of each). Both count COMMENTS — posts and replies — because the
+// snapshot attributes every comment in the window that carries an app string;
+// `posts` is the historical field name. Rewards is SBD, the sum of the three
+// payout legs written by steemdb-sync (total_payout_value +
+// pending_payout_value + total_pending_payout_value — see the clients
+// refresher for why all three are kept). Dates carries the per-day series and
+// is only filled when the caller asks for it — it was 98% of a 236KB payload
+// that nothing rendered.
 //
 // The metadata fields come from the snapshot document and exist so a reader can
 // tell a stale snapshot (UpdatedAt) from a fresh one and see how much of the
 // window the client attribution actually covers (PostsWithApp of
-// PostsScanned).
+// PostsScanned). Both counters count COMMENTS (posts + replies), and
+// PostsWithApp uses the same attribution predicate as the per-client lists, so
+// a document counted there is a document the lists contain.
 type Clients struct {
 	Dates   []ClientDate       `json:"dates,omitempty"`
 	Posts   map[string]int     `json:"posts"`

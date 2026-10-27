@@ -52,8 +52,11 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		// Conventional name/version: counted, reward 10 SBD.
 		{"_id": "a/p1", "created": created, "json_metadata": bson.M{"app": "steemit/0.1.0"},
 			"total_payout_value": 8.0, "pending_payout_value": 1.0, "total_pending_payout_value": 1.0},
-		// No version suffix — the case the old regex dropped. Also exercises the
-		// missing-payout-field guard: `$add` would yield null and zero the day.
+		// No version suffix — the case the old regex dropped. Two payout legs
+		// missing: `$add` would have yielded null and zeroed the day, while
+		// `$sum` ignores them (so the assertion below discriminates the
+		// historical `$add` defect only through the total, not through the
+		// guards).
 		{"_id": "a/p2", "created": created, "json_metadata": bson.M{"app": "dkscore-poststudio"},
 			"pending_payout_value": 5.0},
 		// Empty app string: scanned, not attributed.
@@ -103,10 +106,13 @@ func TestClientsTickerAgainstMongo(t *testing.T) {
 		t.Errorf("snapshot metadata missing: updated_at=%v window_from=%v window_to=%v",
 			snapshot.UpdatedAt, snapshot.WindowFrom, snapshot.WindowTo)
 	}
-	// 5 posts inside the 90-day window; 3 of them carry a non-empty app string
-	// (steemit/0.1.0, dkscore-poststudio, /1.2.3).
-	if snapshot.PostsScanned != 5 || snapshot.PostsWithApp != 3 {
-		t.Errorf("coverage = %d/%d, want 3/5 (the out-of-window post is not scanned)",
+	// 5 comments inside the 90-day window. Only 2 of them are attributed to a
+	// client (steemit/0.1.0 and dkscore-poststudio): the "/1.2.3" app leaves an
+	// empty client name and is dropped by the aggregation, so it must not be
+	// counted as attributed either — counting it made the coverage claim a post
+	// the client lists did not contain.
+	if snapshot.PostsScanned != 5 || snapshot.PostsWithApp != 2 {
+		t.Errorf("coverage = %d/%d, want 2/5 (the out-of-window comment is not scanned; \"/1.2.3\" is scanned but unattributed)",
 			snapshot.PostsWithApp, snapshot.PostsScanned)
 	}
 

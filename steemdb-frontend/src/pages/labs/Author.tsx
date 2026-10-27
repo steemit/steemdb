@@ -80,8 +80,8 @@ export function AuthorPage() {
             </div>
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            Top 200 authors per window. Rewards are converted to STEEM at the current vests ratio
-            and median SBD price, so all three payout legs are comparable.
+            The board is capped per window. Rewards are converted to STEEM at the current vests
+            ratio and median SBD price, so all three payout legs are comparable.
           </p>
         </CardContent>
       </Card>

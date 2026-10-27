@@ -63,6 +63,17 @@ func TestProcessContent_BasicTransforms(t *testing.T) {
 	if _, ok := doc["scanned"].(time.Time); !ok {
 		t.Errorf("scanned should be time.Time, got %T", doc["scanned"])
 	}
+	// rescanned_at is the only field the web freshness display may read: it is
+	// written here and nowhere else, while scanned is also bumped by the
+	// comment handler on every op.
+	rescannedAt, ok := doc["rescanned_at"].(time.Time)
+	if !ok {
+		t.Fatalf("rescanned_at should be time.Time, got %T", doc["rescanned_at"])
+	}
+	if scanned, ok := doc["scanned"].(time.Time); ok && !rescannedAt.Equal(scanned) {
+		t.Errorf("rescanned_at (%v) and scanned (%v) are written together, want the same instant",
+			rescannedAt, scanned)
+	}
 }
 
 func TestProcessContent_ActiveVotesTransform(t *testing.T) {

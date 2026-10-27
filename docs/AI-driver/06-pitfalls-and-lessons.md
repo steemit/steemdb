@@ -136,6 +136,55 @@ this shape survives review.
 
 A single-key `$sort` may stay a map — one key has no precedence problem.
 
+### A5. A field with two writers is not a snapshot time (2026-10, batch 3)
+
+`/labs/rshares` reported `data_as_of` from `max(comment.scanned)` among the
+day's posts, documented as "the comment snapshot behind the numbers". But
+`scanned` has two writers: the comment handler sets it to `time.Now()` on
+**every** comment op (edits included), and the rescanner sets it again when it
+refreshes `get_content`. So on an ongoing day the maximum is dominated by the
+newest document write — ~now — while the last ~6h of votes are still missing,
+and the page said both things at once: "data as of <now>" and "the most recent
+hours are not counted yet". On a historical day it degenerated into "the last
+time some post of that day was edited or rescanned".
+
+The fix is a field with one writer, not a better query: the rescanner also
+writes `rescanned_at`, nobody else touches it, and the response field
+(`votes_complete_as_of`) is read from it. A day with no `rescanned_at` reports
+**no** timestamp, and the SPA then makes no freshness claim — the missing field
+is the honest answer, not `now`.
+
+Swapping the field is only half of it. The good field still has to be reduced in
+the right direction: the rescanner works a **rolling** queue, so on an ongoing
+day some post is refreshed every few minutes and `max(rescanned_at)` is ~now
+again — the same overstatement with a different field name. The only single
+instant that is true for a whole day is `min(rescanned_at)`: every post's votes
+have been refreshed at least that recently, so the day is complete **up to**
+that point. The response computes it with a `$group`/`$min` aggregation rather
+than `find().sort()`: nothing indexes `rescanned_at`, so the sort is an
+unindexed blocking SORT over whole documents (bodies plus `active_votes`) that
+can hit the 100MB `internalQueryMaxBlockingSortMemoryUsageBytes` cap on a busy
+day — and the resulting error looked exactly like "this day was never
+rescanned".
+
+- **Rule**: before publishing a timestamp as "the data is as of X", count its
+  writers (`grep` the collection name in the handler, the rescanner and the
+  repair tools). A field bumped by a write path that does not refresh the data
+  in question answers "when was this row touched", never "how fresh is it".
+- **Second rule**: a per-row timestamp aggregated over a set is a bound, not an
+  instant. `max` claims the whole set is as fresh as its freshest row (never
+  true under a rolling refresh); `min` claims only what every row satisfies.
+- **Corollary for tests**: assert the discriminating case, not the happy path.
+  The regression test seeds one post whose `scanned` is the newest write while
+  its `rescanned_at` is older, a second post rescanned at a different instant
+  (the two values are what make `min` and `max` disagree about the answer), and
+  a third day whose documents have a fresh `scanned` and no `rescanned_at` at
+  all — which must report nil.
+- **Same-shaped hazard, not fixed here**: the rescanner's staleness cursor is
+  still `scanned`, so an actively edited post postpones its own vote rescan for
+  up to `stale_hours`. Switching that cursor to `rescanned_at` needs a backfill
+  plan (a `$lt` on a missing field matches every legacy document at once).
+
 ### B. Reader imagining writer's fields
 `Vote.Time`, `Reblog.BlockNum`, phantom indexes on `timestamp`/
 `last_update`, frontend types declaring string amounts. Every imagined

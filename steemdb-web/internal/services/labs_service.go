@@ -494,10 +494,16 @@ const (
 // Filtering on `rshares > 0` states the intent and keeps `votes` counting the
 // same rows as the sum.
 //
-// `DataAsOf` is the newest `comment.scanned` among that day's posts: the
-// comment_rescanner refreshes active_votes on a ~6h cycle, so the newest
-// hours of an ongoing day are systematically missing (audit measured 36% of
-// votes / 42% of rshares on the day of observation) and the SPA has to say so.
+// `VotesCompleteAsOf` is the OLDEST `comment.rescanned_at` among that day's
+// posts — the instant up to which every one of those posts' active_votes has
+// been refreshed, i.e. the only single instant that is true for the whole day.
+// It is NOT `comment.scanned`: that field is written by the comment handler on
+// every comment op (edits included) as well as by the rescanner, so its maximum
+// over an ongoing day is "the newest document write", which is always ~now
+// while the last ~6h of votes are still missing — a board that read it claimed
+// to be fresh and then said on the same screen that recent hours were not
+// counted. The newest `rescanned_at` is no better for the same reason (the
+// rescanner works a rolling queue, so it too is ~now); see the helper.
 func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, limit int) (*models.RsharesBoard, error) {
 	commentCollection := s.db.Collection("comment")
 
@@ -631,32 +637,83 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, 
 		}
 	}
 
-	board.DataAsOf = s.rsharesDataAsOf(ctx, startOfDay, endOfDay)
+	board.VotesCompleteAsOf = s.rsharesVotesCompleteAsOf(ctx, startOfDay, endOfDay)
 
 	return board, nil
 }
 
-// rsharesDataAsOf returns the newest comment.scanned timestamp among the posts
-// created in the window — the instant the vote snapshot behind the numbers was
-// taken. A nil result means no post of that day carries a snapshot yet.
-func (s *LabsService) rsharesDataAsOf(ctx context.Context, start, end time.Time) *time.Time {
-	var doc struct {
-		Scanned time.Time `bson:"scanned"`
+// rsharesVotesCompleteAsOf returns the day's vote-completeness bound: the
+// OLDEST comment.rescanned_at among the posts created in the window — the
+// instant up to which every one of those posts' active_votes has been
+// refreshed. A nil result means no post of that day has been rescanned yet.
+//
+// The oldest and not the newest: the rescanner works a rolling queue, so on an
+// ongoing day some post is rescanned every few minutes and the newest snapshot
+// is always ~now. Reporting that repeats the defect this field exists to fix —
+// "data as of <now>" printed next to "the recent hours are not counted yet".
+// The oldest snapshot is the only single instant that holds for the whole day:
+// votes after it may already be included, but they are not guaranteed, and the
+// SPA says exactly that.
+//
+// Deliberately not `scanned`: the comment handler writes that on every comment
+// op, so it answers "when was this document last written".
+//
+// A $group aggregation rather than find+sort: nothing indexes `rescanned_at`,
+// so sorting one day of comment documents is an unindexed blocking SORT (30k
+// keys on a probe day) that buffers whole documents — bodies plus
+// active_votes — and can therefore exceed the 100MB
+// internalQueryMaxBlockingSortMemoryUsageBytes cap on a busy day. Its error
+// would have surfaced as "no timestamp" instead of as an error. $group removes
+// the sort stage entirely, so there is no sort buffer to overflow, and the
+// `created` index still bounds the scan to one day.
+func (s *LabsService) rsharesVotesCompleteAsOf(ctx context.Context, start, end time.Time) *time.Time {
+	pipeline := []bson.M{
+		{
+			"$match": bson.M{
+				"created":      bson.M{"$gte": start, "$lt": end},
+				"rescanned_at": bson.M{"$exists": true, "$type": "date"},
+			},
+		},
+		{"$project": bson.M{"rescanned_at": 1}},
+		{
+			"$group": bson.M{
+				"_id":    nil,
+				"oldest": bson.M{"$min": "$rescanned_at"},
+			},
+		},
 	}
 
-	err := s.db.Collection("comment").FindOne(ctx,
-		bson.M{
-			"created": bson.M{"$gte": start, "$lt": end},
-			"scanned": bson.M{"$exists": true, "$type": "date"},
-		},
-		options.FindOne().SetSort(bson.M{"scanned": -1}).SetProjection(bson.M{"scanned": 1}),
-	).Decode(&doc)
-	if err != nil || doc.Scanned.IsZero() {
+	cursor, err := s.db.Collection("comment").Aggregate(ctx, pipeline,
+		options.Aggregate().SetAllowDiskUse(true))
+	if err != nil {
+		s.warnMissingSnapshotTimestamp(err)
+		return nil
+	}
+	defer cursor.Close(ctx)
+
+	var res []struct {
+		Oldest *time.Time `bson:"oldest"`
+	}
+	if err := cursor.All(ctx, &res); err != nil {
+		s.warnMissingSnapshotTimestamp(err)
+		return nil
+	}
+	if len(res) == 0 || res[0].Oldest == nil || res[0].Oldest.IsZero() {
 		return nil
 	}
 
-	scanned := doc.Scanned.UTC()
-	return &scanned
+	refreshedAt := res[0].Oldest.UTC()
+	return &refreshedAt
+}
+
+// warnMissingSnapshotTimestamp reports a failed freshness lookup. Returning nil
+// is the right response (the SPA then claims nothing), but doing it silently
+// makes a broken lookup indistinguishable from a day that was never rescanned.
+func (s *LabsService) warnMissingSnapshotTimestamp(err error) {
+	if s.logger != nil {
+		s.logger.Warn("Failed to read the rshares vote snapshot timestamp; reporting no freshness",
+			utils.Error(err))
+	}
 }
 
 // curatedPermlinksPerCurator bounds how many of a curator's posts the
@@ -1398,9 +1455,13 @@ const labsValuationRetryTTL = 15 * time.Second
 const labsValuationWait = 3 * time.Second
 
 var (
-	// errValuationInFlight reports that a refresh was already running and this
-	// request declined to queue behind it.
-	errValuationInFlight = errors.New("labs reward valuation refresh already in flight")
+	// errValuationWait reports that this request could not get a fresh
+	// valuation in time. Two paths land here and the old name
+	// (errValuationInFlight) only described the first: another request owns the
+	// refresh slot, OR the refresh this request itself started outlived
+	// labsValuationWait. Both are served the last good rate, and only a cold
+	// cache surfaces the error.
+	errValuationWait = errors.New("labs reward valuation not refreshed in time")
 	// errValuationRecentFailure reports that the last refresh failed less than
 	// labsValuationRetryTTL ago.
 	errValuationRecentFailure = errors.New("labs reward valuation refresh failed recently")
@@ -1473,7 +1534,7 @@ func (s *LabsService) rewardValuation(ctx context.Context) (rewardValuation, err
 	// One refresh owner at a time. Followers do not wait at all: they take the
 	// stale value (or the error, on a cold cache) on this same tick.
 	if !s.beginValuationRefresh() {
-		return s.cachedValuation(errValuationInFlight)
+		return s.cachedValuation(errValuationWait)
 	}
 	defer s.endValuationRefresh()
 
@@ -1494,7 +1555,7 @@ func (s *LabsService) rewardValuation(ctx context.Context) (rewardValuation, err
 		v, _ := res.Val.(rewardValuation)
 		return v, nil
 	case <-timer.C:
-		return s.cachedValuation(errValuationInFlight)
+		return s.cachedValuation(errValuationWait)
 	case <-ctx.Done():
 		return s.cachedValuation(ctx.Err())
 	}

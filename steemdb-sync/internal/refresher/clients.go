@@ -32,6 +32,57 @@ type clientsRefresher struct {
 	gate       *catchupGate
 }
 
+// clientNameExpr is the client-attribution expression: the part of
+// json_metadata.app before the first "/", trimmed. A version suffix is optional
+// in practice (`dkscore-poststudio`, `SteemX`, `drugwars`), so it must not gate
+// attribution; the trim handles app strings that start with whitespace.
+//
+// It is shared by the per-day aggregation and by the coverage count so that
+// "attributed" cannot mean two different things in the same snapshot: the count
+// used to be a plain `json_metadata.app != ""`, which kept counting app strings
+// like "/1.2.3" as attributed after the aggregation's `client != ""` match had
+// already dropped them.
+func clientNameExpr() bson.M {
+	return bson.M{"$trim": bson.M{"input": bson.M{
+		"$arrayElemAt": []interface{}{
+			bson.M{"$split": []interface{}{"$json_metadata.app", "/"}},
+			0,
+		},
+	}}}
+}
+
+// countAttributedComments counts the window's comments that the aggregation
+// below actually attributes to a client. It re-applies the attribution stages
+// instead of restating them as a CountDocuments filter, because the verdict
+// depends on the projected client name, not on the raw `app` string.
+func (c *clientsRefresher) countAttributedComments(ctx context.Context, window bson.M) (int, error) {
+	cursor, err := c.commentCol.Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"created":           window,
+			"json_metadata.app": bson.M{"$type": "string", "$ne": ""},
+		}}},
+		{{Key: "$project", Value: bson.M{"client": clientNameExpr()}}},
+		{{Key: "$match", Value: bson.M{"client": bson.M{"$ne": ""}}}},
+		{{Key: "$count", Value: "n"}},
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close(ctx)
+
+	var counts []struct {
+		N int `bson:"n"`
+	}
+	if err := cursor.All(ctx, &counts); err != nil {
+		return 0, err
+	}
+	if len(counts) == 0 {
+		// $count emits nothing for an empty input.
+		return 0, nil
+	}
+	return counts[0].N, nil
+}
+
 func newClientsRefresher(db *mongo.Database) *clientsRefresher {
 	return &clientsRefresher{
 		commentCol: db.Collection("comment"),
@@ -51,20 +102,28 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 	window := bson.M{"$gte": start, "$lte": now}
 
 	// Coverage of the client attribution: how many comments the window holds at
-	// all, and how many carry an `app` string. The gap is the share of posts
-	// with no client signal — it used to be ~11% and it is invisible to a
+	// all, and how many of them end up attributed to a client. The gap is the
+	// share with no client signal — it used to be ~11% and it is invisible to a
 	// reader who only sees the per-client totals.
+	//
+	// `posts_scanned` counts COMMENTS (posts + replies), which is what the
+	// window holds: it is the denominator of the coverage share, not a post
+	// count.
 	postsScanned, err := c.commentCol.CountDocuments(ctx, bson.M{"created": window})
 	if err != nil {
 		log.Printf("[Refresher:Clients] Failed to count window comments: %v", err)
 		return
 	}
-	postsWithApp, err := c.commentCol.CountDocuments(ctx, bson.M{
-		"created":           window,
-		"json_metadata.app": bson.M{"$type": "string", "$ne": ""},
-	})
+	// `posts_with_app` must use the SAME predicate the aggregation below applies
+	// before attributing, otherwise the coverage claim covers documents the
+	// client lists do not contain: an app string of "/1.2.3" (or whitespace)
+	// leaves an empty client name, is dropped by the `client != ""` match, and
+	// was still counted as attributed while the count was a plain
+	// `json_metadata.app != ""` — inflating the attributable share by exactly
+	// those documents.
+	postsWithApp, err := c.countAttributedComments(ctx, window)
 	if err != nil {
-		log.Printf("[Refresher:Clients] Failed to count comments with app: %v", err)
+		log.Printf("[Refresher:Clients] Failed to count attributed comments: %v", err)
 		return
 	}
 
@@ -88,16 +147,23 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 		{
 			"$project": bson.M{
 				"created": 1,
-				"client": bson.M{"$trim": bson.M{"input": bson.M{
-					"$arrayElemAt": []interface{}{
-						bson.M{"$split": []interface{}{"$json_metadata.app", "/"}},
-						0,
-					},
-				}}},
-				// `$add` returns null as soon as one operand is missing or
-				// non-numeric, and a null summand poisons the whole group —
-				// this is how 70 of 91 days ended up with reward 0 while the
-				// post counts were right. Each leg is guarded and summed.
+				"client":  clientNameExpr(),
+				// The reward legs, all three of what SteemDB stores per
+				// comment: total_payout_value (already paid), pending_payout_value
+				// (still accruing in the payout window) and
+				// total_pending_payout_value (the chain's running estimate for the
+				// same window). They are summed as written — the legs overlap in
+				// meaning, and dropping one would silently change every historical
+				// figure — so the column is "the payout legs summed", not "SBD
+				// paid out".
+				//
+				// `$sum` over an array ignores null/missing operands, so a comment
+				// without payout fields contributes 0 instead of turning the whole
+				// group null: the previous `$add` did the latter, which is how 70
+				// of 91 days read reward 0 while the post counts were right. The
+				// `$ifNull` guards below are therefore belt-and-braces — removing
+				// them changes nothing (verified on mongo 4.4), and they cost one
+				// stage per leg in an aggregation that runs over a 90-day window.
 				"reward": bson.M{"$sum": []interface{}{
 					bson.M{"$ifNull": []interface{}{"$total_payout_value", 0}},
 					bson.M{"$ifNull": []interface{}{"$pending_payout_value", 0}},
@@ -203,6 +269,6 @@ func (c *clientsRefresher) tick(ctx context.Context) {
 		log.Printf("[Refresher:Clients] Failed to write clients_history: %v", err)
 	}
 
-	log.Printf("[Refresher:Clients] Snapshot updated (%d days, %d/%d posts attributed)",
+	log.Printf("[Refresher:Clients] Snapshot updated (%d days, %d/%d comments attributed)",
 		len(data), postsWithApp, postsScanned)
 }

@@ -376,8 +376,13 @@ export interface RsharesAllocation {
  * /labs/rshares response. The board is capped at `limit` rows; the totals are
  * computed server-side over every voter of the day, so percentages must be
  * derived from `total_rshares`, never from summing `allocations`.
- * `data_as_of` is the newest comment snapshot behind the numbers (the
- * rescanner lags ~6h), absent when no snapshot exists for that day.
+ * `votes_complete_as_of` is the OLDEST `comment.rescanned_at` among the day's
+ * posts — the instant up to which the whole day's votes have been refreshed
+ * (the rescanner runs on a ~6h cycle, and its queue is rolling, so the newest
+ * snapshot is always ~now and says nothing about the rest of the day). It is
+ * not `comment.scanned`, which the comment handler also bumps on every op.
+ * Absent when no post of that day has been rescanned yet: the page must then
+ * claim no freshness at all.
  */
 export interface RsharesBoard {
   allocations: RsharesAllocation[];
@@ -385,7 +390,7 @@ export interface RsharesBoard {
   total_votes: number;
   voters: number;
   limit: number;
-  data_as_of?: string;
+  votes_complete_as_of?: string;
 }
 
 export interface CurationLeaderboard {
@@ -429,12 +434,14 @@ export interface Flags {
 }
 
 /**
- * /labs/clients response. `rewards` is SBD (author payout of posts published by
- * that client), `posts` the attributed post count. `dates` is only present when
- * the caller asks for the daily series (`?include=daily`). The metadata comes
- * from the 90-day snapshot: `posts_scanned` is every post in the window and
- * `posts_with_app` the ones naming a client, so `posts_scanned - posts_with_app`
- * is the unattributed share.
+ * /labs/clients response. `rewards` is SBD (the three author payout legs of the
+ * posts published by that client, summed), `posts` the attributed post count.
+ * `dates` is only present when the caller asks for the daily series
+ * (`?include=daily`). The metadata comes from the 90-day snapshot:
+ * `posts_scanned` is every COMMENT in the window (posts + replies) and
+ * `posts_with_app` the ones attributed to a client with the same predicate the
+ * lists use, so `posts_scanned - posts_with_app` is the unattributed share.
+ * Both are 0 on a snapshot predating the fields.
  */
 export interface Clients {
   dates?: ClientDate[];

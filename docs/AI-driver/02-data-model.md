@@ -75,7 +75,7 @@ fields.
 | `feed_publish` / `pow` | MiscHandlers | `{block}|{publisher}` / `{block}-{worker}` | ⚠️ same-block collisions |
 | `follow` / `reblog` | CustomJSONHandler | filter-upsert `{_block, follower, following}` / `{_block, permlink, account}` | Pattern B; currently zero web readers |
 | `witness_vote` | WitnessVoteHandler | filter-upsert `{_ts, account, witness}` | filter contains `_ts` — same-block vote+unvote is the canonical Pattern-B conflict case |
-| `comment` | CommentHandler (+comment_options, author_reward writeback) + **comment_rescanner** (get_content snapshots) | `{author}/{permlink}` | the only collection on the unbuffered direct-write bypass (diff read-modify-write + matched semantics); `last_applied_op` dedup marker; dynamic fields (active_votes/depth/payout/…) only exist after rescan; `parent_author`/`parent_permlink` are written by the handler on every op, so reply classification needs no rescan; `scanned` = last `get_content` snapshot (the rescanner's ~6h cycle, readable as "data as of"); `json_metadata` stays a raw string when the chain data is invalid (poison for rigid decoders) |
+| `comment` | CommentHandler (+comment_options, author_reward writeback) + **comment_rescanner** (get_content snapshots) | `{author}/{permlink}` | the only collection on the unbuffered direct-write bypass (diff read-modify-write + matched semantics); `last_applied_op` dedup marker; dynamic fields (active_votes/depth/payout/…) only exist after rescan; `parent_author`/`parent_permlink` are written by the handler on every op, so reply classification needs no rescan; `scanned` = last **write** to the document (the handler bumps it on every op, edits included — it is the rescanner's staleness cursor, *not* a snapshot time); `rescanned_at` = last `get_content` refresh, written only by the rescanner, so it is the only field that answers "when were these active_votes snapshotted"; `json_metadata` stays a raw string when the chain data is invalid (poison for rigid decoders) |
 | `account` | creation ops (stub upsert `{_id, _dirty:true}` via `QueueAccountCreate`; dirty marks via `QueueAccountDirty` never upsert — `docs/rules/account-doc-creation.md`) + **account_refresher** (full docs, `$unset _dirty`) | web everywhere | stub→full two-phase protocol; `scanned` = last refresh time |
 
 ### Snapshot layer (refresher)
@@ -99,12 +99,21 @@ the refresher's clients ticker) holds the labs/clients board:
 reward}], reward, total}` plus the snapshot metadata `updated_at`,
 `window_from`, `window_to`, `posts_scanned`, `posts_with_app`. `client` is the
 part of `comment.json_metadata.app` before the first `/` (a version suffix is
-optional — it must not gate attribution), `count` is attributed posts and
-`reward` is **SBD** (`total_payout_value + pending_payout_value`, summed with
-`$ifNull` guards because a missing payout field makes `$add` null). The
-metadata is what makes the snapshot auditable: `posts_scanned -
-posts_with_app` is the share of posts with no client signal, and `updated_at`
-is the only way to tell a stalled refresher from a fresh one.
+optional — it must not gate attribution), `count` is attributed comments
+(posts and replies — the same set `posts_scanned` counts) and
+`reward` is **SBD**, the sum of all three payout legs SteemDB stores per
+comment: `total_payout_value + pending_payout_value + total_pending_payout_value`
+(summed with `$sum`, which ignores a missing leg; the older `$add` returned null
+as soon as one leg was absent and zeroed the whole day).
+The legs overlap in meaning; they are summed as written, so the figure is "the
+payout legs summed", not "SBD already paid out". The metadata is what makes the
+snapshot auditable: `posts_scanned` counts every **comment** in the window
+(posts *and* replies — it is a coverage denominator, not a post count),
+`posts_with_app` counts the ones the per-client lists actually attribute (same
+predicate, so an app string like `/1.2.3` that trims to an empty client name is
+scanned but not attributed), `posts_scanned - posts_with_app` is the share with
+no client signal, and `updated_at` is the only way to tell a stalled refresher
+from a fresh one.
 
 `stats_cache` is written by **web** (stats_service background counter) —
 self-contained. `tx_cache` is also written by **web** (tx_service read-through
