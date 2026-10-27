@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/steemit/steemdb/web/internal/database"
 	"github.com/steemit/steemdb/web/internal/models"
@@ -24,6 +27,21 @@ type LabsService struct {
 	db          *database.MongoDB
 	steemClient *steem.Client
 	logger      utils.Logger
+
+	// Reward valuation cache (author leaderboard ranking). valMu guards the
+	// cached snapshot and the refresh slot; valGroup merges concurrent
+	// refreshes so a burst of requests issues one props + price-feed round trip
+	// instead of one each.
+	valMu         sync.Mutex
+	val           rewardValuation
+	valAt         time.Time
+	valFailAt     time.Time
+	valRefreshing bool
+	valGroup      singleflight.Group
+
+	// valFetch is a test seam: production leaves it nil and the refresh reads
+	// the chain. Tests need a slow or failing source without a node.
+	valFetch func() (rewardValuation, error)
 }
 
 // NewLabsService creates a new labs service
@@ -243,9 +261,13 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 			},
 		},
 		{
-			"$sort": bson.M{
-				"_id.year": 1,
-				"_id.doy":  1,
+			// bson.D, not bson.M: MongoDB reads the field order of a $sort
+			// document as precedence, while bson.M is an unordered map. With
+			// a map the day-of-year key can end up primary, which misorders a
+			// window that spans a year boundary (Dec 29..Jan 04).
+			"$sort": bson.D{
+				{Key: "_id.year", Value: 1},
+				{Key: "_id.doy", Value: 1},
 			},
 		},
 		{
@@ -318,9 +340,11 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 			},
 		},
 		{
-			"$sort": bson.M{
-				"_id.year": 1,
-				"_id.doy":  1,
+			// bson.D for the same reason as the upcoming pipeline above: a
+			// two-key sort in a map has undefined precedence.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: 1},
+				{Key: "_id.doy", Value: 1},
 			},
 		},
 		{
@@ -446,10 +470,38 @@ func (s *LabsService) GetPowerDowns(ctx context.Context) (*models.PowerDown, err
 	}, nil
 }
 
-// GetRsharesAllocation retrieves rshares allocation data
-func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time) ([]models.RsharesAllocation, error) {
+// rsharesDefaultLimit / rsharesMaxLimit bound the returned voter rows. The
+// board used to return every voter of the day (1,359-1,901 rows, 290-405KB)
+// while top-10 concentrated 65% and top-100 95.8% of the rshares — truncation
+// loses almost no signal, but the percentages must then be computed from
+// server-side totals rather than from the truncated array.
+const (
+	rsharesDefaultLimit = 200
+	rsharesMaxLimit     = 2000
+)
+
+// GetRsharesAllocation retrieves the rshares allocation of one UTC day.
+//
+// Unit/semantics contract: the figure is the rshares accumulated by posts
+// CREATED on that day, including votes cast on later days (a post's payout
+// window is 7 days, so the same historical day keeps growing). It is not
+// "votes cast that day" — the SPA copy says so.
+//
+// Only positive rshares are summed. The previous filter was
+// `active_votes.weight != 0`, which dropped downvotes only by accident:
+// `weight` is a derived, scaled field, so every negative vote observed had
+// weight 0 (and ~480 positive dust votes per day were dropped with it).
+// Filtering on `rshares > 0` states the intent and keeps `votes` counting the
+// same rows as the sum.
+//
+// `DataAsOf` is the newest `comment.scanned` among that day's posts: the
+// comment_rescanner refreshes active_votes on a ~6h cycle, so the newest
+// hours of an ongoing day are systematically missing (audit measured 36% of
+// votes / 42% of rshares on the day of observation) and the SPA has to say so.
+func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time, limit int) (*models.RsharesBoard, error) {
 	commentCollection := s.db.Collection("comment")
 
+	limit = clampLabsLimit(limit, rsharesDefaultLimit, rsharesMaxLimit)
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
@@ -473,8 +525,11 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time) 
 			"$unwind": "$active_votes",
 		},
 		{
+			// Explicit positive filter: a downvote must not silently cancel
+			// out an upvote in the total, and the vote count must describe the
+			// same rows the rshares sum covers.
 			"$match": bson.M{
-				"active_votes.weight": bson.M{"$ne": 0},
+				"active_votes.rshares": bson.M{"$gt": 0},
 			},
 		},
 		{
@@ -491,50 +546,117 @@ func (s *LabsService) GetRsharesAllocation(ctx context.Context, date time.Time) 
 			},
 		},
 		{
-			"$sort": bson.M{
-				"rshares": -1,
-			},
-		},
-		{
-			"$lookup": bson.M{
-				"from":         "account",
-				"localField":   "_id.voter",
-				"foreignField": "name",
-				"as":           "account",
+			// One pass, two outputs: the truncated top rows and the totals the
+			// percentages are computed from. Slicing without carrying the
+			// totals would make the SPA report every percentage against the
+			// truncated sum (top-200 of 1,400: the shares would no longer add
+			// up to 100%).
+			"$facet": bson.M{
+				"rows": []bson.M{
+					// bson.D: a two-key $sort in an unordered map made the
+					// tie-breaker (_id.voter) primary in some runs, so the
+					// board intermittently showed voters in name order.
+					{"$sort": bson.D{{Key: "rshares", Value: -1}, {Key: "_id.voter", Value: 1}}},
+					{"$limit": limit},
+					{
+						"$lookup": bson.M{
+							"from":         "account",
+							"localField":   "_id.voter",
+							"foreignField": "name",
+							"as":           "account",
+						},
+					},
+				},
+				"meta": []bson.M{
+					{
+						"$group": bson.M{
+							"_id":           nil,
+							"total_rshares": bson.M{"$sum": "$rshares"},
+							"total_votes":   bson.M{"$sum": "$votes"},
+							"voters":        bson.M{"$sum": 1},
+						},
+					},
+				},
 			},
 		},
 	}
 
-	cursor, err := commentCollection.Aggregate(ctx, pipeline)
+	cursor, err := commentCollection.Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(true))
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate rshares: %w", err)
 	}
 	defer cursor.Close(ctx)
 
-	var results []struct {
-		ID      bson.M   `bson:"_id"`
-		Votes   int      `bson:"votes"`
-		Rshares int64    `bson:"rshares"`
-		Account []bson.M `bson:"account"`
+	// Decoded leniently (float64): active_votes[].rshares is written by
+	// steemdb-sync, which stores it as a BSON double, while `$sum` over
+	// integer-typed junk returns int64. Decoding both as float64 keeps the
+	// rounding in our hands instead of the codec's (a fractional double would
+	// fail a rigid int64 decode outright); rshares are whole numbers, so the
+	// round on the way out is lossless.
+	var facets []struct {
+		Rows []struct {
+			ID      bson.M   `bson:"_id"`
+			Votes   int      `bson:"votes"`
+			Rshares float64  `bson:"rshares"`
+			Account []bson.M `bson:"account"`
+		} `bson:"rows"`
+		Meta []struct {
+			TotalRshares float64 `bson:"total_rshares"`
+			TotalVotes   int64   `bson:"total_votes"`
+			Voters       int     `bson:"voters"`
+		} `bson:"meta"`
 	}
-	if err := cursor.All(ctx, &results); err != nil {
+	if err := cursor.All(ctx, &facets); err != nil {
 		return nil, fmt.Errorf("failed to decode rshares: %w", err)
 	}
 
-	allocations := make([]models.RsharesAllocation, 0, len(results))
-	for _, r := range results {
-		voterID := r.ID["voter"]
-		voter, _ := voterID.(string)
-
-		allocations = append(allocations, models.RsharesAllocation{
-			Voter:   voter,
-			Votes:   r.Votes,
-			Rshares: r.Rshares,
-			Account: accountSummaryFromLookup(r.Account),
-		})
+	board := &models.RsharesBoard{
+		Allocations: make([]models.RsharesAllocation, 0, limit),
+		Limit:       limit,
+	}
+	if len(facets) > 0 {
+		if len(facets[0].Meta) > 0 {
+			board.TotalRshares = int64(math.Round(facets[0].Meta[0].TotalRshares))
+			board.TotalVotes = facets[0].Meta[0].TotalVotes
+			board.Voters = facets[0].Meta[0].Voters
+		}
+		for _, r := range facets[0].Rows {
+			voter, _ := r.ID["voter"].(string)
+			board.Allocations = append(board.Allocations, models.RsharesAllocation{
+				Voter:   voter,
+				Votes:   r.Votes,
+				Rshares: int64(math.Round(r.Rshares)),
+				Account: accountSummaryFromLookup(r.Account),
+			})
+		}
 	}
 
-	return allocations, nil
+	board.DataAsOf = s.rsharesDataAsOf(ctx, startOfDay, endOfDay)
+
+	return board, nil
+}
+
+// rsharesDataAsOf returns the newest comment.scanned timestamp among the posts
+// created in the window — the instant the vote snapshot behind the numbers was
+// taken. A nil result means no post of that day carries a snapshot yet.
+func (s *LabsService) rsharesDataAsOf(ctx context.Context, start, end time.Time) *time.Time {
+	var doc struct {
+		Scanned time.Time `bson:"scanned"`
+	}
+
+	err := s.db.Collection("comment").FindOne(ctx,
+		bson.M{
+			"created": bson.M{"$gte": start, "$lt": end},
+			"scanned": bson.M{"$exists": true, "$type": "date"},
+		},
+		options.FindOne().SetSort(bson.M{"scanned": -1}).SetProjection(bson.M{"scanned": 1}),
+	).Decode(&doc)
+	if err != nil || doc.Scanned.IsZero() {
+		return nil
+	}
+
+	scanned := doc.Scanned.UTC()
+	return &scanned
 }
 
 // curatedPermlinksPerCurator bounds how many of a curator's posts the
@@ -644,9 +766,45 @@ func (s *LabsService) GetCurationLeaderboard(ctx context.Context, date time.Time
 	return leaderboard, nil
 }
 
-// GetAuthorLeaderboard retrieves author reward leaderboard
-func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, grouping string) ([]models.AuthorLeaderboard, error) {
+// Author leaderboard limits. The board used to return every rewarded account
+// (622 rows for one day, 2,064 for a month) and carried a permlink array the
+// SPA never rendered (65% of a 2.3MB monthly response).
+const (
+	authorDefaultLimit = 200
+	authorMaxLimit     = 500
+)
+
+// GetAuthorLeaderboard retrieves the author reward leaderboard for one UTC day
+// or month.
+//
+// Reward accounting: `vest`/`steem`/`sbd` are the three author_reward payout
+// legs as written by steemdb-sync (VESTS / STEEM / SBD). `total_steem` is the
+// STEEM-equivalent used for ranking — see rewardValuation — because ranking by
+// VESTS alone while displaying only steem+sbd inverted the top of the board
+// and showed "0.000 STEEM / 0.000 SBD" for 100% power-up authors.
+func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, grouping string, limit int) ([]models.AuthorLeaderboard, error) {
+	valuation, err := s.rewardValuation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.authorLeaderboard(ctx, date, grouping, limit, valuation)
+}
+
+// authorLeaderboard is GetAuthorLeaderboard with the chain valuation supplied
+// by the caller, so the aggregation can be exercised without a node.
+//
+// Reply classification: a payout is a reply when its comment document has a
+// non-empty parent_author. The board used to test whether the permlink began
+// with "re-", which is a client convention rather than a protocol rule: on
+// 2026-10-26 that judged 164 of 876 payouts (18.7%) wrong — all replies
+// counted as posts — under-reporting replies by 87% and mis-splitting 88 of
+// 622 authors. parent_author is written by the comment handler for every
+// comment op (no rescan needed) and comment._id is author/permlink, so the
+// join is a primary-key lookup per payout.
+func (s *LabsService) authorLeaderboard(ctx context.Context, date time.Time, grouping string, limit int, valuation rewardValuation) ([]models.AuthorLeaderboard, error) {
 	collection := s.db.Collection("author_reward")
+
+	limit = clampLabsLimit(limit, authorDefaultLimit, authorMaxLimit)
 
 	var startTime, endTime time.Time
 	if grouping == "monthly" {
@@ -655,6 +813,12 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 	} else {
 		startTime = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 		endTime = startTime.Add(24 * time.Hour)
+	}
+
+	// splitByReply builds the two halves of a split metric: whenReply applies
+	// to payouts classified as replies, whenPost to everything else.
+	splitByReply := func(whenReply, whenPost interface{}) bson.M {
+		return bson.M{"$sum": bson.M{"$cond": bson.A{"$is_reply", whenReply, whenPost}}}
 	}
 
 	pipeline := []bson.M{
@@ -668,7 +832,6 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 		},
 		{
 			"$project": bson.M{
-				"prefix":         bson.M{"$substr": bson.A{"$permlink", 0, 3}},
 				"author":         1,
 				"permlink":       1,
 				"steem_payout":   1,
@@ -677,95 +840,85 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 			},
 		},
 		{
-			"$group": bson.M{
-				"_id":   "$author",
-				"count": bson.M{"$sum": 1},
-				"posts": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							0,
-							1,
-						},
-					},
+			// Only parent_author is fetched: the comment body would otherwise
+			// be carried through a join that runs ~900 times a day and ~34k
+			// times a month.
+			"$lookup": bson.M{
+				"from": "comment",
+				"let":  bson.M{"cid": bson.M{"$concat": bson.A{"$author", "/", "$permlink"}}},
+				"pipeline": []bson.M{
+					{"$match": bson.M{"$expr": bson.M{"$eq": bson.A{"$_id", "$$cid"}}}},
+					{"$project": bson.M{"parent_author": 1}},
 				},
-				"replies": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							1,
-							0,
-						},
-					},
-				},
-				"post_vest": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							0,
-							"$vesting_payout",
-						},
-					},
-				},
-				"post_sbd": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							0,
-							"$sbd_payout",
-						},
-					},
-				},
-				"post_steem": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							0,
-							"$steem_payout",
-						},
-					},
-				},
-				"reply_vest": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							"$vesting_payout",
-							0,
-						},
-					},
-				},
-				"reply_sbd": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							"$sbd_payout",
-							0,
-						},
-					},
-				},
-				"reply_steem": bson.M{
-					"$sum": bson.M{
-						"$cond": bson.A{
-							bson.M{"$eq": bson.A{"$prefix", "re-"}},
-							"$steem_payout",
-							0,
-						},
-					},
-				},
-				"sbd":   bson.M{"$sum": "$sbd_payout"},
-				"steem": bson.M{"$sum": "$steem_payout"},
-				"vest":  bson.M{"$sum": "$vesting_payout"},
-				"permlinks": bson.M{
-					"$addToSet": bson.M{
-						"$concat": bson.A{"$author", "/", "$permlink"},
-					},
-				},
+				"as": "comment",
 			},
 		},
 		{
-			"$sort": bson.M{
-				"vest": -1,
+			// A payout whose comment document is missing (or not yet written)
+			// counts as a post, which is the pre-fix behaviour for unknown
+			// documents rather than a new error path.
+			"$addFields": bson.M{
+				"is_reply": bson.M{"$gt": bson.A{
+					bson.M{"$strLenCP": bson.M{"$ifNull": bson.A{
+						bson.M{"$arrayElemAt": bson.A{"$comment.parent_author", 0}},
+						"",
+					}}},
+					0,
+				}},
 			},
+		},
+		{
+			"$group": bson.M{
+				"_id":     "$author",
+				"count":   bson.M{"$sum": 1},
+				"posts":   splitByReply(0, 1),
+				"replies": splitByReply(1, 0),
+				"post_vest": bson.M{"$sum": bson.M{"$cond": bson.A{
+					"$is_reply", 0, "$vesting_payout",
+				}}},
+				"post_sbd": bson.M{"$sum": bson.M{"$cond": bson.A{
+					"$is_reply", 0, "$sbd_payout",
+				}}},
+				"post_steem": bson.M{"$sum": bson.M{"$cond": bson.A{
+					"$is_reply", 0, "$steem_payout",
+				}}},
+				"reply_vest": bson.M{"$sum": bson.M{"$cond": bson.A{
+					"$is_reply", "$vesting_payout", 0,
+				}}},
+				"reply_sbd": bson.M{"$sum": bson.M{"$cond": bson.A{
+					"$is_reply", "$sbd_payout", 0,
+				}}},
+				"reply_steem": bson.M{"$sum": bson.M{"$cond": bson.A{
+					"$is_reply", "$steem_payout", 0,
+				}}},
+				"sbd":   bson.M{"$sum": "$sbd_payout"},
+				"steem": bson.M{"$sum": "$steem_payout"},
+				"vest":  bson.M{"$sum": "$vesting_payout"},
+			},
+		},
+		{
+			// The ranking metric: all three payout legs, in STEEM at the
+			// current vests ratio and median SBD price.
+			"$addFields": bson.M{
+				"total_steem": valuation.steemEquivalentExpr("$vest", "$steem", "$sbd"),
+			},
+		},
+		{
+			// Accounts with an all-zero payout (817 of web2.support's monthly
+			// rows carried no reward at all) are noise on a reward board.
+			"$match": bson.M{"total_steem": bson.M{"$gt": 0}},
+		},
+		{
+			// bson.D: with a map the _id tie-breaker can become the primary
+			// key, which silently replaced "rank by STEEM equivalent" with
+			// "alphabetical by author" in roughly one run out of five.
+			"$sort": bson.D{
+				{Key: "total_steem", Value: -1},
+				{Key: "_id", Value: 1},
+			},
+		},
+		{
+			"$limit": limit,
 		},
 		{
 			"$lookup": bson.M{
@@ -797,7 +950,7 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 		Sbd        float64  `bson:"sbd"`
 		Steem      float64  `bson:"steem"`
 		Vest       float64  `bson:"vest"`
-		Permlinks  []string `bson:"permlinks"`
+		TotalSteem float64  `bson:"total_steem"`
 		Account    []bson.M `bson:"account"`
 	}
 	if err := cursor.All(ctx, &results); err != nil {
@@ -820,7 +973,7 @@ func (s *LabsService) GetAuthorLeaderboard(ctx context.Context, date time.Time, 
 			Sbd:        r.Sbd,
 			Steem:      r.Steem,
 			Vest:       r.Vest,
-			Permlinks:  r.Permlinks,
+			TotalSteem: r.TotalSteem,
 			Account:    accountSummaryFromLookup(r.Account),
 		})
 	}
@@ -897,15 +1050,25 @@ type flagSnapshotEntry struct {
 
 // GetClients retrieves client statistics from the clients-snapshot maintained
 // by steemdb-sync's refresher (legacy history.py update_clients pipeline).
-// Snapshot shape: [{_id: {doy, year, month, day, dow}, clients: [{client,
-// count, reward}], reward, total}, ...] — one entry per day with apps seen in
-// comment json_metadata.app over the last 90 days.
-func (s *LabsService) GetClients(ctx context.Context) (*models.Clients, error) {
+// Snapshot shape: {_id: "clients-snapshot", updated_at, window_from, window_to,
+// posts_scanned, posts_with_app, data: [{_id: {doy, year, month, day, dow},
+// clients: [{client, count, reward}], reward, total}, ...]} — one data entry
+// per day with apps seen in comment json_metadata.app over the last 90 days.
+//
+// includeDaily controls the per-day series. It is off by default because the
+// series is ~98% of the response and the SPA renders only the per-client
+// totals; callers that want to chart the timeline can ask for it.
+func (s *LabsService) GetClients(ctx context.Context, includeDaily bool) (*models.Clients, error) {
 	statusCollection := s.db.Collection("status")
 
 	var status struct {
-		ID   string          `bson:"_id"`
-		Data []clientDayData `bson:"data"`
+		ID           string          `bson:"_id"`
+		Data         []clientDayData `bson:"data"`
+		UpdatedAt    *time.Time      `bson:"updated_at"`
+		WindowFrom   *time.Time      `bson:"window_from"`
+		WindowTo     *time.Time      `bson:"window_to"`
+		PostsScanned int             `bson:"posts_scanned"`
+		PostsWithApp int             `bson:"posts_with_app"`
 	}
 
 	err := statusCollection.FindOne(ctx, bson.M{"_id": "clients-snapshot"}).Decode(&status)
@@ -914,9 +1077,16 @@ func (s *LabsService) GetClients(ctx context.Context) (*models.Clients, error) {
 	}
 
 	clients := &models.Clients{
-		Dates:   make([]models.ClientDate, 0, len(status.Data)),
-		Posts:   make(map[string]int),
-		Rewards: make(map[string]float64),
+		Posts:        make(map[string]int),
+		Rewards:      make(map[string]float64),
+		UpdatedAt:    utcPtr(status.UpdatedAt),
+		WindowFrom:   utcPtr(status.WindowFrom),
+		WindowTo:     utcPtr(status.WindowTo),
+		PostsScanned: status.PostsScanned,
+		PostsWithApp: status.PostsWithApp,
+	}
+	if includeDaily {
+		clients.Dates = make([]models.ClientDate, 0, len(status.Data))
 	}
 
 	for _, day := range status.Data {
@@ -930,13 +1100,27 @@ func (s *LabsService) GetClients(ctx context.Context) (*models.Clients, error) {
 			clients.Posts[c.Client] += c.Count
 			clients.Rewards[c.Client] += c.Reward
 		}
-		clients.Dates = append(clients.Dates, models.ClientDate{
-			Date:    time.Date(day.ID.Year, time.Month(day.ID.Month), day.ID.Day, 0, 0, 0, 0, time.UTC),
-			Clients: entries,
-		})
+		if includeDaily {
+			clients.Dates = append(clients.Dates, models.ClientDate{
+				Date:    time.Date(day.ID.Year, time.Month(day.ID.Month), day.ID.Day, 0, 0, 0, 0, time.UTC),
+				Total:   day.Total,
+				Reward:  day.Reward,
+				Clients: entries,
+			})
+		}
 	}
 
 	return clients, nil
+}
+
+// utcPtr normalises a snapshot timestamp to UTC (the snapshot window and its
+// day buckets are UTC), passing nil through.
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	utc := t.UTC()
+	return &utc
 }
 
 // clientDayData mirrors one clients-snapshot aggregation entry.
@@ -995,10 +1179,14 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 			// "+N more benefactors") are the day's top benefactors. The former
 			// `$sort {_ts:-1}` on the raw collection only ordered that array by
 			// event time.
-			"$sort": bson.M{
-				"_id.year": -1,
-				"_id.doy":  -1,
-				"reward":   -1,
+			// bson.D: the day keys must stay ahead of `reward` in precedence.
+			// In a map the order is random, and with `reward` primary the
+			// per-day array would be ordered across days instead of within
+			// each day.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: -1},
+				{Key: "_id.doy", Value: -1},
+				{Key: "reward", Value: -1},
 			},
 		},
 		{
@@ -1024,9 +1212,10 @@ func (s *LabsService) GetBenefactors(ctx context.Context) (*models.Benefactors, 
 		{
 			// Newest day first (was ascending, which together with $limit 10
 			// returned the oldest 10 days of the collection's history).
-			"$sort": bson.M{
-				"_id.year": -1,
-				"_id.doy":  -1,
+			// bson.D for ordering precedence across the two day keys.
+			"$sort": bson.D{
+				{Key: "_id.year", Value: -1},
+				{Key: "_id.doy", Value: -1},
 			},
 		},
 		{
@@ -1188,6 +1377,246 @@ func vestsToSteem(vests, ratio float64) float64 {
 		return vests
 	}
 	return vests * ratio
+}
+
+// labsValuationTTL bounds how often the author leaderboard asks the chain for
+// its reward valuation (global props + median price feed). Conversions drift
+// by <0.05% over a day, so a minute-old valuation ranks identically, while an
+// uncached pair would put two public-node round trips inside every request.
+const labsValuationTTL = 60 * time.Second
+
+// labsValuationRetryTTL is how long a failed refresh suppresses the next
+// attempt. Without it, a sick node turns every request into a fresh
+// two-RPC call that takes up to 46s each (see steem.rpcMaxRetries): the
+// endpoint would emit a steady stream of doomed requests instead of a few.
+const labsValuationRetryTTL = 15 * time.Second
+
+// labsValuationWait bounds how long a request waits on a refresh that is
+// already in flight. The refresh itself is never abandoned (it warms the
+// cache for later requests), but no request queues behind it: past this
+// budget the caller is served the last good valuation, or fails.
+const labsValuationWait = 3 * time.Second
+
+var (
+	// errValuationInFlight reports that a refresh was already running and this
+	// request declined to queue behind it.
+	errValuationInFlight = errors.New("labs reward valuation refresh already in flight")
+	// errValuationRecentFailure reports that the last refresh failed less than
+	// labsValuationRetryTTL ago.
+	errValuationRecentFailure = errors.New("labs reward valuation refresh failed recently")
+)
+
+// rewardValuation is everything needed to state an author_reward payout in one
+// unit. VESTS → STEEM uses the props ratio; SBD → STEEM uses the median price
+// feed, because on Steem SBD does not trade at parity (2026-10: 1 SBD ≈ 9.6
+// STEEM). Collapsing the two at 1:1 would misrank every author whose payout is
+// mostly SBD.
+type rewardValuation struct {
+	// VestsRatio is STEEM per 1 VEST (total_vesting_fund_steem /
+	// total_vesting_shares).
+	VestsRatio float64
+	// SteemPerSBD is STEEM per 1 SBD (the feed's quote/base).
+	SteemPerSBD float64
+}
+
+// steemEquivalent adds the three payout legs in STEEM.
+func (v rewardValuation) steemEquivalent(vests, steem, sbd float64) float64 {
+	return vests*v.VestsRatio + steem + sbd*v.SteemPerSBD
+}
+
+// steemEquivalentExpr is steemEquivalent as an aggregation expression. Each
+// operand is $ifNull-guarded: `$add` returns null if any operand is missing or
+// non-numeric, and a null sort key would silently sink an author to the bottom
+// of the board.
+func (v rewardValuation) steemEquivalentExpr(vests, steem, sbd string) bson.M {
+	guard := func(field string, factor float64) bson.M {
+		return bson.M{"$ifNull": bson.A{
+			bson.M{"$multiply": bson.A{field, factor}},
+			0,
+		}}
+	}
+	return bson.M{"$add": bson.A{
+		guard(vests, v.VestsRatio),
+		guard(steem, 1),
+		guard(sbd, v.SteemPerSBD),
+	}}
+}
+
+// rewardValuation returns the current reward valuation, refreshing at most once
+// per labsValuationTTL.
+//
+// Failure behaviour is what keeps a sick node from becoming an endpoint-wide
+// pile-up (the lock-then-RPC shape this replaced made every concurrent request
+// wait behind the same refresh, and a hung node makes one refresh up to two 46s
+// retry loops):
+//
+//   - concurrent refreshes are merged, so a burst costs one round trip;
+//   - only the request that started the refresh waits for it (bounded by
+//     labsValuationWait); every other request is served the last good
+//     valuation immediately rather than queueing behind it, because during a
+//     node outage a queue of 3s waits is exactly the pile-up;
+//   - a failed refresh suppresses the next attempt for labsValuationRetryTTL,
+//     and is logged once per attempt rather than once per request.
+//
+// A last-good valuation is always preferred over an error (a minute-stale rate
+// is within 0.05% of the truth); only a cold cache surfaces the error, so the
+// board fails instead of ranking on a fabricated rate.
+func (s *LabsService) rewardValuation(ctx context.Context) (rewardValuation, error) {
+	if v, ok := s.freshValuation(); ok {
+		return v, nil
+	}
+
+	if failedAt := s.lastValuationFailure(); !failedAt.IsZero() && time.Since(failedAt) < labsValuationRetryTTL {
+		return s.cachedValuation(errValuationRecentFailure)
+	}
+
+	// One refresh owner at a time. Followers do not wait at all: they take the
+	// stale value (or the error, on a cold cache) on this same tick.
+	if !s.beginValuationRefresh() {
+		return s.cachedValuation(errValuationInFlight)
+	}
+	defer s.endValuationRefresh()
+
+	// DoChan (not Do) so the wait can be bounded: the refresh keeps running in
+	// its own goroutine and warms the cache even if this request gives up.
+	refreshed := s.valGroup.DoChan("rewardValuation", func() (interface{}, error) {
+		return s.fetchValuation()
+	})
+
+	timer := time.NewTimer(labsValuationWait)
+	defer timer.Stop()
+
+	select {
+	case res := <-refreshed:
+		if res.Err != nil {
+			return s.cachedValuation(res.Err)
+		}
+		v, _ := res.Val.(rewardValuation)
+		return v, nil
+	case <-timer.C:
+		return s.cachedValuation(errValuationInFlight)
+	case <-ctx.Done():
+		return s.cachedValuation(ctx.Err())
+	}
+}
+
+// beginValuationRefresh claims the refresh slot, reporting whether this caller
+// owns it.
+func (s *LabsService) beginValuationRefresh() bool {
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
+	if s.valRefreshing {
+		return false
+	}
+	s.valRefreshing = true
+	return true
+}
+
+// endValuationRefresh releases the refresh slot.
+func (s *LabsService) endValuationRefresh() {
+	s.valMu.Lock()
+	s.valRefreshing = false
+	s.valMu.Unlock()
+}
+
+// freshValuation returns the cached valuation while it is still within
+// labsValuationTTL.
+func (s *LabsService) freshValuation() (rewardValuation, bool) {
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
+	if s.val.VestsRatio > 0 && s.val.SteemPerSBD > 0 && time.Since(s.valAt) < labsValuationTTL {
+		return s.val, true
+	}
+	return rewardValuation{}, false
+}
+
+// lastValuationFailure returns when the last refresh failed (zero if it did
+// not).
+func (s *LabsService) lastValuationFailure() time.Time {
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
+	return s.valFailAt
+}
+
+// fetchValuation performs one refresh and records its outcome. Runs at most
+// once per merge group, never holding valMu across the RPC. The failure is
+// logged here, once per attempt — logging in cachedValuation would emit one
+// warning per request for as long as the stale value is being served.
+func (s *LabsService) fetchValuation() (rewardValuation, error) {
+	source := s.valFetch
+	if source == nil {
+		source = s.readValuationFromChain
+	}
+
+	val, err := source()
+	if err != nil {
+		s.valMu.Lock()
+		s.valFailAt = time.Now()
+		s.valMu.Unlock()
+		if s.logger != nil {
+			s.logger.Warn("Labs reward valuation refresh failed; serving the last good rate", utils.Error(err))
+		}
+		return rewardValuation{}, err
+	}
+
+	s.valMu.Lock()
+	s.val = val
+	s.valAt = time.Now()
+	s.valFailAt = time.Time{}
+	s.valMu.Unlock()
+
+	return val, nil
+}
+
+// readValuationFromChain is the two-call RPC half of a refresh.
+func (s *LabsService) readValuationFromChain() (rewardValuation, error) {
+	if s.steemClient == nil {
+		return rewardValuation{}, errors.New("no steem client configured")
+	}
+
+	props, err := s.steemClient.GetDynamicGlobalProperties()
+	if err != nil {
+		return rewardValuation{}, fmt.Errorf("failed to get props: %w", err)
+	}
+	ratio := vestsToSteemRatio(props.TotalVestingFundSteem, props.TotalVestingShares)
+	if ratio <= 0 {
+		return rewardValuation{}, errors.New("props carry no vesting ratio")
+	}
+
+	steemPerSBD, err := s.steemClient.GetMedianHistoryPrice()
+	if err != nil {
+		return rewardValuation{}, fmt.Errorf("failed to get median price: %w", err)
+	}
+
+	return rewardValuation{VestsRatio: ratio, SteemPerSBD: steemPerSBD}, nil
+}
+
+// cachedValuation returns the last good valuation when a refresh failed,
+// otherwise the refresh error. Deliberately silent: the failure itself is
+// logged once by fetchValuation, while this path runs once per request.
+func (s *LabsService) cachedValuation(cause error) (rewardValuation, error) {
+	s.valMu.Lock()
+	val := s.val
+	s.valMu.Unlock()
+
+	if val.VestsRatio > 0 && val.SteemPerSBD > 0 {
+		return val, nil
+	}
+	return rewardValuation{}, cause
+}
+
+// clampLabsLimit applies a caller-supplied row cap with a default and a hard
+// maximum, so `?limit=` can neither omit truncation nor request an unbounded
+// response.
+func clampLabsLimit(requested, def, max int) int {
+	switch {
+	case requested <= 0:
+		return def
+	case requested > max:
+		return max
+	default:
+		return requested
+	}
 }
 
 // benefactorWindowStart returns the $match lower bound for the benefactor

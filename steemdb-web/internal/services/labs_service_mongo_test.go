@@ -370,6 +370,313 @@ func TestCurationPermlinkCapAgainstMongo(t *testing.T) {
 	}
 }
 
+// authorTestValuation is a fixed conversion for the author-board tests:
+// 1M VESTS = 1 STEEM and 1 SBD = 9.6 STEEM (the 2026-10 ratio and price).
+var authorTestValuation = rewardValuation{VestsRatio: 1e-6, SteemPerSBD: 9.6}
+
+// TestAuthorReplySplitAgainstMongo pins the reply classification: a payout is a
+// reply when its comment document carries a parent_author, never because its
+// permlink happens to start with "re-". On 2026-10-26 that heuristic counted
+// 164 of 876 payouts wrong (all replies read as posts).
+func TestAuthorReplySplitAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	day := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+
+	comments := []bson.M{
+		// Top-level post.
+		{"_id": "alice/p1", "author": "alice", "permlink": "p1", "parent_author": ""},
+		// Reply whose permlink does not start with "re-" — the tn*/rep* families
+		// the audit found.
+		{"_id": "alice/tn5816", "author": "alice", "permlink": "tn5816", "parent_author": "someone"},
+		{"_id": "alice/re-abc", "author": "alice", "permlink": "re-abc", "parent_author": "someone"},
+	}
+	if _, err := svc.db.Collection("comment").InsertMany(ctx, asDocs(comments)); err != nil {
+		t.Fatalf("insert comments: %v", err)
+	}
+
+	// One payout has no comment document at all (cold start / not yet written):
+	// it must count as a post, not fail the board.
+	rewards := []bson.M{
+		{"_id": "1/a1", "_ts": day.Add(1 * time.Hour), "author": "alice", "permlink": "p1", "vesting_payout": 0.0, "steem_payout": 10.0, "sbd_payout": 0.0},
+		{"_id": "1/a2", "_ts": day.Add(2 * time.Hour), "author": "alice", "permlink": "tn5816", "vesting_payout": 1000000.0, "steem_payout": 0.0, "sbd_payout": 0.0},
+		{"_id": "1/a3", "_ts": day.Add(3 * time.Hour), "author": "alice", "permlink": "re-abc", "vesting_payout": 2000000.0, "steem_payout": 0.0, "sbd_payout": 0.0},
+		{"_id": "1/a4", "_ts": day.Add(4 * time.Hour), "author": "bob", "permlink": "gone", "vesting_payout": 0.0, "steem_payout": 0.0, "sbd_payout": 0.0},
+	}
+	if _, err := svc.db.Collection("author_reward").InsertMany(ctx, asDocs(rewards)); err != nil {
+		t.Fatalf("insert rewards: %v", err)
+	}
+
+	got, err := svc.authorLeaderboard(ctx, day, "daily", 100, authorTestValuation)
+	if err != nil {
+		t.Fatalf("authorLeaderboard: %v", err)
+	}
+	// bob's only payout is all-zero, so the zero-reward row filter drops him.
+	if len(got) != 1 {
+		t.Fatalf("got %d authors, want 1 (the all-zero payout is noise): %+v", len(got), got)
+	}
+
+	alice := got[0]
+	if alice.Count != 3 || alice.Posts != 1 || alice.Replies != 2 {
+		t.Errorf("count/posts/replies = %d/%d/%d, want 3/1/2 (re- is a client convention, not the classification)",
+			alice.Count, alice.Posts, alice.Replies)
+	}
+	if alice.PostVest != 0 {
+		t.Errorf("post_vest = %v, want 0 (p1 paid STEEM only)", alice.PostVest)
+	}
+	if alice.ReplyVest != 3000000 {
+		t.Errorf("reply_vest = %v, want 3e6 (both replies, whatever their permlink prefix)", alice.ReplyVest)
+	}
+	// 3M VESTS * 1e-6 = 3 STEEM, plus 10 STEEM liquid.
+	if diff := alice.TotalSteem - 13.0; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("total_steem = %v, want 13 (3 STEEM of VESTS + 10 STEEM)", alice.TotalSteem)
+	}
+}
+
+// TestAuthorRankingBySteemEquivalentAgainstMongo pins the ranking metric: the
+// board is ordered by the STEEM value of all three payout legs, so a
+// 100%-power-up author who only holds VESTS cannot outrank a smaller but liquid
+// payout, and SBD is not treated as STEEM at par.
+func TestAuthorRankingBySteemEquivalentAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	day := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	rewards := []bson.M{
+		// Highest VESTS of the three (2 STEEM equivalent) but no liquid payout.
+		{"_id": "1/p1", "_ts": day.Add(1 * time.Hour), "author": "powerup", "permlink": "p1", "vesting_payout": 2000000.0, "steem_payout": 0.0, "sbd_payout": 0.0},
+		// 5 STEEM + 1 SBD (= 9.6 STEEM) = 14.6 STEEM.
+		{"_id": "1/l1", "_ts": day.Add(2 * time.Hour), "author": "liquid", "permlink": "l1", "vesting_payout": 0.0, "steem_payout": 5.0, "sbd_payout": 1.0},
+		// A middling VESTS-only payout (1.5 STEEM).
+		{"_id": "1/m1", "_ts": day.Add(3 * time.Hour), "author": "middling", "permlink": "m1", "vesting_payout": 1500000.0, "steem_payout": 0.0, "sbd_payout": 0.0},
+	}
+	if _, err := svc.db.Collection("author_reward").InsertMany(ctx, asDocs(rewards)); err != nil {
+		t.Fatalf("insert rewards: %v", err)
+	}
+
+	got, err := svc.authorLeaderboard(ctx, day, "daily", 100, authorTestValuation)
+	if err != nil {
+		t.Fatalf("authorLeaderboard: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d authors, want 3", len(got))
+	}
+	want := []string{"liquid", "powerup", "middling"}
+	for i, author := range want {
+		if got[i].Author != author {
+			t.Errorf("rank %d = %q, want %q (order by total_steem)", i+1, got[i].Author, author)
+		}
+	}
+	if diff := got[0].TotalSteem - 14.6; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("liquid total_steem = %v, want 14.6 (1 SBD = 9.6 STEEM, not 1)", got[0].TotalSteem)
+	}
+
+	// Repeat the same call: a $sort document built from bson.M (an unordered
+	// map) has an undefined key precedence, so the _id tie-breaker became the
+	// primary key in roughly one run in five and the board came back in
+	// alphabetical order. A single call hides that; 20 do not.
+	for i := 0; i < 20; i++ {
+		repeated, err := svc.authorLeaderboard(ctx, day, "daily", 100, authorTestValuation)
+		if err != nil {
+			t.Fatalf("repeat %d: authorLeaderboard: %v", i, err)
+		}
+		if len(repeated) != 3 {
+			t.Fatalf("repeat %d: got %d authors, want 3", i, len(repeated))
+		}
+		for j, author := range want {
+			if repeated[j].Author != author {
+				t.Fatalf("repeat %d: rank %d = %q, want %q (sort precedence must not depend on map order)",
+					i, j+1, repeated[j].Author, author)
+			}
+		}
+	}
+}
+
+// TestAuthorLimitAgainstMongo pins the row cap: the response is bounded but the
+// rows keep their true ranking, and the cap never reaches beyond the sort.
+func TestAuthorLimitAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	day := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	rewards := make([]bson.M, 0, 5)
+	for i, author := range []string{"a", "b", "c", "d", "e"} {
+		rewards = append(rewards, bson.M{
+			"_id": fmt.Sprintf("1/%d", i), "_ts": day.Add(time.Duration(i) * time.Hour),
+			"author": author, "permlink": "p", "vesting_payout": float64(1000000 * (i + 1)),
+			"steem_payout": 0.0, "sbd_payout": 0.0,
+		})
+	}
+	if _, err := svc.db.Collection("author_reward").InsertMany(ctx, asDocs(rewards)); err != nil {
+		t.Fatalf("insert rewards: %v", err)
+	}
+
+	got, err := svc.authorLeaderboard(ctx, day, "daily", 2, authorTestValuation)
+	if err != nil {
+		t.Fatalf("authorLeaderboard: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want the 2-row cap", len(got))
+	}
+	if got[0].Author != "e" || got[1].Author != "d" {
+		t.Errorf("capped rows = %q,%q, want e,d (the cap follows the ranking)", got[0].Author, got[1].Author)
+	}
+
+	// A limit above the maximum is clamped, not honoured.
+	clamped, err := svc.authorLeaderboard(ctx, day, "daily", authorMaxLimit+1000, authorTestValuation)
+	if err != nil {
+		t.Fatalf("authorLeaderboard: %v", err)
+	}
+	if len(clamped) != 5 {
+		t.Errorf("got %d rows, want all 5 (only 5 exist; the clamp caps the cap)", len(clamped))
+	}
+}
+
+// TestRsharesBoardAgainstMongo pins the rshares contract: positive-only sums
+// (downvotes must not cancel upvotes and dust votes must still count), totals
+// computed before the row cap, and the snapshot timestamp the SPA reports.
+func TestRsharesBoardAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	day := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	comments := []bson.M{
+		{
+			"_id": "a/p1", "author": "a", "permlink": "p1", "created": day.Add(time.Hour),
+			"scanned": day.Add(7 * time.Hour),
+			"active_votes": []bson.M{
+				{"voter": "up", "weight": int64(10000), "rshares": int64(1000), "time": day},
+				// weight 0 but positive rshares: a dust vote the old
+				// `weight != 0` filter dropped.
+				{"voter": "dust", "weight": int64(0), "rshares": int64(5), "time": day},
+				// A downvote must not subtract from the day's total.
+				{"voter": "down", "weight": int64(0), "rshares": int64(-50), "time": day},
+			},
+		},
+		{
+			"_id": "a/p2", "author": "a", "permlink": "p2", "created": day.Add(2 * time.Hour),
+			"scanned": day.Add(5 * time.Hour),
+			"active_votes": []bson.M{
+				{"voter": "up", "weight": int64(10000), "rshares": int64(500), "time": day},
+			},
+		},
+	}
+	if _, err := svc.db.Collection("comment").InsertMany(ctx, asDocs(comments)); err != nil {
+		t.Fatalf("insert comments: %v", err)
+	}
+
+	board, err := svc.GetRsharesAllocation(ctx, day, 1)
+	if err != nil {
+		t.Fatalf("GetRsharesAllocation: %v", err)
+	}
+	if board.TotalRshares != 1505 {
+		t.Errorf("total_rshares = %d, want 1505 (1000+5+500; the -50 downvote is not summed)", board.TotalRshares)
+	}
+	if board.TotalVotes != 3 || board.Voters != 2 {
+		t.Errorf("total_votes/voters = %d/%d, want 3/2", board.TotalVotes, board.Voters)
+	}
+	if len(board.Allocations) != 1 {
+		t.Fatalf("got %d rows, want the 1-row cap", len(board.Allocations))
+	}
+	if board.Allocations[0].Voter != "up" || board.Allocations[0].Rshares != 1500 {
+		t.Errorf("top row = %+v, want up/1500", board.Allocations[0])
+	}
+
+	// Repeat: the board's two-key $sort (_id.voter tie-breaker) came back in
+	// voter-name order in roughly one run in five while the sort document was
+	// an unordered map, which put the 5-rshare dust vote on top.
+	for i := 0; i < 20; i++ {
+		repeated, err := svc.GetRsharesAllocation(ctx, day, 1)
+		if err != nil {
+			t.Fatalf("repeat %d: GetRsharesAllocation: %v", i, err)
+		}
+		if len(repeated.Allocations) != 1 || repeated.Allocations[0].Voter != "up" {
+			t.Fatalf("repeat %d: top row = %+v, want the 1500-rshare vote (sort precedence must not depend on map order)",
+				i, repeated.Allocations)
+		}
+	}
+	if board.DataAsOf == nil || !board.DataAsOf.Equal(day.Add(7*time.Hour)) {
+		t.Errorf("data_as_of = %v, want the newest comment.scanned (%v)", board.DataAsOf, day.Add(7*time.Hour))
+	}
+
+	// An empty day reports zero totals and no snapshot rather than an error.
+	empty, err := svc.GetRsharesAllocation(ctx, day.AddDate(0, 0, -3), 0)
+	if err != nil {
+		t.Fatalf("GetRsharesAllocation(empty): %v", err)
+	}
+	if len(empty.Allocations) != 0 || empty.TotalRshares != 0 || empty.DataAsOf != nil {
+		t.Errorf("empty day = %+v, want no rows, no totals and no timestamp", empty)
+	}
+}
+
+// TestClientsSnapshotAgainstMongo pins the clients read path: the per-day
+// series is opt-in, the per-day totals survive, and the snapshot metadata
+// (freshness + attribution coverage) reaches the API.
+func TestClientsSnapshotAgainstMongo(t *testing.T) {
+	svc, ctx := labsTestService(t)
+
+	updatedAt := time.Date(2026, 10, 26, 16, 12, 0, 0, time.UTC)
+	snapshot := bson.M{
+		"_id":            "clients-snapshot",
+		"updated_at":     updatedAt,
+		"window_from":    updatedAt.AddDate(0, 0, -90),
+		"window_to":      updatedAt,
+		"posts_scanned":  6000,
+		"posts_with_app": 5400,
+		"data": []bson.M{
+			{
+				"_id": bson.M{"doy": 298, "year": 2026, "month": 10, "day": 25, "dow": 7},
+				"clients": []bson.M{
+					{"client": "steemit", "count": 100, "reward": 10.0},
+					{"client": "dkscore-poststudio", "count": 4, "reward": 0.0},
+				},
+				"reward": 10.0, "total": 104,
+			},
+			{
+				"_id": bson.M{"doy": 299, "year": 2026, "month": 10, "day": 26, "dow": 1},
+				"clients": []bson.M{
+					{"client": "steemit", "count": 50, "reward": 5.0},
+				},
+				"reward": 5.0, "total": 50,
+			},
+		},
+	}
+	if _, err := svc.db.Collection("status").InsertOne(ctx, snapshot); err != nil {
+		t.Fatalf("insert snapshot: %v", err)
+	}
+
+	got, err := svc.GetClients(ctx, false)
+	if err != nil {
+		t.Fatalf("GetClients: %v", err)
+	}
+	if got.Dates != nil {
+		t.Errorf("dates = %d entries, want nil unless the caller asks for the series", len(got.Dates))
+	}
+	if got.Posts["steemit"] != 150 || got.Posts["dkscore-poststudio"] != 4 {
+		t.Errorf("posts = %+v, want steemit=150 and dkscore-poststudio=4 (app without a version still counts)", got.Posts)
+	}
+	if got.Rewards["steemit"] != 15 {
+		t.Errorf("rewards[steemit] = %v, want 15", got.Rewards["steemit"])
+	}
+	if got.UpdatedAt == nil || !got.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("updated_at = %v, want %v", got.UpdatedAt, updatedAt)
+	}
+	if got.PostsScanned != 6000 || got.PostsWithApp != 5400 {
+		t.Errorf("coverage = %d/%d, want 5400/6000", got.PostsWithApp, got.PostsScanned)
+	}
+
+	withDaily, err := svc.GetClients(ctx, true)
+	if err != nil {
+		t.Fatalf("GetClients(daily): %v", err)
+	}
+	if len(withDaily.Dates) != 2 {
+		t.Fatalf("dates = %d entries, want 2", len(withDaily.Dates))
+	}
+	if withDaily.Dates[0].Date.Format("2006-01-02") != "2026-10-25" {
+		t.Errorf("dates[0] = %v, want 2026-10-25", withDaily.Dates[0].Date)
+	}
+	if withDaily.Dates[0].Total != 104 || withDaily.Dates[0].Reward != 10 {
+		t.Errorf("dates[0] totals = %d/%v, want 104/10", withDaily.Dates[0].Total, withDaily.Dates[0].Reward)
+	}
+}
+
 // asDocs adapts a typed document slice to the driver's InsertMany signature.
 func asDocs(ms []bson.M) []interface{} {
 	out := make([]interface{}, 0, len(ms))

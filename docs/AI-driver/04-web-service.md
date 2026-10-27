@@ -78,6 +78,41 @@ neither — the API now exposes `count`, `voter_count`, `post_count` and the top
    `formatCurrency`). Replies vs posts is a filter (`depth: 0`), not a
    subtitle — 14.5% of the pending-payout rows used to be replies on a page
    titled "Posts".
+6. **A capped board ships its own totals.** `labs/rshares` used to return every
+   voter of the day (290-405KB, unbounded) while top-10 held 65% of the
+   rshares; it is now a `$facet` of top-N rows plus `total_rshares` /
+   `total_votes` / `voters`. Never let the SPA derive a share from a truncated
+   array. The same endpoint reports `data_as_of` (newest `comment.scanned`
+   among the day's posts) because the rescanner refreshes `active_votes` on a
+   ~6h cycle — an ongoing day is systematically short of its last hours (36% of
+   votes, 42% of rshares at audit time) and the copy says so.
+7. **Classify on written fields, not on identifier spelling.** A reply is a
+   payout whose `comment.parent_author` is non-empty, never a payout whose
+   permlink starts with `re-` (client convention; 18.7% wrong on one day). The
+   join is `comment._id = author/permlink`. Cost, measured on a local 4.4 with
+   34k monthly payouts: the join roughly doubles the monthly request (~5s vs
+   1s in the probe) — acceptable for a labs page, and the cheap long-term exit
+   is a `parent_author`-derived flag written by the rewards handler (which then
+   needs the processor write-ordering classification plus a backfill).
+8. **A snapshot states its freshness and coverage.** `status.clients-snapshot`
+   now carries `updated_at`, `window_from`, `window_to`, `posts_scanned` and
+   `posts_with_app`; `GET /labs/clients` exposes them and only ships the
+   per-day series on request (`?include=daily`, it was 98% of the payload and
+   nothing rendered it). `rewards` is SBD (`total_payout_value` +
+   `pending_payout_value`), not STEEM.
+9. **A cached RPC value must not queue requests behind it.** `labs/author`
+   needs props + the median price feed to rank payouts in one unit. The cache
+   is refreshed under singleflight; only the request that owns the refresh
+   waits (≤3s), every other request takes the last good rate immediately, and a
+   failure suppresses the next attempt for 15s and is logged once per attempt.
+   A hanging node costs up to two 46s retry loops (`pkg/steem`), so the naive
+   "hold a mutex across the call" shape turns one bad node into an
+   endpoint-wide pile-up. On a cold cache the endpoint fails fast instead of
+   ranking on a fabricated rate.
+10. **A multi-key `$sort` is a `bson.D`.** MongoDB reads the field order of a
+   `$sort` document as precedence and `bson.M` has none, so
+   `{"total_steem": -1, "_id": 1}` occasionally makes the unique tie-breaker
+   primary — alphabetical boards, no error (pitfall A4).
 
 ## Dual-track data access (local Mongo vs steem RPC)
 

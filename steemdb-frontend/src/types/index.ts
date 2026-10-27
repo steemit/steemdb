@@ -372,6 +372,22 @@ export interface RsharesAllocation {
   account?: LabsAccountSummary;
 }
 
+/**
+ * /labs/rshares response. The board is capped at `limit` rows; the totals are
+ * computed server-side over every voter of the day, so percentages must be
+ * derived from `total_rshares`, never from summing `allocations`.
+ * `data_as_of` is the newest comment snapshot behind the numbers (the
+ * rescanner lags ~6h), absent when no snapshot exists for that day.
+ */
+export interface RsharesBoard {
+  allocations: RsharesAllocation[];
+  total_rshares: number;
+  total_votes: number;
+  voters: number;
+  limit: number;
+  data_as_of?: string;
+}
+
 export interface CurationLeaderboard {
   curator: string;
   count: number;
@@ -395,7 +411,8 @@ export interface AuthorLeaderboard {
   sbd: number;
   steem: number;
   vest: number;
-  permlinks?: string[];
+  /** STEEM equivalent of all three payout legs; the board is ranked by it. */
+  total_steem: number;
   account?: LabsAccountSummary;
 }
 
@@ -411,14 +428,29 @@ export interface Flags {
   voters?: Record<string, number>;
 }
 
+/**
+ * /labs/clients response. `rewards` is SBD (author payout of posts published by
+ * that client), `posts` the attributed post count. `dates` is only present when
+ * the caller asks for the daily series (`?include=daily`). The metadata comes
+ * from the 90-day snapshot: `posts_scanned` is every post in the window and
+ * `posts_with_app` the ones naming a client, so `posts_scanned - posts_with_app`
+ * is the unattributed share.
+ */
 export interface Clients {
-  dates: ClientDate[];
+  dates?: ClientDate[];
   posts: Record<string, number>;
   rewards: Record<string, number>;
+  updated_at?: string;
+  window_from?: string;
+  window_to?: string;
+  posts_scanned: number;
+  posts_with_app: number;
 }
 
 export interface ClientDate {
   date: string;
+  total: number;
+  reward: number;
   clients: ClientEntry[];
 }
 

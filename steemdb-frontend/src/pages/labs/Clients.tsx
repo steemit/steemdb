@@ -1,11 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, FlaskConical } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { getClients } from '../../lib/api';
 import { formatNumber, formatCurrency } from '../../lib/utils';
 import type { Clients } from '../../types';
+
+const TOP_CLIENTS = 50;
+
+/** YYYY-MM-DD of an ISO timestamp, for window captions. */
+function dayOf(iso?: string): string | undefined {
+  return iso ? iso.slice(0, 10) : undefined;
+}
 
 export function ClientsPage() {
   const { data, isLoading, error } = useQuery({
@@ -42,11 +49,26 @@ export function ClientsPage() {
   // Sort clients by posts
   const sortedPosts = Object.entries(clients.posts || {})
     .sort(([, a], [, b]) => b - a)
-    .slice(0, 50);
+    .slice(0, TOP_CLIENTS);
 
   const sortedRewards = Object.entries(clients.rewards || {})
     .sort(([, a], [, b]) => b - a)
-    .slice(0, 50);
+    .slice(0, TOP_CLIENTS);
+
+  const clientCount = Object.keys(clients.posts || {}).length;
+  const windowFrom = dayOf(clients.window_from);
+  const windowTo = dayOf(clients.window_to);
+  const updatedAt = clients.updated_at
+    ? `${clients.updated_at.slice(0, 16).replace('T', ' ')} UTC`
+    : undefined;
+  const unattributed =
+    clients.posts_scanned > 0
+      ? clients.posts_scanned - clients.posts_with_app
+      : 0;
+  const attributedShare =
+    clients.posts_scanned > 0
+      ? ((clients.posts_with_app / clients.posts_scanned) * 100).toFixed(1)
+      : undefined;
 
   return (
     <div className="space-y-6">
@@ -62,10 +84,36 @@ export function ClientsPage() {
         </div>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Coverage</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-sm text-muted-foreground">
+          <p>
+            {windowFrom && windowTo ? `${windowFrom} to ${windowTo} (UTC)` : 'Last 90 days (UTC)'}
+            {' · '}
+            {formatNumber(clientCount)} clients
+            {clientCount > TOP_CLIENTS ? ` · top ${TOP_CLIENTS} shown` : ''}
+          </p>
+          <p>
+            Attribution comes from each post&apos;s <code>json_metadata.app</code>:{' '}
+            {formatNumber(clients.posts_with_app)} of {formatNumber(clients.posts_scanned)} posts
+            name a client
+            {attributedShare ? ` (${attributedShare}%)` : ''}
+            {unattributed > 0
+              ? `, the other ${formatNumber(unattributed)} are not counted below`
+              : ''}
+            .
+          </p>
+          {updatedAt && <p>Snapshot refreshed {updatedAt}.</p>}
+        </CardContent>
+      </Card>
+
       {/* Top by Posts */}
       <Card>
         <CardHeader>
           <CardTitle>Top Clients by Posts</CardTitle>
+          <CardDescription>Posts published by each client in the window</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -99,6 +147,12 @@ export function ClientsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Top Clients by Rewards</CardTitle>
+          {/* SBD, not STEEM: the snapshot sums total_payout_value +
+              pending_payout_value, both SBD assets (labelled STEEM before,
+              inflating every figure). */}
+          <CardDescription>
+            Author rewards (SBD) earned by posts published through each client
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -120,7 +174,7 @@ export function ClientsPage() {
                       <div className="font-medium">{client}</div>
                     </div>
                   </div>
-                  <div className="font-semibold">{formatCurrency(reward)}</div>
+                  <div className="font-semibold">{formatCurrency(reward, 'SBD')}</div>
                 </div>
               ))
             )}

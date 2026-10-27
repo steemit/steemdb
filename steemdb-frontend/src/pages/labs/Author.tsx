@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { getAuthor } from '../../lib/api';
-import { formatCurrency, formatVests, getAvatarUrl } from '../../lib/utils';
+import { formatCurrency, getAvatarUrl } from '../../lib/utils';
 import type { AuthorLeaderboard } from '../../types';
 
 export function AuthorPage() {
@@ -18,31 +18,12 @@ export function AuthorPage() {
     queryFn: () => getAuthor(date, grouping),
   });
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="text-center py-12">
-          <div className="text-muted-foreground">Loading author leaderboard...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !data?.success) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center text-muted-foreground">
-              Failed to load author leaderboard.
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const leaderboard = data.data || [];
+  const leaderboard: AuthorLeaderboard[] = data?.success ? data.data || [] : [];
+  // The failure state is rendered inside the results card, not instead of the
+  // page: a single failed request used to unmount the filters too, leaving
+  // "Failed to load author leaderboard." as the only thing on screen with no
+  // way back to another day or grouping.
+  const failed = Boolean(error) || Boolean(data && !data.success);
 
   return (
     <div className="space-y-6">
@@ -98,6 +79,10 @@ export function AuthorPage() {
               </Button>
             </div>
           </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Top 200 authors per window. Rewards are converted to STEEM at the current vests ratio
+            and median SBD price, so all three payout legs are comparable.
+          </p>
         </CardContent>
       </Card>
 
@@ -105,90 +90,105 @@ export function AuthorPage() {
         <CardHeader>
           <CardTitle>Top Authors</CardTitle>
           <CardDescription>
-            Showing top {leaderboard.length} authors
+            {failed
+              ? 'Failed to load author leaderboard.'
+              : `Top ${leaderboard.length} authors`}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {leaderboard.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                No author data found.
-              </div>
-            ) : (
-              leaderboard.map((entry: AuthorLeaderboard, index: number) => (
-                <div
-                  key={entry.author}
-                  className="border rounded-lg p-4"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10">
-                        <span className="text-sm font-semibold text-primary">
-                          {index + 1}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {entry.account && (
-                          <img
-                            src={getAvatarUrl(entry.author)}
-                            alt={entry.author}
-                            className="h-8 w-8 rounded-full"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        )}
-                        <Link
-                          to={`/accounts/${entry.author}`}
-                          className="font-medium hover:underline"
-                        >
-                          @{entry.author}
-                        </Link>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-semibold text-lg">
-                        {formatVests(entry.vest)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <div className="text-muted-foreground flex items-center gap-1">
-                        <FileText className="h-3 w-3" />
-                        Posts
-                      </div>
-                      <div className="font-medium">{entry.posts}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatVests(entry.post_vest)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground flex items-center gap-1">
-                        <MessageSquare className="h-3 w-3" />
-                        Replies
-                      </div>
-                      <div className="font-medium">{entry.replies}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatVests(entry.reply_vest)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Total Rewards</div>
-                      <div className="font-medium">{formatCurrency(entry.steem)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatCurrency(entry.sbd, 'SBD')}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Total Count</div>
-                      <div className="font-medium">{entry.count}</div>
-                    </div>
-                  </div>
+          {failed ? (
+            <div className="text-center py-12 text-muted-foreground">
+              The leaderboard for {grouping === 'monthly' ? date.slice(0, 7) : date} (UTC) could
+              not be loaded. Pick another day or grouping above.
+            </div>
+          ) : isLoading ? (
+            <div className="text-center py-12 text-muted-foreground">
+              Loading author leaderboard...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {leaderboard.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  No author data found.
                 </div>
-              ))
-            )}
-          </div>
+              ) : (
+                leaderboard.map((entry: AuthorLeaderboard, index: number) => (
+                  <div key={entry.author} className="border rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10">
+                          <span className="text-sm font-semibold text-primary">{index + 1}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {entry.account && (
+                            <img
+                              src={getAvatarUrl(entry.author)}
+                              alt={entry.author}
+                              className="h-8 w-8 rounded-full"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          )}
+                          <Link
+                            to={`/accounts/${entry.author}`}
+                            className="font-medium hover:underline"
+                          >
+                            @{entry.author}
+                          </Link>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        {/* STEEM equivalent of all three payout legs — the
+                            value the board is ranked by. Showing only steem+sbd
+                            here printed "0.000" for 100% power-up authors. */}
+                        <div className="font-semibold text-lg">
+                          {formatCurrency(entry.total_steem)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatCurrency(entry.vest, 'VESTS')} +{' '}
+                          {formatCurrency(entry.steem)} + {formatCurrency(entry.sbd, 'SBD')}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <div className="text-muted-foreground flex items-center gap-1">
+                          <FileText className="h-3 w-3" />
+                          Posts
+                        </div>
+                        <div className="font-medium">{entry.posts}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatCurrency(entry.post_vest, 'VESTS')}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground flex items-center gap-1">
+                          <MessageSquare className="h-3 w-3" />
+                          Replies
+                        </div>
+                        <div className="font-medium">{entry.replies}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatCurrency(entry.reply_vest, 'VESTS')}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Liquid Rewards</div>
+                        <div className="font-medium">{formatCurrency(entry.steem)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatCurrency(entry.sbd, 'SBD')}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Total Count</div>
+                        <div className="font-medium">{entry.count}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

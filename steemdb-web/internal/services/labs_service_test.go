@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -308,6 +310,204 @@ func TestVestsToSteem(t *testing.T) {
 	}
 	if got := vestsToSteem(27.5, 0); got != 27.5 {
 		t.Errorf("vestsToSteem with no rate = %v, want the input 27.5", got)
+	}
+}
+
+// TestRewardValuationSteemEquivalent pins the author-board ranking metric: all
+// three payout legs are converted to STEEM, VESTS by the props ratio and SBD by
+// the median price feed. Treating SBD as STEEM at par (2026-10: 1 SBD ≈ 9.6
+// STEEM) or dropping VESTS (52.4% of one day's author rewards) misranks the
+// board.
+func TestRewardValuationSteemEquivalent(t *testing.T) {
+	// Production snapshot 2026-10-26: 201,658,879.271 STEEM over
+	// 324,827,389,106.419916 VESTS, and a median feed of
+	// 58,455,023.535 SBD / 561,645,706.579 STEEM.
+	valuation := rewardValuation{
+		VestsRatio:  vestsToSteemRatio("201658879.271 STEEM", "324827389106.419916 VESTS"),
+		SteemPerSBD: 561645706.579 / 58455023.535,
+	}
+
+	// 1,126,437.341679 VESTS ≈ 699.3 STEEM (the audit's chain cross-check).
+	if got := valuation.steemEquivalent(1126437.341679, 0, 0); got < 698 || got > 700 {
+		t.Errorf("vests leg = %v STEEM, want ≈699.3", got)
+	}
+	// A pure SBD payout is worth ~9.6x its face value in STEEM.
+	if got := valuation.steemEquivalent(0, 0, 1); got < 9.5 || got > 9.7 {
+		t.Errorf("1 SBD = %v STEEM, want ≈9.6 (never 1)", got)
+	}
+	// All three legs add up.
+	if got, want := valuation.steemEquivalent(1126437.341679, 548.186, 0.5), 699.307+548.186+4.804; got < want-1 || got > want+1 {
+		t.Errorf("total = %v STEEM, want ≈%v", got, want)
+	}
+}
+
+// TestRewardValuationFailureBackoff pins the node-failure behaviour of the
+// author-board valuation cache. The previous shape held a mutex across two RPC
+// calls, so every concurrent request queued behind the same (up to 46s) refresh
+// and a single sick node became an endpoint-wide pile-up. Now: the refresh is
+// merged, failures are recorded and short-circuit the next attempt, and a
+// last-good valuation keeps being served instead of failing the board.
+func TestRewardValuationFailureBackoff(t *testing.T) {
+	// No RPC client: every refresh fails, which is the "node unreachable" shape
+	// minus the wait.
+	svc := &LabsService{}
+
+	start := time.Now()
+	if _, err := svc.rewardValuation(context.Background()); err == nil {
+		t.Fatal("cold cache with no client returned a valuation; want an error")
+	}
+	failedAt := svc.lastValuationFailure()
+	if failedAt.IsZero() {
+		t.Fatal("refresh failure was not recorded; every request would hit the node again")
+	}
+	if failedAt.Before(start) {
+		t.Errorf("failure timestamp %v predates the attempt at %v", failedAt, start)
+	}
+
+	// Inside the retry window the call short-circuits instead of retrying.
+	if _, err := svc.rewardValuation(context.Background()); !errors.Is(err, errValuationRecentFailure) {
+		t.Errorf("second call error = %v, want errValuationRecentFailure", err)
+	}
+
+	// With a last-good valuation the same failure serves the stale rate: a
+	// minute-stale conversion is within 0.05% of the truth, an error page is not.
+	svc.valMu.Lock()
+	svc.val = rewardValuation{VestsRatio: 1e-6, SteemPerSBD: 9.6}
+	svc.valAt = time.Now().Add(-2 * labsValuationTTL)
+	svc.valMu.Unlock()
+
+	got, err := svc.rewardValuation(context.Background())
+	if err != nil {
+		t.Fatalf("stale valuation not served on a failed refresh: %v", err)
+	}
+	if got.SteemPerSBD != 9.6 || got.VestsRatio != 1e-6 {
+		t.Errorf("stale valuation = %+v, want the cached {VestsRatio:1e-6 SteemPerSBD:9.6}", got)
+	}
+}
+
+// TestRewardValuationServesFreshCache pins that a valuation inside
+// labsValuationTTL is returned without any RPC: the author board must not put
+// two public-node round trips inside every request.
+func TestRewardValuationServesFreshCache(t *testing.T) {
+	svc := &LabsService{}
+	svc.valMu.Lock()
+	svc.val = rewardValuation{VestsRatio: 2e-6, SteemPerSBD: 9.5}
+	svc.valAt = time.Now()
+	svc.valMu.Unlock()
+
+	got, err := svc.rewardValuation(context.Background())
+	if err != nil {
+		t.Fatalf("fresh cache returned an error: %v", err)
+	}
+	if got.SteemPerSBD != 9.5 {
+		t.Errorf("valuation = %+v, want the cached SteemPerSBD 9.5", got)
+	}
+	if !svc.lastValuationFailure().IsZero() {
+		t.Error("a fresh cache hit recorded a failure")
+	}
+}
+
+// TestRewardValuationFollowerDoesNotWait pins the outage shape: while one
+// request owns a refresh, the others must return the last good valuation on the
+// same tick. Waiting 3s each would turn a hung node into a queue of 3s waits —
+// the pile-up the merge was supposed to remove.
+func TestRewardValuationFollowerDoesNotWait(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+
+	svc := &LabsService{
+		val:   rewardValuation{VestsRatio: 1e-6, SteemPerSBD: 9.6},
+		valAt: time.Now().Add(-2 * labsValuationTTL), // expired, still usable
+		valFetch: func() (rewardValuation, error) {
+			started <- struct{}{}
+			<-release // stands in for a hung node
+			return rewardValuation{VestsRatio: 2e-6, SteemPerSBD: 9.7}, nil
+		},
+	}
+
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := svc.rewardValuation(context.Background())
+		leaderErr <- err
+	}()
+	<-started // the leader is now inside the refresh
+
+	begin := time.Now()
+	got, err := svc.rewardValuation(context.Background())
+	elapsed := time.Since(begin)
+	if err != nil {
+		t.Fatalf("follower returned an error instead of the stale valuation: %v", err)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("follower waited %v; it must not queue behind the in-flight refresh", elapsed)
+	}
+	if got.SteemPerSBD != 9.6 || got.VestsRatio != 1e-6 {
+		t.Errorf("follower valuation = %+v, want the last good {VestsRatio:1e-6 SteemPerSBD:9.6}", got)
+	}
+
+	close(release)
+	if err := <-leaderErr; err != nil {
+		t.Errorf("leader refresh failed: %v", err)
+	}
+	// The completed refresh is cached and no failure is recorded.
+	if v, ok := svc.freshValuation(); !ok || v.SteemPerSBD != 9.7 {
+		t.Errorf("refreshed valuation not cached: %+v (ok=%v)", v, ok)
+	}
+	if !svc.lastValuationFailure().IsZero() {
+		t.Error("a successful refresh left a failure timestamp behind; the next refresh would be suppressed")
+	}
+}
+
+// TestRewardValuationRecoversAfterFailure pins that the retry suppression
+// expires: once labsValuationRetryTTL has passed the service asks the node
+// again, and a success clears the stale state.
+func TestRewardValuationRecoversAfterFailure(t *testing.T) {
+	svc := &LabsService{
+		valFailAt: time.Now(),
+		valFetch: func() (rewardValuation, error) {
+			return rewardValuation{VestsRatio: 3e-6, SteemPerSBD: 9.4}, nil
+		},
+	}
+
+	// Inside the window: suppressed, no fetch.
+	if _, err := svc.rewardValuation(context.Background()); !errors.Is(err, errValuationRecentFailure) {
+		t.Errorf("call inside the retry window = %v, want errValuationRecentFailure", err)
+	}
+
+	// Past the window the service retries and caches the result.
+	svc.valMu.Lock()
+	svc.valFailAt = time.Now().Add(-2 * labsValuationRetryTTL)
+	svc.valMu.Unlock()
+
+	got, err := svc.rewardValuation(context.Background())
+	if err != nil {
+		t.Fatalf("retry after the window failed: %v", err)
+	}
+	if got.SteemPerSBD != 9.4 {
+		t.Errorf("valuation = %+v, want the fresh SteemPerSBD 9.4", got)
+	}
+	if !svc.lastValuationFailure().IsZero() {
+		t.Error("a successful retry did not clear the failure timestamp")
+	}
+}
+
+// TestClampLabsLimit pins the row-cap policy shared by the labs boards: a
+// missing request gets the default, an oversized one is clamped, and a
+// negative or zero value never means "no limit".
+func TestClampLabsLimit(t *testing.T) {
+	cases := []struct {
+		requested, def, max, want int
+	}{
+		{0, 200, 500, 200},
+		{-5, 200, 500, 200},
+		{50, 200, 500, 50},
+		{500, 200, 500, 500},
+		{100000, 200, 500, 500},
+	}
+	for _, c := range cases {
+		if got := clampLabsLimit(c.requested, c.def, c.max); got != c.want {
+			t.Errorf("clampLabsLimit(%d, %d, %d) = %d, want %d", c.requested, c.def, c.max, got, c.want)
+		}
 	}
 }
 

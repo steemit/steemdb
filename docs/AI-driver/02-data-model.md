@@ -75,7 +75,7 @@ fields.
 | `feed_publish` / `pow` | MiscHandlers | `{block}|{publisher}` / `{block}-{worker}` | ⚠️ same-block collisions |
 | `follow` / `reblog` | CustomJSONHandler | filter-upsert `{_block, follower, following}` / `{_block, permlink, account}` | Pattern B; currently zero web readers |
 | `witness_vote` | WitnessVoteHandler | filter-upsert `{_ts, account, witness}` | filter contains `_ts` — same-block vote+unvote is the canonical Pattern-B conflict case |
-| `comment` | CommentHandler (+comment_options, author_reward writeback) + **comment_rescanner** (get_content snapshots) | `{author}/{permlink}` | the only collection on the unbuffered direct-write bypass (diff read-modify-write + matched semantics); `last_applied_op` dedup marker; dynamic fields (active_votes/depth/payout/…) only exist after rescan; `json_metadata` stays a raw string when the chain data is invalid (poison for rigid decoders) |
+| `comment` | CommentHandler (+comment_options, author_reward writeback) + **comment_rescanner** (get_content snapshots) | `{author}/{permlink}` | the only collection on the unbuffered direct-write bypass (diff read-modify-write + matched semantics); `last_applied_op` dedup marker; dynamic fields (active_votes/depth/payout/…) only exist after rescan; `parent_author`/`parent_permlink` are written by the handler on every op, so reply classification needs no rescan; `scanned` = last `get_content` snapshot (the rescanner's ~6h cycle, readable as "data as of"); `json_metadata` stays a raw string when the chain data is invalid (poison for rigid decoders) |
 | `account` | creation ops (stub upsert `{_id, _dirty:true}` via `QueueAccountCreate`; dirty marks via `QueueAccountDirty` never upsert — `docs/rules/account-doc-creation.md`) + **account_refresher** (full docs, `$unset _dirty`) | web everywhere | stub→full two-phase protocol; `scanned` = last refresh time |
 
 ### Snapshot layer (refresher)
@@ -92,6 +92,19 @@ refresher's flags ticker) holds the labs/flags leaderboard:
 top 200 authors plus their 10 heaviest downvoters. It exists because the
 underlying aggregation over `vote` (`weight<0`, ~7.7M documents) cannot run
 on a request path (see 04-web-service.md); `steemdb-web` only reads it.
+
+`status.clients-snapshot` (`_id=clients-snapshot`, 90-day window, written by
+the refresher's clients ticker) holds the labs/clients board:
+`data[] = {_id: {doy, year, month, day, dow}, clients: [{client, count,
+reward}], reward, total}` plus the snapshot metadata `updated_at`,
+`window_from`, `window_to`, `posts_scanned`, `posts_with_app`. `client` is the
+part of `comment.json_metadata.app` before the first `/` (a version suffix is
+optional — it must not gate attribution), `count` is attributed posts and
+`reward` is **SBD** (`total_payout_value + pending_payout_value`, summed with
+`$ifNull` guards because a missing payout field makes `$add` null). The
+metadata is what makes the snapshot auditable: `posts_scanned -
+posts_with_app` is the share of posts with no client signal, and `updated_at`
+is the only way to tell a stalled refresher from a fresh one.
 
 `stats_cache` is written by **web** (stats_service background counter) —
 self-contained. `tx_cache` is also written by **web** (tx_service read-through
