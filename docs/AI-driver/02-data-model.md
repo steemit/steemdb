@@ -36,6 +36,16 @@ fields.
 - Account identity is **`account._id`** (the name). The `name` field
   exists only on refreshed documents — never use it as a join key,
   search filter, or sort key.
+- **VESTS vs STEEM is a per-field fact, not a per-collection one.**
+  `curation_reward.reward`, `author_reward.vesting_payout`,
+  `benefactor_reward.reward` (= `comment_benefactor_reward.vesting_payout`),
+  `fill_vesting_withdraw.withdrawn` and `account.vesting_withdraw_rate` are
+  **VESTS**; `vesting_deposit.amount`,
+  `fill_vesting_withdraw.deposited`, `author_reward.steem_payout` are STEEM.
+  Readers must render VESTS as VESTS (`formatVests`) or convert with
+  `total_vesting_fund_steem / total_vesting_shares` from the same props
+  snapshot — never hand a VESTS number to a STEEM formatter (the labs power
+  down page was overstated ~1610x that way until 2026-10).
 
 ## Collection reference
 
@@ -67,10 +77,17 @@ fields.
 ### Snapshot layer (refresher)
 
 `status` (processor cursor `processor_height`; stats counters; clients
-snapshot), `witness` (30s top-100 rebuild; votes float), `witness_history`
-(daily, `_id=owner|YYYYMMDD`), `witness_misses`, `funds_history` (hourly),
-`clients_history`. `status` is cleanly partitioned by `_id` across writers —
-the model multi-writer collection.
+snapshot; flags snapshot), `witness` (30s top-100 rebuild; votes float),
+`witness_history` (daily, `_id=owner|YYYYMMDD`), `witness_misses`,
+`funds_history` (hourly), `clients_history`. `status` is cleanly
+partitioned by `_id` across writers — the model multi-writer collection.
+
+`status.flags-snapshot` (`_id=flags-snapshot`, daily, written by the
+refresher's flags ticker) holds the labs/flags leaderboard:
+`data[] = {author, count, voter_count, post_count, voters[{voter, count}]}` —
+top 200 authors plus their 10 heaviest downvoters. It exists because the
+underlying aggregation over `vote` (`weight<0`, ~7.7M documents) cannot run
+on a request path (see 04-web-service.md); `steemdb-web` only reads it.
 
 `stats_cache` is written by **web** (stats_service background counter) —
 self-contained. `tx_cache` is also written by **web** (tx_service read-through

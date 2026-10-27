@@ -401,9 +401,13 @@ export interface AuthorLeaderboard {
 
 export interface Flags {
   author: string;
+  /** Downvote op count (a voter may flag the same post more than once). */
   count: number;
-  flaggers?: string[];
-  posts?: string[];
+  /** Distinct accounts that flagged this author. */
+  voter_count: number;
+  /** Distinct posts flagged. */
+  post_count: number;
+  /** Top downvoters with their op counts. */
   voters?: Record<string, number>;
 }
 

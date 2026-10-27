@@ -23,7 +23,9 @@ type PowerDown struct {
 	Props         PowerDownProps  `json:"props"`
 }
 
-// PowerDownDay represents daily power down statistics
+// PowerDownDay represents daily power down statistics. Withdrawn is STEEM
+// (converted from the on-chain VESTS rate), Deposited is the exact STEEM paid
+// out by the operations themselves.
 type PowerDownDay struct {
 	DayOfYear int     `json:"doy"`
 	Year      int     `json:"year"`
@@ -35,7 +37,8 @@ type PowerDownDay struct {
 	Deposited float64 `json:"deposited,omitempty"`
 }
 
-// PowerDownUser represents user power down statistics
+// PowerDownUser represents user power down statistics. Withdrawn is STEEM
+// (converted from VESTS), Deposited is the exact STEEM paid out.
 type PowerDownUser struct {
 	User        string          `json:"user"`
 	Count       int             `json:"count"`
@@ -45,7 +48,10 @@ type PowerDownUser struct {
 	Account     *AccountSummary `json:"account,omitempty"`
 }
 
-// PowerDownProps represents blockchain properties for power down
+// PowerDownProps represents blockchain properties for power down. All three
+// are STEEM: Vesting is total_vesting_fund_steem (the STEEM locked in the
+// vesting fund, not total_vesting_shares), Liquid is current_supply minus the
+// vesting fund and the pending (already earmarked) vesting rewards.
 type PowerDownProps struct {
 	Current float64 `json:"current"`
 	Vesting float64 `json:"vesting"`
@@ -89,13 +95,17 @@ type AuthorLeaderboard struct {
 	Account    *AccountSummary `json:"account,omitempty"`
 }
 
-// Flags represents flagged accounts statistics
+// Flags represents flagged accounts statistics, served from the
+// status.flags-snapshot document maintained by steemdb-sync's refresher.
+// Count is the downvote op count (an op log, so one voter/one post can
+// contribute several), VoterCount/PostCount are the distinct voter and post
+// totals, and Voters carries the top downvoters with their op counts.
 type Flags struct {
-	Author   string         `json:"author"`
-	Count    int            `json:"count"`
-	Flaggers []string       `json:"flaggers,omitempty"`
-	Posts    []string       `json:"posts,omitempty"`
-	Voters   map[string]int `json:"voters,omitempty"`
+	Author     string         `json:"author"`
+	Count      int            `json:"count"`
+	VoterCount int            `json:"voter_count"`
+	PostCount  int            `json:"post_count"`
+	Voters     map[string]int `json:"voters,omitempty"`
 }
 
 // Clients represents client statistics
@@ -135,7 +145,8 @@ type BenefactorDate struct {
 	Total       int               `json:"total"`
 }
 
-// BenefactorEntry represents a benefactor entry
+// BenefactorEntry represents a benefactor entry. Reward is VESTS
+// (comment_benefactor_reward.vesting_payout), never STEEM.
 type BenefactorEntry struct {
 	Benefactor string  `json:"benefactor"`
 	Count      int     `json:"count"`

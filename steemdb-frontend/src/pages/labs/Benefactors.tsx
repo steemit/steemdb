@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Gift, Calendar } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { getBenefactors } from '../../lib/api';
-import { formatCurrency } from '../../lib/utils';
+import { formatVests } from '../../lib/utils';
 import type { Benefactors } from '../../types';
 
 const dayNames = ['', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -58,6 +58,9 @@ export function BenefactorsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Benefactor Rewards by Date</CardTitle>
+          <CardDescription>
+            Last 10 days (UTC). Rewards are paid in VESTS.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
@@ -82,7 +85,7 @@ export function BenefactorsPage() {
                     </div>
                     <div className="text-right">
                       <div className="font-semibold text-lg">
-                        {formatCurrency(date.reward)}
+                        {formatVests(date.reward)}
                       </div>
                     </div>
                   </div>
@@ -105,7 +108,7 @@ export function BenefactorsPage() {
                           </span>
                         </div>
                         <div className="text-sm font-medium">
-                          {formatCurrency(benefactor.reward)}
+                          {formatVests(benefactor.reward)}
                         </div>
                       </div>
                     ))}
