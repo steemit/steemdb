@@ -2,24 +2,26 @@ name: Test
 
 # Runs the Go test suites against a real MongoDB.
 #
-# Why a service container: the labs/rewards integration tests (the
-# `…AgainstMongo` cases in steemdb-web/internal/services and
-# steemdb-sync/internal/refresher) drive real aggregations against a real
-# mongod — they pin document shapes, index usage and VESTS/STEEM conversions
-# that a stub cannot express. They self-skip when STEEMDB_TEST_MONGO_URI is
-# unset, so before this workflow they only ever ran on a developer's machine:
-# a regression in an aggregation pipeline had nothing but human discipline
+# Why a service container: the mongo-backed suites (the `…AgainstMongo` cases in
+# steemdb-web/internal/services and steemdb-sync/internal/refresher, plus the
+# ingest handler tests in steemdb-sync/internal/pipeline) drive real
+# aggregations and real writes against a real mongod — they pin document
+# shapes, index usage and VESTS/STEEM conversions that a stub cannot express.
+# Every one of them reads STEEMDB_TEST_MONGO_URI and skips when it is unset, so
+# before this workflow they only ever ran on a developer's machine: a
+# regression in an aggregation pipeline had nothing but human discipline
 # between it and master.
 #
 # The service container is a plain Docker container started by the runner
-# (GitHub-hosted Linux runners have Docker; no docker-in-docker setup, no
-# `services` port publishing beyond the host mapping below). The job waits for
-# the health check before the first step runs.
+# (GitHub-hosted Linux runners have Docker; no docker-in-docker setup). It is
+# published on the host port below, the job waits for the health check before
+# the first step runs, and each matrix job gets its own runner and its own
+# container.
 #
-# mongo:4.4, not 6.0: 4.4 is what the production ingest stack and
-# docker-compose.db.test.yml run, and it is the server the aggregations were
-# verified against. The dev docker-compose.yml's 6.0 is known drift, not a
-# target.
+# mongo:4.4, not 6.0: 4.4 is what the production ingest stack
+# (docker-compose.production.yml) and docker-compose.db.test.yml run, and it is
+# the server the aggregations were verified against. The dev
+# docker-compose.yml's 6.0 is known drift, not a target.
 on:
   push:
     branches: [master]
@@ -33,6 +35,7 @@ jobs:
   go-test:
     name: go test (${{ matrix.module }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     strategy:
@@ -41,13 +44,12 @@ jobs:
         include:
           - module: steemdb-web
             packages: ./...
-          # steemdb-sync/test/... is deliberately out of scope: those legacy
-          # suites are not hermetic (test/unit/rpc calls https://api.steemit.com,
-          # test/unit/mongo hardcodes an admin credential against 127.0.0.1:27017,
-          # test/e2e needs a steemd Docker image) and the slow ones ignore -short,
-          # so they cannot gate a build as-is. The deterministic suites — internal
-          # packages and the command binaries, which is where the mongo-backed
-          # refresher tests live — all run here.
+          # steemdb-sync/test/... is deliberately out of test scope: those
+          # legacy suites are not hermetic (test/unit/rpc asserts against the
+          # public https://api.steemit.com, test/e2e needs a steemd Docker
+          # image) and the slow ones ignore -short, so they cannot gate a
+          # build as-is. The packages that run here — internal + cmd — carry
+          # every mongo-backed suite in this module.
           - module: steemdb-sync
             packages: ./internal/... ./cmd/...
     services:
@@ -55,18 +57,20 @@ jobs:
         image: mongo:4.4
         ports:
           - 27017:27017
-        # The official mongo image ships no HEALTHCHECK; without one the job
-        # would start before mongod accepts connections and the integration
-        # tests would fail on connect instead of on their assertions.
+        # The official mongo image ships no HEALTHCHECK, so without one the job
+        # would start before mongod accepts connections and the mongo-backed
+        # cases would skip on connect instead of failing on their assertions.
+        # Note: --health-cmd uses the legacy `mongo` shell, which mongo 6.0
+        # removed — switching the image tag means switching this to `mongosh`.
         options: >-
           --health-cmd "mongo --quiet --eval 'db.adminCommand({ping:1})'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
     env:
-      # Both modules derive their test database names from this URI and drop
-      # them on cleanup; each matrix job gets its own runner and its own mongo,
-      # so the two suites never share a database.
+      # One variable for every mongo-backed suite in the repo. The suites derive
+      # their own database names from it and drop them on cleanup, and the two
+      # matrix legs run on separate runners, so nothing is shared.
       STEEMDB_TEST_MONGO_URI: mongodb://127.0.0.1:27017
     steps:
       - name: Checkout
@@ -82,6 +86,9 @@ jobs:
 
       - name: Build
         working-directory: ${{ matrix.module }}
+        # Wider than the test scope on purpose (the sync leg's ./... also
+        # compiles test/...): a compile break is unambiguous, while executing
+        # the non-hermetic suites is what this workflow deliberately skips.
         run: go build ./...
 
       - name: Vet
@@ -91,27 +98,24 @@ jobs:
       - name: Test
         working-directory: ${{ matrix.module }}
         # -count=1: no cached results, the mongo-backed cases must actually run.
-        run: go test ${{ matrix.packages }} -count=1
-
-      - name: Verify the mongo-backed tests ran
-        working-directory: ${{ matrix.module }}
-        # A test that skips exits 0, so a green Test step alone does not prove
-        # the service container was reachable — it would also be green with
-        # every `…AgainstMongo` case silently skipped. Re-run that subset
-        # verbosely and require that at least one case passed and none skipped.
+        # -v + the skip assertion: a skipped test exits 0, so a plain `go test`
+        # would report green while proving nothing about the suites this
+        # workflow exists for. Any skip fails the job.
         run: |
-          out=$(go test -count=1 -v -run 'AgainstMongo' ${{ matrix.packages }}) || {
-            echo "$out"
+          out=$(go test ${{ matrix.packages }} -count=1 -v) || {
+            printf '%s\n' "$out"
             exit 1
           }
-          passes=$(printf '%s\n' "$out" | grep -c '^--- PASS:' || true)
-          skips=$(printf '%s\n' "$out" | grep -c '^--- SKIP:' || true)
-          echo "mongo-backed cases: $passes passed, $skips skipped"
-          if [ "$passes" -eq 0 ]; then
-            echo "::error::no mongo-backed case ran — is STEEMDB_TEST_MONGO_URI reaching the service container?"
+          printf '%s\n' "$out" | grep -E '^[[:space:]]*--- (PASS|SKIP|FAIL):' | tail -40
+          passes=$(printf '%s\n' "$out" | grep -cE '^[[:space:]]*--- PASS:' || true)
+          skips=$(printf '%s\n' "$out" | grep -cE '^[[:space:]]*--- SKIP:' || true)
+          echo "cases: $passes passed, $skips skipped"
+          if [ "$skips" -ne 0 ]; then
+            printf '%s\n' "$out" | grep -E '^[[:space:]]*--- SKIP:' || true
+            echo "::error::$skips case(s) skipped — a skipped test is a test that did not run. Fix the fixture, or gate the case behind an explicit opt-in instead of a silent skip."
             exit 1
           fi
-          if [ "$skips" -ne 0 ]; then
-            echo "::error::$skips mongo-backed case(s) skipped"
+          if [ "$passes" -eq 0 ]; then
+            echo "::error::no test case ran — is STEEMDB_TEST_MONGO_URI reaching the service container?"
             exit 1
           fi

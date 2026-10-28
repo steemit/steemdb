@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,13 +14,29 @@ import (
 	"github.com/steemit/steemdb-sync/internal/mongo"
 )
 
+// testMongoURI returns the integration-test MongoDB URI (STEEMDB_TEST_MONGO_URI),
+// the same convention steemdb-web's labs tests and this repo's refresher tests
+// use, so one environment variable points every mongo-backed suite at the same
+// server. When it is unset the tests skip, which is also what makes them
+// runnable in CI against a throwaway server rather than a local one with a
+// hardcoded credential.
+func testMongoURI(t *testing.T) string {
+	t.Helper()
+
+	uri := os.Getenv("STEEMDB_TEST_MONGO_URI")
+	if uri == "" {
+		t.Skip("no test mongo configured (STEEMDB_TEST_MONGO_URI)")
+	}
+	return uri
+}
+
 // createTestHandler creates a test handler with a real batcher
 // Note: This requires MongoDB to be running. If MongoDB is not available,
 // the tests will be skipped.
 func createTestHandler(t *testing.T) *IngestHandler {
 	cfg := &config.Config{
 		Mongo: config.MongoConfig{
-			URI:      "mongodb://admin:123456@127.0.0.1:27017/steemdb_test?authSource=admin",
+			URI:      testMongoURI(t),
 			Database: "steemdb_test",
 		},
 		Ingest: config.IngestConfig{
