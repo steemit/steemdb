@@ -1,6 +1,15 @@
 name: Build & Publish Images
 
-# Builds and publishes versioned Docker images on every push to master.
+# Builds and publishes versioned Docker images on every push to master — but
+# only from a commit whose Go test suites passed. The `test` job below calls
+# test.yml (the same reusable workflow that gates pull requests), and `build`
+# needs it, so a red suite leaves the registry untouched: a failed test shows
+# up as a skipped build, not as a `latest` that nobody wants to run.
+#
+# The test suites are NOT duplicated here and are not merely "also running":
+# cross-workflow `needs` does not exist, so the alternative was a `workflow_run`
+# trigger on Test, which cannot express "same commit, gated, in one run" as
+# directly as a called workflow does.
 #
 # Image naming: steemit/steemdb-{service}
 # Tag scheme:   {latest, branch}-{commit sha 7}   e.g.
@@ -19,7 +28,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate. Skipped/failed tests mean `build` never runs.
+  test:
+    uses: ./.github/workflows/test.yml
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

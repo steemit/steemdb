@@ -24,13 +24,14 @@ name: Test
 # (steemdb-sync/test/docker-compose/), which AGENTS.md already records as drift.
 # Both suites were run against 6.0 (248 + 172 cases, no skips) before switching.
 on:
-  push:
-    branches: [master]
+  # Pull requests run on their own. Pushes to master are NOT triggered here:
+  # docker-publish.yml calls this workflow as its gate, so a master commit is
+  # tested exactly once — inside the publish run, before any image is built.
+  # Re-adding a `push` trigger would run every master commit twice (once
+  # standalone, once inside the publish run) and still gate nothing.
   pull_request:
-
-concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
+  # Entry point for docker-publish.yml's `uses: ./.github/workflows/test.yml`.
+  workflow_call:
 
 jobs:
   go-test:
@@ -39,6 +40,12 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    # Job-level so the group can include the matrix leg: a single group shared
+    # by both legs would make them cancel each other. Keying per module keeps
+    # the original intent (a superseded run cancels the one it replaced).
+    concurrency:
+      group: test-${{ github.ref }}-${{ matrix.module }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
