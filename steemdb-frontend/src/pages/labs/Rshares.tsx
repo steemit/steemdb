@@ -73,8 +73,8 @@ export function RsharesPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Rshares Allocation</h1>
           <p className="text-muted-foreground">
-            Rshares received by posts created on the selected day — including votes cast on
-            later days
+            Cumulative rshares of posts created on the selected day — including the votes they
+            receive over the following 7 days
           </p>
         </div>
       </div>
@@ -95,9 +95,53 @@ export function RsharesPage() {
             />
             <span className="text-sm text-muted-foreground">UTC day</span>
           </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            A post pays out over 7 days, so a day&apos;s rshares keep growing after it ends.
-          </p>
+        </CardContent>
+      </Card>
+
+      {/* What the board counts — the label alone ("rshares of a day") reads as
+          "votes cast that day", which is a different and much smaller number. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>What This Measures</CardTitle>
+          <CardDescription>
+            How to read a row of this board, and what it leaves out
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="list-disc space-y-3 pl-5 text-sm text-muted-foreground">
+            <li>
+              <span className="font-medium text-foreground">Rshares are vote weight, not money.</span>{' '}
+              A vote turns part of the voter&apos;s mana into rshares — a full-weight vote spends 2%
+              of it — denominated in millionths of a VEST. They only decide how large a slice of the
+              reward fund a post can claim when it pays out; they are not a STEEM, SBD or SP amount.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">
+                This is the content view, not the voting view.
+              </span>{' '}
+              Each row is the rshares a voter put into posts <em>published</em> on the selected day.
+              A vote cast today on a post from six days ago counts under that post&apos;s
+              publication day, not today — so these totals are not &quot;rshares cast on this
+              day&quot;, and the two figures differ substantially.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">The day keeps growing for a week.</span>{' '}
+              A post pays out over 7 days, so a day&apos;s total keeps rising for 7 days after it
+              ends and only then settles: a recent day is a partial figure next to a settled one.
+              The numbers always describe each post&apos;s vote list as it stands now, not a
+              historical snapshot — Steem keeps no such series on chain.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Only upvotes are counted.</span>{' '}
+              Downvotes are left out of both the totals and the vote counts, so the board shows
+              gross upvote weight, not a net figure.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Percentages are of the whole day.</span>{' '}
+              A share is measured against every voter of that day, not against the rows listed
+              here — only the top rows are shown.
+            </li>
+          </ul>
         </CardContent>
       </Card>
 

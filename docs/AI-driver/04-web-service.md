@@ -93,6 +93,14 @@ neither — the API now exposes `count`, `voter_count`, `post_count` and the top
    screen (pitfall A5). The newest `rescanned_at` fails the same way — the
    rescanner's queue is rolling, so some post is always refreshed ~now. Only the
    oldest snapshot is a bound the whole day satisfies.
+   The board's label must name the **creation** day: it is the rshares a set of
+   posts *published* that day accumulated, including votes cast in the 7 days
+   after it — not the rshares *cast* that day, which is a different and much
+   smaller number (old posts keep drawing votes for a week). The page carries
+   this wording in the subtitle plus a "What This Measures" block that spells
+   out the unit (millionths of a VEST, not a token amount), the vote-side vs
+   content-side distinction, the 7-day growth, the positive-only filter and
+   that percentages are of the whole day rather than of the listed rows.
 7. **Classify on written fields, not on identifier spelling.** A reply is a
    payout whose `comment.parent_author` is non-empty, never a payout whose
    permlink starts with `re-` (client convention; 18.7% wrong on one day). The
