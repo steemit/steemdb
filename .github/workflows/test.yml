@@ -18,10 +18,11 @@ name: Test
 # the first step runs, and each matrix job gets its own runner and its own
 # container.
 #
-# mongo:4.4, not 6.0: 4.4 is what the production ingest stack
-# (docker-compose.production.yml) and docker-compose.db.test.yml run, and it is
-# the server the aggregations were verified against. The dev
-# docker-compose.yml's 6.0 is known drift, not a target.
+# mongo:6.0 — the version docker-compose.production.yml pins for the stack these
+# aggregations actually run in. Pin what runs in production: 4.4 only survives in
+# the root dev compose and the cold-start test stack
+# (steemdb-sync/test/docker-compose/), which AGENTS.md already records as drift.
+# Both suites were run against 6.0 (248 + 172 cases, no skips) before switching.
 on:
   push:
     branches: [master]
@@ -54,16 +55,15 @@ jobs:
             packages: ./internal/... ./cmd/...
     services:
       mongo:
-        image: mongo:4.4
+        image: mongo:6.0
         ports:
           - 27017:27017
         # The official mongo image ships no HEALTHCHECK, so without one the job
         # would start before mongod accepts connections and the mongo-backed
         # cases would skip on connect instead of failing on their assertions.
-        # Note: --health-cmd uses the legacy `mongo` shell, which mongo 6.0
-        # removed — switching the image tag means switching this to `mongosh`.
+        # mongosh, not the legacy `mongo` shell — 6.0 dropped the latter.
         options: >-
-          --health-cmd "mongo --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
