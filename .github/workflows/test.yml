@@ -92,3 +92,26 @@ jobs:
         working-directory: ${{ matrix.module }}
         # -count=1: no cached results, the mongo-backed cases must actually run.
         run: go test ${{ matrix.packages }} -count=1
+
+      - name: Verify the mongo-backed tests ran
+        working-directory: ${{ matrix.module }}
+        # A test that skips exits 0, so a green Test step alone does not prove
+        # the service container was reachable — it would also be green with
+        # every `…AgainstMongo` case silently skipped. Re-run that subset
+        # verbosely and require that at least one case passed and none skipped.
+        run: |
+          out=$(go test -count=1 -v -run 'AgainstMongo' ${{ matrix.packages }}) || {
+            echo "$out"
+            exit 1
+          }
+          passes=$(printf '%s\n' "$out" | grep -c '^--- PASS:' || true)
+          skips=$(printf '%s\n' "$out" | grep -c '^--- SKIP:' || true)
+          echo "mongo-backed cases: $passes passed, $skips skipped"
+          if [ "$passes" -eq 0 ]; then
+            echo "::error::no mongo-backed case ran — is STEEMDB_TEST_MONGO_URI reaching the service container?"
+            exit 1
+          fi
+          if [ "$skips" -ne 0 ]; then
+            echo "::error::$skips mongo-backed case(s) skipped"
+            exit 1
+          fi
