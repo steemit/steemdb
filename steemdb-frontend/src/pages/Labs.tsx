@@ -20,7 +20,7 @@ const labsFeatures = [
   {
     id: 'rshares',
     name: 'Rshares Allocation',
-    description: 'Analysis of rshares distribution',
+    description: 'Rshares accumulated by posts of each UTC day',
     icon: BarChart3,
     href: '/labs/rshares',
   },
