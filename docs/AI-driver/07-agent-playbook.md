@@ -147,6 +147,10 @@ causes incidents), S = structural (violation causes drift debt).
       a writer for collections web reads.
 - [ ] Ports: cold_ingest 8080/9090 collide with web's on a shared host.
 - [ ] Don't run e2e next to anything on host port 8080.
+- [ ] Images publish only from a commit whose Go suites passed:
+      `docker-publish.yml` calls `test.yml` as its gate, so a red suite
+      skips the build instead of pushing a `latest` (the test job is the
+      same reusable workflow that gates pull requests).
 
 ### Touch the batcher / processor core
 - [ ] Map lifecycle: entries die on success; no second bookkeeping map.
