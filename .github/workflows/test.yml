@@ -1,0 +1,94 @@
+name: Test
+
+# Runs the Go test suites against a real MongoDB.
+#
+# Why a service container: the labs/rewards integration tests (the
+# `…AgainstMongo` cases in steemdb-web/internal/services and
+# steemdb-sync/internal/refresher) drive real aggregations against a real
+# mongod — they pin document shapes, index usage and VESTS/STEEM conversions
+# that a stub cannot express. They self-skip when STEEMDB_TEST_MONGO_URI is
+# unset, so before this workflow they only ever ran on a developer's machine:
+# a regression in an aggregation pipeline had nothing but human discipline
+# between it and master.
+#
+# The service container is a plain Docker container started by the runner
+# (GitHub-hosted Linux runners have Docker; no docker-in-docker setup, no
+# `services` port publishing beyond the host mapping below). The job waits for
+# the health check before the first step runs.
+#
+# mongo:4.4, not 6.0: 4.4 is what the production ingest stack and
+# docker-compose.db.test.yml run, and it is the server the aggregations were
+# verified against. The dev docker-compose.yml's 6.0 is known drift, not a
+# target.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    name: go test (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: steemdb-web
+            packages: ./...
+          # steemdb-sync/test/... is deliberately out of scope: those legacy
+          # suites are not hermetic (test/unit/rpc calls https://api.steemit.com,
+          # test/unit/mongo hardcodes an admin credential against 127.0.0.1:27017,
+          # test/e2e needs a steemd Docker image) and the slow ones ignore -short,
+          # so they cannot gate a build as-is. The deterministic suites — internal
+          # packages and the command binaries, which is where the mongo-backed
+          # refresher tests live — all run here.
+          - module: steemdb-sync
+            packages: ./internal/... ./cmd/...
+    services:
+      mongo:
+        image: mongo:4.4
+        ports:
+          - 27017:27017
+        # The official mongo image ships no HEALTHCHECK; without one the job
+        # would start before mongod accepts connections and the integration
+        # tests would fail on connect instead of on their assertions.
+        options: >-
+          --health-cmd "mongo --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Both modules derive their test database names from this URI and drop
+      # them on cleanup; each matrix job gets its own runner and its own mongo,
+      # so the two suites never share a database.
+      STEEMDB_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Reads the `go` directive; both modules pin a newer `toolchain`, so
+          # the build actually runs on the toolchain version, not this one.
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Build
+        working-directory: ${{ matrix.module }}
+        run: go build ./...
+
+      - name: Vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ${{ matrix.packages }}
+
+      - name: Test
+        working-directory: ${{ matrix.module }}
+        # -count=1: no cached results, the mongo-backed cases must actually run.
+        run: go test ${{ matrix.packages }} -count=1
