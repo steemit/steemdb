@@ -11,11 +11,11 @@ import (
 // zero max, and unparsable mana strings (degrade to 0, not an error).
 func TestBuildAccountRC(t *testing.T) {
 	tests := []struct {
-		name       string
-		rc         steem.RCAccount
-		wantCurr   int64
-		wantMax    int64
-		wantPct    float64
+		name     string
+		rc       steem.RCAccount
+		wantCurr int64
+		wantMax  int64
+		wantPct  float64
 	}{
 		{
 			name: "normal values",

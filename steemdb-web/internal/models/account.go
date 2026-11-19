@@ -58,11 +58,11 @@ type Account struct {
 // proxied in real time from rc_api.find_rc_accounts (not stored in Mongo —
 // RC regenerates continuously, so a stored snapshot would go stale).
 type AccountRC struct {
-	Account      string  `json:"account"`
-	CurrentMana  int64   `json:"current_mana"`
-	MaxMana      int64   `json:"max_mana"`
-	Percentage   float64 `json:"percentage"`
-	LastUpdate   int64   `json:"last_update_time"`
+	Account     string  `json:"account"`
+	CurrentMana int64   `json:"current_mana"`
+	MaxMana     int64   `json:"max_mana"`
+	Percentage  float64 `json:"percentage"`
+	LastUpdate  int64   `json:"last_update_time"`
 }
 
 // AccountSummary represents a simplified account view for lists
