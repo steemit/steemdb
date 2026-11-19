@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/steemit/steemdb/web/internal/database"
 	"github.com/steemit/steemdb/web/internal/models"
@@ -18,10 +21,16 @@ import (
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
+// ErrRCAccountNotFound is returned when the Steem network answers
+// rc_api.find_rc_accounts with an empty rc_accounts array — the account does
+// not exist on chain. The handler maps exactly this error to 404; every other
+// error is an upstream RPC failure mapped to 502.
+var ErrRCAccountNotFound = errors.New("account not found")
+
 // rcCacheTTL bounds how long one account's RC snapshot may be served without
 // re-querying the node. RC regenerates continuously, so the value is stale
 // the moment it is fetched; the TTL only throttles page-refresh storms, not
-// the accuracy ceiling.
+// the accuracy ceiling. The same TTL applies to negative (not-found) entries.
 const rcCacheTTL = 30 * time.Second
 
 // rcCacheMaxEntries caps the cache; when reached, expired entries are swept
@@ -38,11 +47,18 @@ type AccountService struct {
 	rcCacheMu  sync.Mutex
 	rcCache    map[string]rcCacheEntry
 	rcCacheTTL time.Duration
+	// rcSingleFlight merges concurrent misses for the same account so a
+	// burst of requests issues one rc_api round trip instead of one each
+	// (same pattern as the labs reward-valuation cache).
+	rcSingleFlight singleflight.Group
 }
 
-// rcCacheEntry is one cached GetAccountRC response with its expiry.
+// rcCacheEntry is one cached GetAccountRC response with its expiry. A
+// notFound entry caches the absence of the account (chain-stable until the
+// account is created) so hot misses don't re-run the RPC retry loop.
 type rcCacheEntry struct {
 	data      *models.AccountRC
+	notFound  bool
 	expiresAt time.Time
 }
 
@@ -60,27 +76,50 @@ func NewAccountService(db *database.MongoDB, steemClient *steem.Client, logger u
 
 // GetAccountRC returns the live Resource Credit state for one account,
 // proxied from rc_api.find_rc_accounts through the shared Steem RPC client.
-// Responses are cached for rcCacheTTL to keep page-refresh storms from
-// hammering the RPC nodes.
+// Responses are cached for rcCacheTTL; concurrent misses for the same account
+// are merged by singleflight; not-found results are negatively cached with
+// the same TTL, while upstream RPC failures are never cached (the next
+// request retries the node).
 func (s *AccountService) GetAccountRC(ctx context.Context, name string) (*models.AccountRC, error) {
+	now := time.Now()
 	s.rcCacheMu.Lock()
-	if e, ok := s.rcCache[name]; ok && time.Now().Before(e.expiresAt) {
-		s.rcCacheMu.Unlock()
-		return e.data, nil
-	}
+	entry, hit := s.rcCache[name]
 	s.rcCacheMu.Unlock()
+	if hit {
+		if entry.notFound {
+			if now.Before(entry.expiresAt) {
+				return nil, ErrRCAccountNotFound
+			}
+		} else if now.Before(entry.expiresAt) {
+			return entry.data, nil
+		}
+	}
 
-	rc, err := s.steemClient.GetRCAccount(name)
+	value, err, _ := s.rcSingleFlight.Do(name, func() (interface{}, error) {
+		rc, err := s.steemClient.GetRCAccount(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get RC account: %w", err)
+		}
+		if rc == nil {
+			s.cacheRC(name, rcCacheEntry{notFound: true})
+			return nil, ErrRCAccountNotFound
+		}
+		data := buildAccountRC(rc)
+		s.cacheRC(name, rcCacheEntry{data: data})
+		return data, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get RC account: %w", err)
+		return nil, err
 	}
-	if rc == nil {
-		return nil, fmt.Errorf("account not found: %s", name)
-	}
+	return value.(*models.AccountRC), nil
+}
 
-	data := buildAccountRC(rc)
-
+// cacheRC stores one entry keyed by account name with a fresh expiry,
+// sweeping expired entries first when the cache is at capacity.
+func (s *AccountService) cacheRC(name string, entry rcCacheEntry) {
+	entry.expiresAt = time.Now().Add(s.rcCacheTTL)
 	s.rcCacheMu.Lock()
+	defer s.rcCacheMu.Unlock()
 	if len(s.rcCache) >= rcCacheMaxEntries {
 		now := time.Now()
 		for k, e := range s.rcCache {
@@ -89,10 +128,7 @@ func (s *AccountService) GetAccountRC(ctx context.Context, name string) (*models
 			}
 		}
 	}
-	s.rcCache[name] = rcCacheEntry{data: data, expiresAt: time.Now().Add(s.rcCacheTTL)}
-	s.rcCacheMu.Unlock()
-
-	return data, nil
+	s.rcCache[name] = entry
 }
 
 // buildAccountRC projects the raw rc_api payload into the API shape. Mana
@@ -114,14 +150,20 @@ func buildAccountRC(rc *steem.RCAccount) *models.AccountRC {
 	}
 }
 
-// parseRCMana parses an RC mana string ("5642263478103") to int64, 0 on
-// anything unparsable.
+// parseRCMana parses an RC mana string to int64. The wire type is
+// uint64-in-string, so it is parsed as uint64: unparsable or negative values
+// degrade to 0, and a value above MaxInt64 saturates at MaxInt64 (unreachable
+// in practice — observed magnitudes are ~1e12-1e14) instead of silently
+// reading as 0.
 func parseRCMana(s string) int64 {
-	v, err := strconv.ParseInt(s, 10, 64)
+	v, err := strconv.ParseUint(s, 10, 64)
 	if err != nil {
 		return 0
 	}
-	return v
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(v)
 }
 
 // GetAccount retrieves an account by name. Decoded into a generic map: the

@@ -2,9 +2,11 @@ package steem
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -20,29 +22,27 @@ type RCAccount struct {
 	MaxRC     string  `json:"max_rc"`
 }
 
-// rcHTTPClient is shared by all rc_api posts. Its Timeout matches
-// rpcAttemptTimeout so an attempt abandoned by callWithAttemptTimeout still
-// self-terminates instead of lingering on a hung connection.
-var rcHTTPClient = &http.Client{Timeout: rpcAttemptTimeout}
-
 // rcFindAccounts posts one pre-marshaled rc_api.find_rc_accounts request to
 // the given node and returns the first rc_account, or (nil, nil) when the
 // node answers with an empty rc_accounts array (account does not exist on
-// chain).
-func rcFindAccounts(node string, body []byte) (*RCAccount, error) {
-	req, err := http.NewRequest(http.MethodPost, node, bytes.NewReader(body))
+// chain). ctx cancels the in-flight HTTP request when the caller's context
+// is done (e.g. a disconnected browser request), so the node stops working
+// for nobody.
+func rcFindAccounts(ctx context.Context, client *http.Client, node string, body []byte) (*RCAccount, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, node, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := rcHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
 		return nil, fmt.Errorf("rc_api http status %d", resp.StatusCode)
 	}
 
@@ -75,7 +75,10 @@ func rcFindAccounts(node string, body []byte) (*RCAccount, error) {
 // The steemgosdk Call surface only emits array params, so this call posts the
 // JSON-RPC body directly. Node rotation, per-attempt timeout and backoff
 // mirror rpcCall's semantics (same constants, same abandon-and-rotate shape).
-func (c *Client) GetRCAccount(account string) (*RCAccount, error) {
+// ctx bounds the whole call: a cancelled context fails the in-flight attempt
+// and short-circuits the remaining retries (the backoff sleeps are bounded
+// to 6 units total, so cancellation latency stays small regardless).
+func (c *Client) GetRCAccount(ctx context.Context, account string) (*RCAccount, error) {
 	body, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "rc_api.find_rc_accounts",
@@ -88,9 +91,12 @@ func (c *Client) GetRCAccount(account string) (*RCAccount, error) {
 
 	var lastErr error
 	for attempt := 0; attempt <= rpcMaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		node, _ := c.currentNodeAndAPI()
 		result, err := callWithAttemptTimeout(c.attemptTimeout, func() (*RCAccount, error) {
-			return rcFindAccounts(node, body)
+			return rcFindAccounts(ctx, c.rcHTTP, node, body)
 		})
 		if err == nil {
 			return result, nil

@@ -51,6 +51,31 @@ func TestBuildAccountRC(t *testing.T) {
 			wantMax:  0,
 			wantPct:  0,
 		},
+		{
+			name: "negative mana string degrades to zero",
+			rc: steem.RCAccount{
+				Account:   "negative",
+				RCManabar: steem.Manabar{CurrentMana: "-5", LastUpdateTime: 3},
+				MaxRC:     "100",
+			},
+			wantCurr: 0,
+			wantMax:  100,
+			wantPct:  0,
+		},
+		{
+			// 1e19 is within uint64 range but above MaxInt64, so it
+			// exercises the saturation branch — a value beyond MaxUint64
+			// would take the parse-error path instead.
+			name: "value above MaxInt64 saturates instead of reading as zero",
+			rc: steem.RCAccount{
+				Account:   "huge",
+				RCManabar: steem.Manabar{CurrentMana: "10000000000000000000", LastUpdateTime: 4},
+				MaxRC:     "10000000000000000000",
+			},
+			wantCurr: math.MaxInt64,
+			wantMax:  math.MaxInt64,
+			wantPct:  100,
+		},
 	}
 
 	for _, tt := range tests {

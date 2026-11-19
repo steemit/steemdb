@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -127,8 +128,10 @@ func (h *AccountHandler) GetTopAccounts(c *gin.Context) {
 }
 
 // GetAccountRC handles GET /api/v1/accounts/:name/rc — the live Resource
-// Credit state proxied from rc_api (not stored in Mongo). Errors map to 404
-// "Account not found", same convention as GetAccount.
+// Credit state proxied from rc_api. Unlike the Mongo-backed GetAccount (whose
+// only failure mode is absence), this endpoint talks to a live RPC network:
+// only the typed not-found sentinel maps to 404, upstream failures map to
+// 502 so a node outage is not misread as a nonexistent account.
 func (h *AccountHandler) GetAccountRC(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
@@ -138,8 +141,12 @@ func (h *AccountHandler) GetAccountRC(c *gin.Context) {
 
 	rc, err := h.accountService.GetAccountRC(c.Request.Context(), name)
 	if err != nil {
+		if errors.Is(err, services.ErrRCAccountNotFound) {
+			h.respondWithError(c, http.StatusNotFound, "Account not found")
+			return
+		}
 		h.logger.Error("Failed to get account RC", utils.String("name", name), utils.Error(err))
-		h.respondWithError(c, http.StatusNotFound, "Account not found")
+		h.respondWithError(c, http.StatusBadGateway, "Failed to fetch Resource Credits from the Steem RPC network")
 		return
 	}
 
