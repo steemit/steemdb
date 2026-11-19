@@ -169,6 +169,14 @@ export interface TransactionDetail {
 }
 
 // Account types
+export interface AccountRC {
+  account: string;
+  current_mana: number;
+  max_mana: number;
+  percentage: number;
+  last_update_time: number;
+}
+
 export interface Account {
   id: number;
   name: string;

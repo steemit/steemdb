@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { getAccounts, getAccount, getAccountHistory, getWitness } from '../lib/api';
+import { getAccounts, getAccount, getAccountRC, getAccountHistory, getWitness } from '../lib/api';
 import { formatNumber, formatTimeAgo, formatDate, formatCurrency, formatReputation, getAvatarUrl, formatVests } from '../lib/utils';
 import { useFavoritesStore } from '../store';
 
@@ -265,6 +265,17 @@ export function AccountDetailPage() {
   });
   const witness = witnessData?.success && witnessData.data ? witnessData.data : undefined;
 
+  // Live Resource Credit state (rc_api proxy). Non-critical display data:
+  // fail silently and hide the card on RPC errors, same convention as the
+  // witness section above.
+  const { data: rcData } = useQuery({
+    queryKey: ['account-rc', accountName],
+    queryFn: () => getAccountRC(accountName),
+    enabled: !!accountName,
+    retry: false,
+  });
+  const rc = rcData?.success && rcData.data ? rcData.data : undefined;
+
 
   if (accountLoading) {
     return (
@@ -408,6 +419,39 @@ export function AccountDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {rc && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Resource Credits</CardTitle>
+              <CardDescription>Live RC mana for chain operations</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Percentage and bar clamp together so current>max data can
+                  never render as ">100%" next to a full bar. */}
+              <div className="flex justify-between items-baseline">
+                <span className="text-muted-foreground">Remaining</span>
+                <span className="font-medium text-lg">
+                  {Math.min(100, Math.max(0, rc.percentage)).toFixed(1)}%
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-primary h-2 rounded-full"
+                  style={{ width: `${Math.min(100, Math.max(0, rc.percentage))}%` }}
+                />
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Current Mana</span>
+                <span className="font-medium">{formatMana(rc.current_mana)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Max Mana</span>
+                <span className="font-medium">{formatMana(rc.max_mana)}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {witness && (
@@ -602,6 +646,14 @@ export function AccountDetailPage() {
       </Card>
     </div>
   );
+}
+
+// formatMana renders RC mana counts in adaptive T/G units — raw RC values
+// are typically 1e12-1e15 and unreadable with plain thousand separators.
+function formatMana(value: number): string {
+  if (value >= 1e12) return `${(value / 1e12).toFixed(2)} T RC`;
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)} G RC`;
+  return formatNumber(value);
 }
 
 // formatOpSummary renders the backend-generated summary map as readable text

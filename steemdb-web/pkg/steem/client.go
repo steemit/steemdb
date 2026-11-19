@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,6 +79,13 @@ type Client struct {
 	// keep timeout/retry tests fast. Production code uses the constants.
 	attemptTimeout time.Duration
 	backoffUnit    time.Duration
+
+	// rcHTTP backs the raw rc_api post (pkg/steem/rc.go). Its timeout
+	// mirrors attemptTimeout so an attempt abandoned by
+	// callWithAttemptTimeout still self-terminates; a per-instance field
+	// (not a package var) keeps the test seam coherent — shortening
+	// attemptTimeout in tests shortens this too.
+	rcHTTP *http.Client
 }
 
 // NewClient creates a new Steem RPC client using steemgosdk
@@ -100,8 +108,18 @@ func NewClient(nodes []string, logger utils.Logger) *Client {
 		apis:           apis,
 		attemptTimeout: rpcAttemptTimeout,
 		backoffUnit:    rpcBackoffUnit,
+		rcHTTP:         &http.Client{Timeout: rpcAttemptTimeout},
 	}
 }
+
+// AttemptTimeoutForTest overrides the per-attempt timeout from tests outside
+// this package (steem's own tests use the unexported field directly).
+// Production code must not call this.
+func (c *Client) AttemptTimeoutForTest(d time.Duration) { c.attemptTimeout = d }
+
+// BackoffUnitForTest overrides the retry backoff unit from tests outside this
+// package. Production code must not call this.
+func (c *Client) BackoffUnitForTest(d time.Duration) { c.backoffUnit = d }
 
 // currentNodeAndAPI returns the name and API instance of the node the next
 // attempt will hit, read together under one lock so a timeout error can name
