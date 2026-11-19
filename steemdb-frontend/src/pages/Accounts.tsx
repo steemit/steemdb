@@ -427,9 +427,13 @@ export function AccountDetailPage() {
               <CardDescription>Live RC mana for chain operations</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* Percentage and bar clamp together so current>max data can
+                  never render as ">100%" next to a full bar. */}
               <div className="flex justify-between items-baseline">
                 <span className="text-muted-foreground">Remaining</span>
-                <span className="font-medium text-lg">{rc.percentage.toFixed(1)}%</span>
+                <span className="font-medium text-lg">
+                  {Math.min(100, Math.max(0, rc.percentage)).toFixed(1)}%
+                </span>
               </div>
               <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
                 <div
