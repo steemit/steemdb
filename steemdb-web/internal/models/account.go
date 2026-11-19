@@ -54,6 +54,17 @@ type Account struct {
 	Scanned                time.Time              `json:"scanned" bson:"scanned"`
 }
 
+// AccountRC represents the live Resource Credit state of an account,
+// proxied in real time from rc_api.find_rc_accounts (not stored in Mongo —
+// RC regenerates continuously, so a stored snapshot would go stale).
+type AccountRC struct {
+	Account      string  `json:"account"`
+	CurrentMana  int64   `json:"current_mana"`
+	MaxMana      int64   `json:"max_mana"`
+	Percentage   float64 `json:"percentage"`
+	LastUpdate   int64   `json:"last_update_time"`
+}
+
 // AccountSummary represents a simplified account view for lists
 type AccountSummary struct {
 	Name          string     `json:"name"`

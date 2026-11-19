@@ -126,6 +126,26 @@ func (h *AccountHandler) GetTopAccounts(c *gin.Context) {
 	h.respondWithSuccess(c, accounts)
 }
 
+// GetAccountRC handles GET /api/v1/accounts/:name/rc — the live Resource
+// Credit state proxied from rc_api (not stored in Mongo). Errors map to 404
+// "Account not found", same convention as GetAccount.
+func (h *AccountHandler) GetAccountRC(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		h.respondWithError(c, http.StatusBadRequest, "Account name is required")
+		return
+	}
+
+	rc, err := h.accountService.GetAccountRC(c.Request.Context(), name)
+	if err != nil {
+		h.logger.Error("Failed to get account RC", utils.String("name", name), utils.Error(err))
+		h.respondWithError(c, http.StatusNotFound, "Account not found")
+		return
+	}
+
+	h.respondWithSuccess(c, rc)
+}
+
 // GetAccountHistory handles GET /api/v1/accounts/:name/history
 func (h *AccountHandler) GetAccountHistory(c *gin.Context) {
 	name := c.Param("name")

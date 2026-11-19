@@ -15,7 +15,7 @@ import (
 // SetupRoutes configures all API routes
 func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Client, logger utils.Logger, config *utils.Config) {
 	// Initialize services
-	accountService := services.NewAccountService(db, logger)
+	accountService := services.NewAccountService(db, steemClient, logger)
 	blockService := services.NewBlockService(db, steemClient, logger)
 	dashboardService := services.NewDashboardService(db, steemClient, logger)
 	commentService := services.NewCommentService(db, logger)
@@ -52,6 +52,7 @@ func SetupRoutes(router *gin.Engine, db *database.MongoDB, steemClient *steem.Cl
 			accounts.GET("/top", accountHandler.GetTopAccounts)
 			accounts.GET("/:name", accountHandler.GetAccount)
 			accounts.GET("/:name/history", accountHandler.GetAccountHistory)
+			accounts.GET("/:name/rc", accountHandler.GetAccountRC)
 		}
 
 		// Block routes

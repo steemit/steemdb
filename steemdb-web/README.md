@@ -121,6 +121,7 @@ Base URL: `/api/v1`
 - `GET /accounts/top?criteria=` - Top accounts (reputation/vests/balance/posts)
 - `GET /accounts/:name` - Get account information
 - `GET /accounts/:name/history` - Get account operation history
+- `GET /accounts/:name/rc` - Live Resource Credit state (proxied from `rc_api.find_rc_accounts`; ~30s server-side cache)
 
 #### Blocks
 - `GET /blocks` - List blocks (page/page_size, sort_by/sort_order; limit/sort/order aliases)

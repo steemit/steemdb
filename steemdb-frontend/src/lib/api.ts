@@ -1,6 +1,7 @@
 import type { 
   ApiResponse, 
   Account, 
+  AccountRC,
   Block,
   BlockSummary,
   AccountOperation,
@@ -124,6 +125,11 @@ class ApiClient {
     });
 
     return this.request<Account[]>(`/v1/accounts?${searchParams}`);
+  }
+
+  // Live Resource Credit state proxied from rc_api (real-time, not stored).
+  async getAccountRC(username: string): Promise<ApiResponse<AccountRC>> {
+    return this.request<AccountRC>(`/v1/accounts/${username}/rc`);
   }
 
   async getAccountHistory(username: string, params: PaginationParams): Promise<ApiResponse<AccountOperation[]>> {
@@ -382,6 +388,7 @@ const boundClient: ApiClient = new Proxy(apiClient, {
 // Export individual methods for easier use
 export const {
   getAccount,
+  getAccountRC,
   getAccounts,
   getAccountHistory,
   getBlock,

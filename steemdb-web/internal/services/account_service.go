@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -12,21 +14,114 @@ import (
 
 	"github.com/steemit/steemdb/web/internal/database"
 	"github.com/steemit/steemdb/web/internal/models"
+	"github.com/steemit/steemdb/web/pkg/steem"
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
 
+// rcCacheTTL bounds how long one account's RC snapshot may be served without
+// re-querying the node. RC regenerates continuously, so the value is stale
+// the moment it is fetched; the TTL only throttles page-refresh storms, not
+// the accuracy ceiling.
+const rcCacheTTL = 30 * time.Second
+
+// rcCacheMaxEntries caps the cache; when reached, expired entries are swept
+// before inserting (best effort — a pathological burst of distinct accounts
+// within one TTL window can still exceed the cap).
+const rcCacheMaxEntries = 4096
+
 // AccountService handles account-related operations
 type AccountService struct {
-	db     *database.MongoDB
-	logger utils.Logger
+	db          *database.MongoDB
+	steemClient *steem.Client
+	logger      utils.Logger
+
+	rcCacheMu  sync.Mutex
+	rcCache    map[string]rcCacheEntry
+	rcCacheTTL time.Duration
 }
 
-// NewAccountService creates a new account service
-func NewAccountService(db *database.MongoDB, logger utils.Logger) *AccountService {
+// rcCacheEntry is one cached GetAccountRC response with its expiry.
+type rcCacheEntry struct {
+	data      *models.AccountRC
+	expiresAt time.Time
+}
+
+// NewAccountService creates a new account service. steemClient backs the
+// live Resource Credit endpoint (rc_api proxy); everything else reads Mongo.
+func NewAccountService(db *database.MongoDB, steemClient *steem.Client, logger utils.Logger) *AccountService {
 	return &AccountService{
-		db:     db,
-		logger: logger,
+		db:          db,
+		steemClient: steemClient,
+		logger:      logger,
+		rcCache:     make(map[string]rcCacheEntry),
+		rcCacheTTL:  rcCacheTTL,
 	}
+}
+
+// GetAccountRC returns the live Resource Credit state for one account,
+// proxied from rc_api.find_rc_accounts through the shared Steem RPC client.
+// Responses are cached for rcCacheTTL to keep page-refresh storms from
+// hammering the RPC nodes.
+func (s *AccountService) GetAccountRC(ctx context.Context, name string) (*models.AccountRC, error) {
+	s.rcCacheMu.Lock()
+	if e, ok := s.rcCache[name]; ok && time.Now().Before(e.expiresAt) {
+		s.rcCacheMu.Unlock()
+		return e.data, nil
+	}
+	s.rcCacheMu.Unlock()
+
+	rc, err := s.steemClient.GetRCAccount(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get RC account: %w", err)
+	}
+	if rc == nil {
+		return nil, fmt.Errorf("account not found: %s", name)
+	}
+
+	data := buildAccountRC(rc)
+
+	s.rcCacheMu.Lock()
+	if len(s.rcCache) >= rcCacheMaxEntries {
+		now := time.Now()
+		for k, e := range s.rcCache {
+			if now.After(e.expiresAt) {
+				delete(s.rcCache, k)
+			}
+		}
+	}
+	s.rcCache[name] = rcCacheEntry{data: data, expiresAt: time.Now().Add(s.rcCacheTTL)}
+	s.rcCacheMu.Unlock()
+
+	return data, nil
+}
+
+// buildAccountRC projects the raw rc_api payload into the API shape. Mana
+// values arrive as uint64-in-string; unparsable values degrade to 0 rather
+// than failing the whole endpoint (the percentage just reads as 0%).
+func buildAccountRC(rc *steem.RCAccount) *models.AccountRC {
+	current := parseRCMana(rc.RCManabar.CurrentMana)
+	max := parseRCMana(rc.MaxRC)
+	percentage := 0.0
+	if max > 0 && current >= 0 {
+		percentage = float64(current) / float64(max) * 100
+	}
+	return &models.AccountRC{
+		Account:     rc.Account,
+		CurrentMana: current,
+		MaxMana:     max,
+		Percentage:  percentage,
+		LastUpdate:  rc.RCManabar.LastUpdateTime,
+	}
+}
+
+// parseRCMana parses an RC mana string ("5642263478103") to int64, 0 on
+// anything unparsable.
+func parseRCMana(s string) int64 {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 // GetAccount retrieves an account by name. Decoded into a generic map: the
