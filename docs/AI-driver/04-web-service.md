@@ -192,6 +192,17 @@ Conventions:
   must be whitelisted.
 - **Counting large collections**: `EstimatedDocumentCount` for empty
   filters (dashboard and the WS `state` channel both do).
+- **Charts/stats windows are block ranges, not timestamps**: Steem emits one
+  block per 3s slot (a missed slot still consumes a block number), so
+  `block_num` deltas and durations are interchangeable — N blocks == 3N
+  seconds. `/operations/stats` and the per-hour rates in `/blocks/stats`
+  convert the requested window into a `block_num` range anchored at the local
+  head, which is what makes them index-servable (`operations` has
+  `{op_type:1, block_num:-1}`; a 2000-block histogram is ~23ms on production,
+  an unbounded one would be a 2.2B-doc scan). `/operations/stats` therefore
+  requires a bounded window (`range`, default 24h, 1h..7d, invalid → 400) and
+  counts every document including virtual ops; `/blocks/stats` reports
+  `totals_estimated: true` because its totals are metadata estimates.
 - Error mapping: decode errors are not "not found" — distinguish
   `ErrNoDocuments` from corruption before returning 404.
 
