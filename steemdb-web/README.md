@@ -125,7 +125,7 @@ Base URL: `/api/v1`
 #### Blocks
 - `GET /blocks` - List blocks (page/page_size, sort_by/sort_order; limit/sort/order aliases)
 - `GET /blocks/latest` - Get latest blocks
-- `GET /blocks/stats` - Block statistics (placeholder data)
+- `GET /blocks/stats` - Block statistics: latest/irreversible block (irreversible is head−20, an approximation — `/stats/props` carries the authoritative LIB), `total_transactions` / `total_operations` from `EstimatedDocumentCount` (hence `totals_estimated: true`), and real per-hour rates counted over the last 1200 blocks
 - `GET /blocks/:number` - Get specific block (headers enriched from the steem RPC for cold-ingested blocks)
 - `GET /blocks/:number/virtual-ops` - Get the virtual operations of a block (always served from the steem RPC; virtual ops are not persisted locally)
 
@@ -157,7 +157,7 @@ Base URL: `/api/v1`
 - `GET /dashboard` - Dashboard aggregate (local/ upstream with per-probe degradation)
 - `GET /search?q=&type=` - Global search
 - `GET /charts/accounts/growth` / `GET /charts/blocks/production` / `GET /charts/transactions/volume` / `GET /charts/witnesses/voting` - Chart data
-- `GET /operations/stats` - Operation type statistics (currently returns placeholder data)
+- `GET /operations/stats?range=24h` - Operation-type distribution over a bounded window (`range` accepts Go durations plus `d`: `1h`..`7d`, default `24h`; anything else is 400). Counts every document in `operations`, virtual ops included, and reports the percentage of the window's own total. The window is index-served via `block_num` — do not call it without a range in mind: an unbounded histogram would scan 2.2B documents
 - `GET /status`, `GET /health` - Service status
 
 #### Legacy API

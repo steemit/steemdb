@@ -3,7 +3,11 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -15,6 +19,29 @@ import (
 	"github.com/steemit/steemdb/web/pkg/steem"
 	"github.com/steemit/steemdb/web/pkg/utils"
 )
+
+// Steem produces one block per 3-second slot, and a skipped slot still consumes
+// a block number, so a block_num delta and elapsed time are interchangeable:
+// N blocks == 3N seconds. Both stats endpoints use that identity to turn a
+// duration window into an index-servable block_num range.
+const steemBlockInterval = 3 * time.Second
+
+const (
+	defaultStatsRange = 24 * time.Hour
+	minStatsRange     = time.Hour
+	maxStatsRange     = 7 * 24 * time.Hour
+	// statsAggregateTimeout bounds the on-demand operation histogram. The
+	// supported windows cost tens to a few hundred milliseconds on production
+	// (23ms per 2000 blocks, ~120k ops/day), so 10s only ever fires when
+	// something pathological happens (cold cache, replica stall) — failing fast
+	// beats pinning a request handler.
+	statsAggregateTimeout = 10 * time.Second
+)
+
+// ErrInvalidStatsRange marks a /operations/stats range parameter that cannot be
+// parsed or is outside the supported bounds. Handlers map it to HTTP 400; every
+// other error is a 500.
+var ErrInvalidStatsRange = errors.New("invalid stats range")
 
 // BlockService handles block-related operations
 type BlockService struct {
@@ -378,39 +405,202 @@ func (s *BlockService) GetBlockOperations(ctx context.Context, blockNum int64, p
 	return operations, nil
 }
 
-// GetBlockStats retrieves blockchain statistics
+// GetBlockStats retrieves blockchain statistics.
+//
+// The two totals are estimates, not exact counts: operations holds ~2.2B
+// documents and transactions ~3.4M, so an exact countDocuments would scan the
+// whole collection on every request. EstimatedDocumentCount reads the
+// collection metadata instead (instant) and is exact for small collections; the
+// response carries totals_estimated: true so clients can label the number.
+//
+// The per-hour rates come from the last 1200 blocks (one hour at 3s/slot) and
+// are real counts over that index-backed window.
 func (s *BlockService) GetBlockStats(ctx context.Context) (*models.BlockStats, error) {
-	collection := s.db.Collection("blocks")
-
-	// Get latest block
-	var latestBlock models.Block
-	err := collection.FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.M{"_id": -1})).Decode(&latestBlock)
+	head, headTime, err := s.latestBlockHeader(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get latest block: %w", err)
+		return nil, err
 	}
 
-	// Get total transactions and operations (placeholder values)
-	totalTransactions := int64(0)
-	totalOperations := int64(0)
+	totalTransactions, err := s.db.Collection("transactions").EstimatedDocumentCount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate transactions: %w", err)
+	}
+	totalOperations, err := s.db.Collection("operations").EstimatedDocumentCount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate operations: %w", err)
+	}
+
+	from, to := blockNumWindow(head, time.Hour)
+	window := bson.M{"block_num": bson.M{"$gte": from, "$lte": to}}
+	transactionsPerHour, err := s.db.Collection("transactions").CountDocuments(ctx, window)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count transactions in the last hour: %w", err)
+	}
+	operationsPerHour, err := s.db.Collection("operations").CountDocuments(ctx, window)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count operations in the last hour: %w", err)
+	}
+
+	// last_irreversible_num is a fixed-depth approximation (the chain's LIB sits
+	// ~20 blocks behind the head); /api/v1/stats/props carries the authoritative
+	// value from get_dynamic_global_properties for callers that need it.
+	lastIrreversible := head - 20
+	if lastIrreversible < 0 {
+		lastIrreversible = 0
+	}
 
 	return &models.BlockStats{
-		LatestBlockNum:      int64(latestBlock.BlockNum),
-		LastIrreversibleNum: int64(latestBlock.BlockNum) - 20, // Approximate
-		HeadBlockTime:       latestBlock.Timestamp,
+		LatestBlockNum:      head,
+		LastIrreversibleNum: lastIrreversible,
+		HeadBlockTime:       headTime,
 		TotalTransactions:   totalTransactions,
 		TotalOperations:     totalOperations,
-		AverageBlockTime:    3.0, // Default 3 seconds
-		TransactionsPerHour: 0,   // Placeholder
-		OperationsPerHour:   0,   // Placeholder
+		TotalsEstimated:     true,
+		AverageBlockTime:    steemBlockInterval.Seconds(),
+		TransactionsPerHour: transactionsPerHour,
+		OperationsPerHour:   operationsPerHour,
 	}, nil
 }
 
-// GetOperationStats retrieves operation type statistics
+// GetOperationStats retrieves the operation-type distribution over a bounded
+// window (default 24h, supported 1h..7d).
+//
+// Cost: the window is expressed as a block_num range and operations has
+// {op_type:1, block_num:-1}, so the $group is index-servable — 23ms per 2000
+// blocks on production, i.e. a few hundred ms for a full day. An unbounded
+// histogram would be a 2.2B-document collection scan, which is why the window
+// is mandatory (the default silently supplies it).
+//
+// Coverage: every document in operations, including virtual ops
+// (producer_reward, curation_reward, …), matching the totals reported by
+// /blocks/stats. Percentages are of the window's own total, rounded to two
+// decimals, so they can drift a hundredth from 100.
 func (s *BlockService) GetOperationStats(ctx context.Context, timeRange string) ([]models.OperationStats, error) {
-	// Return placeholder data for now
-	return []models.OperationStats{
-		{Type: "comment", Count: 1000, Percentage: 30.0},
-		{Type: "vote", Count: 2000, Percentage: 60.0},
-		{Type: "transfer", Count: 333, Percentage: 10.0},
-	}, nil
+	window, err := parseStatsRange(timeRange)
+	if err != nil {
+		return nil, err
+	}
+
+	head, _, err := s.latestBlockHeader(ctx)
+	if err != nil {
+		return nil, err
+	}
+	from, to := blockNumWindow(head, window)
+
+	ctx, cancel := context.WithTimeout(ctx, statsAggregateTimeout)
+	defer cancel()
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{{Key: "block_num", Value: bson.D{
+			{Key: "$gte", Value: from},
+			{Key: "$lte", Value: to},
+		}}}}},
+		{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$op_type"},
+			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+		}}},
+		// Multi-key sorts must be bson.D: $sort reads document order as
+		// priority, and an unordered map would silently randomise it.
+		{{Key: "$sort", Value: bson.D{
+			{Key: "count", Value: -1},
+			{Key: "_id", Value: 1},
+		}}},
+	}
+
+	cursor, err := s.db.Collection("operations").Aggregate(ctx, pipeline,
+		options.Aggregate().SetAllowDiskUse(true))
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate operation stats: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var rows []struct {
+		Type  string `bson:"_id"`
+		Count int64  `bson:"count"`
+	}
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("failed to read operation stats: %w", err)
+	}
+
+	var total int64
+	for _, row := range rows {
+		total += row.Count
+	}
+
+	stats := make([]models.OperationStats, 0, len(rows))
+	for _, row := range rows {
+		var percentage float64
+		if total > 0 {
+			percentage = math.Round(float64(row.Count)*10000/float64(total)) / 100
+		}
+		stats = append(stats, models.OperationStats{
+			Type:       row.Type,
+			Count:      row.Count,
+			Percentage: percentage,
+		})
+	}
+
+	return stats, nil
+}
+
+// latestBlockHeader returns the local chain head: the highest block_num in the
+// blocks collection and its timestamp. It is the upper bound of every stats
+// window — the local database is the authority for what has been ingested.
+func (s *BlockService) latestBlockHeader(ctx context.Context) (int64, time.Time, error) {
+	var latest models.Block
+	err := s.db.Collection("blocks").
+		FindOne(ctx, bson.M{}, options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})).
+		Decode(&latest)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, time.Time{}, fmt.Errorf("blocks collection is empty")
+		}
+		return 0, time.Time{}, fmt.Errorf("failed to get latest block: %w", err)
+	}
+	return int64(latest.BlockNum), latest.Timestamp, nil
+}
+
+// blockNumWindow maps a duration ending at head onto an inclusive block_num
+// range. See steemBlockInterval for why the conversion is exact.
+func blockNumWindow(head int64, d time.Duration) (from, to int64) {
+	span := int64(d / steemBlockInterval)
+	if span < 1 {
+		span = 1
+	}
+	from = head - span
+	if from < 0 {
+		from = 0
+	}
+	return from, head
+}
+
+// parseStatsRange parses the range query parameter: Go duration syntax plus a
+// "d" (days) suffix, e.g. 1h, 6h, 24h, 7d. Empty means the 24h default; values
+// outside [1h, 7d] are rejected rather than clamped so a caller asking for an
+// unsupported window gets a clear 400 instead of a silently different answer.
+func parseStatsRange(raw string) (time.Duration, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return defaultStatsRange, nil
+	}
+
+	var window time.Duration
+	if strings.HasSuffix(s, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil {
+			return 0, fmt.Errorf("%w: %q (use e.g. 6h, 24h, 7d)", ErrInvalidStatsRange, raw)
+		}
+		window = time.Duration(days) * 24 * time.Hour
+	} else {
+		parsed, err := time.ParseDuration(s)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %q (use e.g. 6h, 24h, 7d)", ErrInvalidStatsRange, raw)
+		}
+		window = parsed
+	}
+
+	if window < minStatsRange || window > maxStatsRange {
+		return 0, fmt.Errorf("%w: %q must be between 1h and 7d", ErrInvalidStatsRange, raw)
+	}
+	return window, nil
 }

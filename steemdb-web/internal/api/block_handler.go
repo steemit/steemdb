@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -133,6 +134,10 @@ func (h *BlockHandler) GetOperationStats(c *gin.Context) {
 
 	stats, err := h.blockService.GetOperationStats(c.Request.Context(), timeRange)
 	if err != nil {
+		if errors.Is(err, services.ErrInvalidStatsRange) {
+			h.respondWithError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		h.logger.Error("Failed to get operation stats", utils.String("range", timeRange), utils.Error(err))
 		h.respondWithError(c, http.StatusInternalServerError, "Failed to retrieve operation statistics")
 		return

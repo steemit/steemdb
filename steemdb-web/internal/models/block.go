@@ -87,6 +87,9 @@ type BlockStats struct {
 	HeadBlockTime        time.Time `json:"head_block_time"`
 	TotalTransactions    int64     `json:"total_transactions"`
 	TotalOperations      int64     `json:"total_operations"`
+	// TotalsEstimated reports that the two totals above come from collection
+	// metadata (EstimatedDocumentCount), not from an exact count.
+	TotalsEstimated      bool      `json:"totals_estimated"`
 	AverageBlockTime     float64   `json:"average_block_time"`
 	TransactionsPerHour  int64     `json:"transactions_per_hour"`
 	OperationsPerHour    int64     `json:"operations_per_hour"`
